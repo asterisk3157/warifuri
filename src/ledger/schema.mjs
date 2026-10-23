@@ -105,11 +105,21 @@ export const MIGRATIONS = [
     updated_at       TEXT NOT NULL
   );
 
+  -- One row per machine allowed to use the MCP endpoint. Only the sha256 of its key is kept.
+  -- read_withheld: 1 when the machine may read rows whose secrecy is 'withhold'.
+  CREATE TABLE IF NOT EXISTS machines (
+    name          TEXT PRIMARY KEY,
+    key_hash      TEXT NOT NULL UNIQUE,
+    read_withheld INTEGER NOT NULL DEFAULT 0 CHECK (read_withheld IN (0, 1)),
+    created_at    TEXT NOT NULL,
+    revoked_at    TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS records (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     at        TEXT NOT NULL,
     actor     TEXT NOT NULL CHECK (length(actor) > 0),
-    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import')),
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','machine')),
     entity_id TEXT NOT NULL,
     action    TEXT NOT NULL,
     changes   TEXT NOT NULL

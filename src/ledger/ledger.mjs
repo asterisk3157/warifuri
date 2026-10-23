@@ -4,9 +4,10 @@
 // A refused write changes nothing and throws a LedgerError carrying every problem found.
 // replaceFromSnapshot() is the one write that takes rows breaking the rules: it stores them
 // with `review` set, and the next write to such a row must pass the rules (which clears it).
+// Machines hold the keys for the MCP endpoint; only a hash of each key is stored.
 
 import { DatabaseSync } from 'node:sqlite';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomBytes, createHash } from 'node:crypto';
 import { migrate } from './schema.mjs';
 import { checkEnvelope, prepareSnapshot } from './snapshot.mjs';
 import {
@@ -51,6 +52,10 @@ const HABIT_EDITABLE = ['title', 'rule', 'duration_min', 'goal_id', 'active'];
 const FLAG_FIELDS = ['due_provisional', 'human_led', 'active'];
 const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p' };
 const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+// A machine's name: 1–64 letters, digits, dots, underscores or hyphens.
+const MACHINE_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+const hashKey = (key) => createHash('sha256').update(key, 'utf8').digest('hex');
 
 const pad = (n, w = 2) => String(n).padStart(w, '0');
 
@@ -527,6 +532,71 @@ export function openLedger(path, options = {}) {
     ).map(present);
   }
 
+  // The secrecy of every goal and place, and what each task's secrecy depends on.
+  // Used to decide what a machine may read (secrecy.mjs).
+  function secrecyIndex() {
+    return {
+      goals: new Map(all('SELECT id, secrecy FROM goals').map((r) => [r.id, r.secrecy])),
+      places: new Map(all('SELECT id, secrecy FROM places').map((r) => [r.id, r.secrecy])),
+      tasks: new Map(
+        all('SELECT id, secrecy, goal_id, place_id FROM tasks').map((r) => [
+          r.id,
+          { secrecy: r.secrecy, goal_id: r.goal_id, place_id: r.place_id },
+        ]),
+      ),
+    };
+  }
+
+  // Issues a key for a machine. The key is returned here once and never stored; a revoked
+  // name may be issued again. Records say who added the machine, never the key or its hash.
+  function addMachine(name, { readWithheld = false } = {}, opts) {
+    const actor = requireActor(opts);
+    if (typeof name !== 'string' || !MACHINE_NAME.test(name)) {
+      throw new LedgerError(['機械の名前は、英数字と . _ - の 1〜64 文字です']);
+    }
+    if (typeof readWithheld !== 'boolean') throw new LedgerError(['readWithheld は true か false です']);
+    const before = one('SELECT * FROM machines WHERE name = ?', name);
+    if (before && before.revoked_at === null) throw new LedgerError([`機械 ${name} はもうあります`]);
+    const key = `wf_${randomBytes(32).toString('base64url')}`;
+    const t = nowIso();
+    const flag = readWithheld ? 1 : 0;
+    return transaction(() => {
+      db.prepare(
+        'INSERT INTO machines (name, key_hash, read_withheld, created_at, revoked_at) VALUES (?, ?, ?, ?, NULL) ' +
+          'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, read_withheld = excluded.read_withheld, ' +
+          'created_at = excluded.created_at, revoked_at = NULL',
+      ).run(name, hashKey(key), flag, t);
+      record(actor, 'machine', name, 'create', { read_withheld: { before: before ? before.read_withheld : null, after: flag } });
+      return { name, key };
+    });
+  }
+
+  function revokeMachine(name, opts) {
+    const actor = requireActor(opts);
+    const before = one('SELECT * FROM machines WHERE name = ?', name);
+    if (!before || before.revoked_at !== null) throw new LedgerError([`使える機械 ${name} はありません`]);
+    const t = nowIso();
+    return transaction(() => {
+      db.prepare('UPDATE machines SET revoked_at = ? WHERE name = ?').run(t, name);
+      record(actor, 'machine', name, 'revoke', { revoked_at: { before: null, after: t } });
+      return { name, revoked_at: t };
+    });
+  }
+
+  function listMachines() {
+    return all('SELECT name, read_withheld, created_at, revoked_at FROM machines ORDER BY name').map((r) => ({
+      ...r,
+      read_withheld: r.read_withheld === 1,
+    }));
+  }
+
+  // The machine a key belongs to, or null when the key is unknown or revoked.
+  function machineForKey(key) {
+    if (typeof key !== 'string' || key === '') return null;
+    const row = one('SELECT name, read_withheld FROM machines WHERE key_hash = ? AND revoked_at IS NULL', hashKey(key));
+    return row ? { name: row.name, read_withheld: row.read_withheld === 1 } : null;
+  }
+
   // Replaces goals, tasks, blocks and places with a snapshot (docs/snapshot.md), in one
   // transaction with one record. Habits, autonomy and records stay. Rows that cannot be stored
   // are skipped; rows that break the rules are stored with `review`. A habit whose goal is not
@@ -588,6 +658,11 @@ export function openLedger(path, options = {}) {
     board,
     search,
     records,
+    secrecyIndex,
+    addMachine,
+    revokeMachine,
+    listMachines,
+    machineForKey,
     close: () => {
       if (db.isOpen) db.close();
     },

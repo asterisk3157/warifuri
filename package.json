@@ -13,5 +13,9 @@
   },
   "scripts": {
     "test": "node --test --no-warnings=ExperimentalWarning \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.5"
   }
 }
