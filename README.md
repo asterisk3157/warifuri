@@ -2,34 +2,28 @@
 
 [日本語](README.ja.md)
 
-A secretary for people who work alongside AI agents.
+A secretary for people who work with AI agents.
 
-You decide what you are working toward, by when, and how far. warifuri and your agents decide when to do what, and in which order. You stop carrying the plan in your head; you keep your promises.
+## Why
 
-> **Status: early design.** There is no code yet. The design is in `docs/` (in Japanese for now). The repository is private while a few friends try it; it becomes public at v0.1.0, once someone can set it up from this README alone.
+Without a fixed timetable, as in graduate school or freelancing, work with a deadline tends to drag on. Writing down what to do helps, but deciding every day what to do next and when is still tiring.
 
-## The idea
+warifuri hands that part to AI. You decide what you are working toward and by when; the AI decides what to do when. I designed it from the records of running my own secretary for a little over two weeks.
 
-- One ledger of goals and tasks, on a server you own. A goal has an outcome and a deadline that you set. A task is one block of work toward it.
-- Opened through MCP. Claude Code on each of your machines (Mac, Windows, any PC) reads and writes the same ledger over HTTPS, from any network.
-- Everything else plugs in. Scheduling, calendar, the secretary that watches your deadlines every night, Discord and a web page to talk to it: add the ones you want.
-- Your agents close their own tasks. The secretary picks up what they forget. You can override anything at any time.
+## How it works
 
-## Documents
+At the center is a ledger of goals and tasks. It lives on one server, and Claude Code on your Mac or Windows machine reads and writes it over MCP. Whichever machine you work on, you see the same tasks and close them where you finish them.
 
-| File | What it says |
-|---|---|
-| [`docs/思想.md`](docs/思想.md) | The philosophy: who decides what, and 21 principles. Rewrite the ones that do not fit you. |
-| [`docs/構成.md`](docs/構成.md) | The architecture: the core (ledger and MCP endpoint), plug-ins, how it is reached, and settings. |
+Scheduling, the calendar, and a secretary that checks your deadlines every night are plug-ins to the ledger. Leave out the ones you do not need.
 
-## What comes first
+The server runs on macOS, Windows and Linux, and you do not need your own domain.
 
-The ledger and read-only MCP tools (`board`, `get`, `search`), reachable from more than one machine.
+## Status
 
-## Feedback
+The design is done and work on the ledger has started. Nothing is usable yet.
 
-If you try it, please open a [feedback issue](../../issues/new?template=feedback.yml): where you got stuck matters most. Security problems go through [SECURITY.md](SECURITY.md).
+The ideas are in [Philosophy](docs/思想.md) and the overall shape in [Architecture](docs/構成.md), both in Japanese for now.
 
 ## License
 
-[Apache-2.0](LICENSE)
+Apache-2.0
