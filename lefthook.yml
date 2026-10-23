@@ -1,0 +1,7 @@
+pre-commit:
+  commands:
+    private-terms:
+      run: scripts/check-private-terms.sh
+    gitleaks:
+      # Runs when gitleaks is installed; CI runs it on every push either way.
+      run: command -v gitleaks >/dev/null 2>&1 && gitleaks git --staged --no-banner --redact || true

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem / セキュリティの問題を報告する
+    url: https://github.com/asterisk3157/warifuri/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue. / 脆弱性は公開の Issue ではなく、こちらから非公開で送ってください。

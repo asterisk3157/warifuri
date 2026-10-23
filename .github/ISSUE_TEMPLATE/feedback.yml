@@ -1,0 +1,38 @@
+name: Feedback / 感想
+description: Tell us how setting up or using warifuri went. / 立ててみた感想、使ってみた感想を書いてください。
+labels: [feedback]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste tokens, keys, or the contents of your own tasks.
+        鍵やトークン、自分のタスクの中身は貼らないでください。
+  - type: dropdown
+    id: stage
+    attributes:
+      label: How far did you get? / どこまで進みましたか
+      options:
+        - Read the docs only / 文書を読んだだけ
+        - Tried to set it up / 立てようとした
+        - Set it up from the README alone / README だけで立てられた
+        - Used it for a while / しばらく使った
+    validations:
+      required: true
+  - type: textarea
+    id: stuck
+    attributes:
+      label: Where did you get stuck? / どこで詰まりましたか
+      description: The step, what you expected, and what happened. / どの手順で、何を期待して、何が起きたか。
+  - type: textarea
+    id: good
+    attributes:
+      label: What worked well? / よかったところ
+  - type: textarea
+    id: wish
+    attributes:
+      label: What would you change? / 変えてほしいところ
+  - type: input
+    id: env
+    attributes:
+      label: Environment / 環境
+      placeholder: "macOS 15, Node 24, home server / VPS / old PC"
