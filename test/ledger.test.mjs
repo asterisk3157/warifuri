@@ -55,7 +55,7 @@ function refuses(fn, ...fragments) {
   return err;
 }
 
-const humanGoal = (extra = {}) => ({ title: 'Write the thesis draft', mode: 'human_with_ai', due: '2026-12-01', ...extra });
+const humanGoal = (extra = {}) => ({ title: 'Write the thesis draft', outcome: 'A full draft is with the advisor', mode: 'human_with_ai', due: '2026-12-01', ...extra });
 const aiTask = (extra = {}) => ({ title: 'Collect references', mode: 'ai_worker', ...extra });
 
 test('rule 1: a human-time goal needs a due date; an ai_worker goal does not', (t) => {
@@ -73,17 +73,24 @@ test('rule 1: a human-time goal needs a due date; an ai_worker goal does not', (
   // On update: the merged row is checked.
   refuses(() => L.update(g.id, { due: null }, ACTOR), '原則2');
   refuses(() => L.update(ai.id, { mode: 'human' }, ACTOR), '原則2');
-  const moved = L.update(ai.id, { mode: 'human', due: '2026-11-15' }, ACTOR);
+  const moved = L.update(ai.id, { mode: 'human', due: '2026-11-15', outcome: 'Notes are in one place' }, ACTOR);
   assert.equal(moved.mode, 'human');
   assert.equal(count('goals'), 2);
   assert.equal(count('records'), 3);
 });
 
-test('rule 1: a provisional due date is stored with its flag', (t) => {
-  const { L } = fresh(t);
-  const g = L.createGoal(humanGoal({ due_provisional: true }), ACTOR);
-  assert.equal(g.due_provisional, true);
-  assert.equal(L.update(g.id, { due_provisional: false }, ACTOR).due_provisional, false);
+test('rule 1: a human-time goal needs an outcome, and a provisional date does not count as its due date', (t) => {
+  const { L, count } = fresh(t);
+  refuses(() => L.createGoal(humanGoal({ outcome: '' }), ACTOR), 'あるべき姿(outcome)が要ります(原則1)');
+  refuses(() => L.createGoal(humanGoal({ due_provisional: true }), ACTOR), '仮の期日では足りません');
+  assert.equal(count('goals'), 0);
+
+  const g = L.createGoal(humanGoal(), ACTOR);
+  refuses(() => L.update(g.id, { due_provisional: true }, ACTOR), '仮の期日');
+  // An ai_worker goal may carry a provisional date, flagged as such.
+  const ai = L.createGoal({ title: 'Tidy notes', mode: 'ai_worker', due: '2026-11-01', due_provisional: true }, ACTOR);
+  assert.equal(ai.due_provisional, true);
+  assert.equal(L.update(ai.id, { due_provisional: false }, ACTOR).due_provisional, false);
 });
 
 test('rule 2: a human-time task needs done_when; an ai_worker task does not', (t) => {
@@ -306,7 +313,7 @@ test('ids: generated from the clock, or supplied by the caller', (t) => {
 test('board: open goals with their tasks, then tasks with no goal, with filters', (t) => {
   const { L } = fresh(t);
   const research = L.createGoal(humanGoal({ area: 'research', due: '2026-12-01' }), ACTOR);
-  const club = L.createGoal({ title: 'Plan the club camp', mode: 'human', due: '2026-11-20', area: 'club' }, ACTOR);
+  const club = L.createGoal({ title: 'Plan the club camp', outcome: 'The camp is booked', mode: 'human', due: '2026-11-20', area: 'club' }, ACTOR);
   const closed = L.createGoal({ title: 'Old goal', mode: 'ai_worker', area: 'research' }, ACTOR);
   L.setState(closed.id, 'done', { result: 'Finished' }, ACTOR);
 
@@ -399,7 +406,7 @@ test('places: one path per machine', (t) => {
 
 test('habits: create and update with checks', (t) => {
   const { L } = fresh(t);
-  const g = L.createGoal({ title: 'Keep training', mode: 'human', due: '2027-03-31' }, ACTOR);
+  const g = L.createGoal({ title: 'Keep training', outcome: 'Training is logged every week', mode: 'human', due: '2027-03-31' }, ACTOR);
   refuses(() => L.createHabit({ title: 'Run', rule: '', duration_min: 0 }, ACTOR), 'rule', 'duration_min');
   refuses(() => L.createHabit({ title: 'Run', rule: 'Mon 07:00', duration_min: 30, goal_id: 'g_20261024000000_nogoal' }, ACTOR), 'がありません');
   const h = L.createHabit({ title: 'Run', rule: '毎週月水金 07:00-07:30', duration_min: 30, goal_id: g.id }, ACTOR);

@@ -88,8 +88,11 @@ export function checkStateFields(row) {
 
 export function checkGoal(row) {
   const p = checkCommon(row, 'ゴール');
-  if (HUMAN_TIME_MODES.includes(row.mode) && isBlank(row.due)) {
-    p.push('人の時間を使うゴールには期日が要ります(原則2)');
+  // A goal that takes a person's time is an outcome and a date, both set by the person (原則1, 2).
+  if (HUMAN_TIME_MODES.includes(row.mode)) {
+    if (isBlank(row.due)) p.push('人の時間を使うゴールには期日が要ります(原則2)');
+    else if (row.due_provisional === 1) p.push('人の時間を使うゴールの期日は、人が決めたものにします。仮の期日では足りません(原則2)');
+    if (isBlank(row.outcome)) p.push('人の時間を使うゴールには、あるべき姿(outcome)が要ります(原則1)');
   }
   if (!isFlag(row.human_led)) p.push('human_led は 0 か 1 です');
   if (!SECRECY.includes(row.secrecy)) p.push(`秘密度は ${SECRECY.join(', ')} のどちらかです`);
