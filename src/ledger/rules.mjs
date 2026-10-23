@@ -3,7 +3,7 @@
 // missing and why). An empty list means the row may be written. The ledger runs these
 // on the merged row, so the same rules hold on create and on update.
 
-export const STATES = ['ready', 'running', 'needs_human_input', 'deferred', 'done', 'discarded'];
+export const STATES = ['ready', 'running', 'waiting', 'deferred', 'done', 'discarded'];
 export const CLOSED_STATES = ['done', 'discarded'];
 export const MODES = ['ai_worker', 'human_with_ai', 'human'];
 export const HUMAN_TIME_MODES = ['human_with_ai', 'human'];
@@ -12,7 +12,7 @@ export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
 
 // Fields that belong to a state. Leaving the state clears them.
 export const STATE_FIELDS = {
-  needs_human_input: ['waiting_on', 'waiting_for'],
+  waiting: ['waiting_on', 'waiting_for'],
   done: ['result'],
   discarded: ['reason'],
   deferred: ['defer_until'],
@@ -73,7 +73,7 @@ function checkCommon(row, kind) {
 // The fields a state requires (原則5, 6). Shared by goals and tasks.
 export function checkStateFields(row) {
   const p = [];
-  if (row.state === 'needs_human_input') {
+  if (row.state === 'waiting') {
     if (isBlank(row.waiting_on)) p.push('待ちには、だれを待つか(waiting_on)が要ります(原則6)');
     if (isBlank(row.waiting_for)) p.push('待ちには、何を待つか(waiting_for)が要ります(原則6)');
   }

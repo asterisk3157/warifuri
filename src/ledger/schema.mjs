@@ -4,7 +4,7 @@
 
 export const SCHEMA_VERSION = 1;
 
-const ENUM_STATE = "('ready','running','needs_human_input','deferred','done','discarded')";
+const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
 const ENUM_SECRECY = "('open','withhold')";
 

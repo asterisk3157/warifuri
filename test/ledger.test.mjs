@@ -106,18 +106,18 @@ test('rule 2: a human-time task needs done_when; an ai_worker task does not', (t
   assert.equal(ok.done_when, 'The list has 20 papers');
 });
 
-test('rule 3: needs_human_input needs waiting_on and waiting_for', (t) => {
+test('rule 3: waiting needs waiting_on and waiting_for', (t) => {
   const { L } = fresh(t);
   const task = L.createTask(aiTask(), ACTOR);
   const g = L.createGoal(humanGoal(), ACTOR);
-  refuses(() => L.setState(task.id, 'needs_human_input', {}, AGENT), 'waiting_on', 'waiting_for');
-  refuses(() => L.setState(task.id, 'needs_human_input', { waiting_on: 'human' }, AGENT), 'waiting_for');
-  refuses(() => L.setState(g.id, 'needs_human_input', { waiting_for: 'a decision' }, AGENT), 'waiting_on');
+  refuses(() => L.setState(task.id, 'waiting', {}, AGENT), 'waiting_on', 'waiting_for');
+  refuses(() => L.setState(task.id, 'waiting', { waiting_on: 'human' }, AGENT), 'waiting_for');
+  refuses(() => L.setState(g.id, 'waiting', { waiting_for: 'a decision' }, AGENT), 'waiting_on');
   assert.equal(L.get(task.id).state, 'ready');
   assert.equal(L.records(task.id).length, 1);
 
-  const w = L.setState(task.id, 'needs_human_input', { waiting_on: 'human', waiting_for: 'Pick a journal' }, AGENT);
-  assert.equal(w.state, 'needs_human_input');
+  const w = L.setState(task.id, 'waiting', { waiting_on: 'human', waiting_for: 'Pick a journal' }, AGENT);
+  assert.equal(w.state, 'waiting');
   assert.equal(w.waiting_for, 'Pick a journal');
   const back = L.setState(task.id, 'running', {}, AGENT);
   assert.equal(back.waiting_on, null);
