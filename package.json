@@ -5,6 +5,9 @@
   "description": "A secretary for people who work alongside AI agents: a ledger of goals and tasks.",
   "license": "Apache-2.0",
   "type": "module",
+  "bin": {
+    "warifuri": "bin/warifuri.mjs"
+  },
   "engines": {
     "node": ">=24"
   },

@@ -8,6 +8,9 @@ const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')"
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
 const ENUM_SECRECY = "('open','withhold')";
 
+// review (goals, tasks): a JSON array of problems found when the row was imported from a
+// snapshot that broke the rules, or NULL. Cleared by the next write that passes the rules.
+
 // MIGRATIONS[n] takes the database from version n to version n + 1.
 export const MIGRATIONS = [
   `
@@ -27,6 +30,7 @@ export const MIGRATIONS = [
     result          TEXT,
     reason          TEXT,
     defer_until     TEXT,
+    review          TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     closed_at       TEXT
@@ -65,6 +69,7 @@ export const MIGRATIONS = [
     reason          TEXT,
     defer_until     TEXT,
     secrecy         TEXT CHECK (secrecy IS NULL OR secrecy IN ${ENUM_SECRECY}),
+    review          TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     closed_at       TEXT
@@ -104,7 +109,7 @@ export const MIGRATIONS = [
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     at        TEXT NOT NULL,
     actor     TEXT NOT NULL CHECK (length(actor) > 0),
-    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy')),
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import')),
     entity_id TEXT NOT NULL,
     action    TEXT NOT NULL,
     changes   TEXT NOT NULL

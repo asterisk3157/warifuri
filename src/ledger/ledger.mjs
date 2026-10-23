@@ -2,10 +2,13 @@
 // kept in one SQLite file through node:sqlite. Every write is checked against rules.mjs,
 // runs in one transaction and appends one row to `records` (who changed what, before/after).
 // A refused write changes nothing and throws a LedgerError carrying every problem found.
+// replaceFromSnapshot() is the one write that takes rows breaking the rules: it stores them
+// with `review` set, and the next write to such a row must pass the rules (which clears it).
 
 import { DatabaseSync } from 'node:sqlite';
 import { randomInt } from 'node:crypto';
 import { migrate } from './schema.mjs';
+import { checkEnvelope, prepareSnapshot } from './snapshot.mjs';
 import {
   STATES,
   CLOSED_STATES,
@@ -32,11 +35,11 @@ export class LedgerError extends Error {
 
 const GOAL_COLUMNS = [
   'id', 'title', 'outcome', 'due', 'due_provisional', 'state', 'mode', 'human_led', 'area', 'secrecy',
-  'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'created_at', 'updated_at', 'closed_at',
+  'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'review', 'created_at', 'updated_at', 'closed_at',
 ];
 const TASK_COLUMNS = [
   'id', 'title', 'done_when', 'goal_id', 'state', 'mode', 'estimate_min', 'due', 'due_provisional', 'place_id',
-  'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'secrecy', 'created_at', 'updated_at', 'closed_at',
+  'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'secrecy', 'review', 'created_at', 'updated_at', 'closed_at',
 ];
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'area', 'secrecy', 'created_at', 'updated_at'];
@@ -61,11 +64,12 @@ function normalizeFlags(fields) {
   return out;
 }
 
-// Rows as returned to callers: 0/1 flags become booleans.
+// Rows as returned to callers: 0/1 flags become booleans, review becomes an array (or null).
 function present(row) {
   if (!row) return row;
   const out = { ...row };
   for (const f of FLAG_FIELDS) if (f in out) out[f] = out[f] === 1;
+  if ('review' in out) out.review = out.review === null ? null : JSON.parse(out.review);
   return out;
 }
 
@@ -269,6 +273,7 @@ export function openLedger(path, options = {}) {
     for (const [k, v] of Object.entries(input)) next[k] = v === undefined ? next[k] : v;
     problems.push(...validate(item.kind, next));
     if (problems.length) throw new LedgerError(problems);
+    next.review = null; // the row now passes the rules
     return writeItem(item, next, actor, 'update');
   }
 
@@ -283,6 +288,7 @@ export function openLedger(path, options = {}) {
     const next = applyState(item.row, state, extra ?? {}, nowIso());
     problems.push(...validate(item.kind, next));
     if (problems.length) throw new LedgerError(problems);
+    next.review = null; // the row now passes the rules
     return writeItem(item, next, actor, 'state');
   }
 
@@ -473,13 +479,17 @@ export function openLedger(path, options = {}) {
   }
 
   // Open goals, each with its tasks, and the tasks with no goal.
-  // area filters goals (and goal-less tasks by their place's area); state and mode filter
-  // goals and tasks alike, and a goal also appears when any of its tasks match.
-  function board({ area, state, mode, includeClosed = false } = {}) {
+  // area filters goals (and goal-less tasks by their place's area); state, mode and review
+  // (true: only rows flagged on import) filter goals and tasks alike, and a goal also appears
+  // when any of its tasks match.
+  function board({ area, state, mode, review = false, includeClosed = false } = {}) {
     const closed = CLOSED_STATES.map(() => '?').join(', ');
     const openOnly = (alias) => (includeClosed ? '' : ` AND ${alias}.state NOT IN (${closed})`);
     const openArgs = includeClosed ? [] : CLOSED_STATES;
-    const matches = (row) => (state === undefined || row.state === state) && (mode === undefined || row.mode === mode);
+    const matches = (row) =>
+      (state === undefined || row.state === state) &&
+      (mode === undefined || row.mode === mode) &&
+      (!review || row.review !== null);
 
     const goalRows = all(
       `SELECT g.* FROM goals g WHERE 1 = 1${openOnly('g')}${area !== undefined ? ' AND g.area = ?' : ''} ` +
@@ -508,16 +518,60 @@ export function openLedger(path, options = {}) {
   function search(text, { limit = 20 } = {}) {
     const pattern = `%${String(text ?? '').replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     return all(
-      "SELECT 'goal' AS kind, id, title, state, due, updated_at FROM goals WHERE title LIKE ? ESCAPE '\\' " +
-        "UNION ALL SELECT 'task' AS kind, id, title, state, due, updated_at FROM tasks WHERE title LIKE ? ESCAPE '\\' " +
+      "SELECT 'goal' AS kind, id, title, state, due, review, updated_at FROM goals WHERE title LIKE ? ESCAPE '\\' " +
+        "UNION ALL SELECT 'task' AS kind, id, title, state, due, review, updated_at FROM tasks WHERE title LIKE ? ESCAPE '\\' " +
         'ORDER BY updated_at DESC, id LIMIT ?',
       pattern,
       pattern,
       limit,
-    );
+    ).map(present);
+  }
+
+  // Replaces goals, tasks, blocks and places with a snapshot (docs/snapshot.md), in one
+  // transaction with one record. Habits, autonomy and records stay. Rows that cannot be stored
+  // are skipped; rows that break the rules are stored with `review`. A habit whose goal is not
+  // in the snapshot loses that link. A bad envelope throws and changes nothing.
+  function replaceFromSnapshot(doc, opts) {
+    const actor = requireActor(opts);
+    const envelope = checkEnvelope(doc);
+    if (envelope.length) throw new LedgerError(envelope);
+    const t = nowIso();
+    return transaction(() => {
+      // Habits may point at goals that are deleted and inserted again; check at commit.
+      db.exec('PRAGMA defer_foreign_keys = ON');
+      const reservedIds = new Set(all('SELECT id FROM habits').map((r) => r.id));
+      const snap = prepareSnapshot(doc, { at: t, reservedIds });
+      for (const table of ['blocks', 'tasks', 'goals', 'place_paths', 'places']) db.exec(`DELETE FROM ${table}`);
+      for (const row of snap.places) insert('places', PLACE_COLUMNS, row);
+      const insPath = db.prepare('INSERT INTO place_paths (place_id, machine, path) VALUES (?, ?, ?)');
+      for (const p of snap.paths) insPath.run(p.place_id, p.machine, p.path);
+      const stored = (row) => ({ ...row, review: row.review ? JSON.stringify(row.review) : null });
+      for (const row of snap.goals) insert('goals', GOAL_COLUMNS, stored(row));
+      for (const row of snap.tasks) insert('tasks', TASK_COLUMNS, stored(row));
+      const insBlock = db.prepare('INSERT INTO blocks (before_id, after_id, created_at) VALUES (?, ?, ?)');
+      for (const b of snap.blocks) insBlock.run(b.before_id, b.after_id, t);
+      const detached = all(
+        'SELECT id FROM habits WHERE goal_id IS NOT NULL AND goal_id NOT IN (SELECT id FROM goals) ORDER BY id',
+      ).map((r) => r.id);
+      const detach = db.prepare('UPDATE habits SET goal_id = NULL, updated_at = ? WHERE id = ?');
+      for (const id of detached) detach.run(t, id);
+
+      const counts = { places: snap.places.length, goals: snap.goals.length, tasks: snap.tasks.length, blocks: snap.blocks.length };
+      const changes = {
+        taken_at: doc.taken_at ?? null,
+        counts,
+        flagged: snap.flagged.length,
+        skipped: snap.skipped.length,
+      };
+      if (detached.length) changes.detached_habits = detached;
+      const source = typeof doc.source === 'string' && doc.source.trim() !== '' ? doc.source : 'snapshot';
+      record(actor, 'import', source, 'replace', changes);
+      return { counts, flagged: snap.flagged, skipped: snap.skipped, detached_habits: detached };
+    });
   }
 
   return {
+    replaceFromSnapshot,
     createGoal,
     createTask,
     update,

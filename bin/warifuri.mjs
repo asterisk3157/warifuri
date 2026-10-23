@@ -1,0 +1,75 @@
+#!/usr/bin/env node
+// The warifuri command. Thin: it reads arguments and files, calls the ledger, prints.
+//
+//   warifuri import <snapshot.json> --db <ledger.sqlite> [--actor <name>]
+//
+// Exit codes: 0 done (even when rows were flagged or skipped), 1 the snapshot or the ledger
+// could not be read or the snapshot's envelope is wrong, 2 the command line is wrong.
+
+import fs from 'node:fs';
+import { parseArgs } from 'node:util';
+import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
+
+const USAGE = 'usage: warifuri import <snapshot.json> --db <ledger.sqlite> [--actor <name>]';
+
+function usage(message) {
+  if (message) process.stderr.write(`warifuri: ${message}\n`);
+  process.stderr.write(`${USAGE}\n`);
+  return 2;
+}
+
+function runImport(args) {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      allowPositionals: true,
+      options: { db: { type: 'string' }, actor: { type: 'string', default: 'import' } },
+    });
+  } catch (err) {
+    return usage(err.message);
+  }
+  const { values, positionals } = parsed;
+  if (positionals.length !== 1) return usage('give exactly one snapshot file');
+  if (!values.db) return usage('--db is required');
+  if (values.actor.trim() === '') return usage('--actor must not be empty');
+
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(positionals[0], 'utf8'));
+  } catch (err) {
+    process.stderr.write(`warifuri: cannot read ${positionals[0]}: ${err.message}\n`);
+    return 1;
+  }
+
+  let ledger;
+  try {
+    ledger = openLedger(values.db);
+    const res = ledger.replaceFromSnapshot(doc, { actor: values.actor });
+    const c = res.counts;
+    const out = [
+      `imported: ${c.places} places, ${c.goals} goals, ${c.tasks} tasks, ${c.blocks} blocks`,
+      `flagged for review: ${res.flagged.length}`,
+      `skipped: ${res.skipped.length}`,
+      ...res.skipped.map((s) => `  ${s.kind} ${s.id}: ${s.problems.join(' / ')}`),
+    ];
+    if (res.detached_habits.length) out.push(`habits whose goal is gone (link removed): ${res.detached_habits.join(', ')}`);
+    process.stdout.write(`${out.join('\n')}\n`);
+    return 0;
+  } catch (err) {
+    const detail = err instanceof LedgerError ? err.problems.join('\n  ') : err.message;
+    process.stderr.write(`warifuri: nothing was imported:\n  ${detail}\n`);
+    return 1;
+  } finally {
+    ledger?.close();
+  }
+}
+
+function main(argv) {
+  const [command, ...rest] = argv;
+  if (command === 'import') return runImport(rest);
+  if (command === undefined || command === '--help' || command === '-h') return usage();
+  return usage(`unknown command: ${command}`);
+}
+
+process.exitCode = main(process.argv.slice(2));
