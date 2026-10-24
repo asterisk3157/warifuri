@@ -61,6 +61,23 @@ test('the data directory: --home, then WARIFURI_HOME, then ~/.warifuri; never fr
   assert.ok(cfg.warnings.some((w) => /WARIFURI_HOME is ignored/.test(w)));
   assert.equal(loadConfig({ env: { WARIFURI_HOME: b } }).home, b);
   assert.equal(loadConfig({ env: {} }).home, path.join(os.homedir(), '.warifuri'));
+  assert.equal(loadConfig({ env: { WARIFURI_HOME: '~/wf' } }).home, path.join(os.homedir(), 'wf'));
+  if (process.platform === 'win32') assert.equal(loadConfig({ env: { WARIFURI_HOME: '~\\wf' } }).home, path.join(os.homedir(), 'wf'));
+});
+
+test('settings files written with CRLF line endings read the same', () => {
+  const dir = home({
+    settings: '# a comment\r\nWARIFURI_PORT=1001\r\nWARIFURI_GITHUB_USER="from-file"\r\n',
+    secrets: 'WARIFURI_GITHUB_CLIENT_SECRET=s3cret\r\n',
+  });
+  fs.writeFileSync(path.join(dir, 'secret.txt'), 'from-a-file\r\n');
+  const cfg = loadConfig({ env: { WARIFURI_HOME: dir } });
+  assert.deepEqual(cfg.problems, []);
+  assert.equal(cfg.values.WARIFURI_PORT, '1001');
+  assert.equal(cfg.values.WARIFURI_GITHUB_USER, 'from-file');
+  assert.equal(cfg.values.WARIFURI_GITHUB_CLIENT_SECRET, 's3cret');
+  const viaFile = loadConfig({ env: { WARIFURI_HOME: home(), WARIFURI_GITHUB_CLIENT_SECRET_FILE: path.join(dir, 'secret.txt') } });
+  assert.equal(viaFile.values.WARIFURI_GITHUB_CLIENT_SECRET, 'from-a-file');
 });
 
 test('secrets.env is read, and a secret can be given as <NAME>_FILE', () => {

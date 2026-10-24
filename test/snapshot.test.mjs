@@ -352,7 +352,8 @@ test('cli: warifuri import end to end', () => {
   const home = path.join(dir, 'home');
   assert.equal(cli(['import', snap], { home }).status, 0);
   assert.ok(fs.existsSync(path.join(home, 'ledger.sqlite')));
-  assert.equal(fs.statSync(home).mode & 0o777, 0o700);
+  // Windows has no POSIX modes: there the directory reports 0o666 whatever was asked.
+  if (process.platform !== 'win32') assert.equal(fs.statSync(home).mode & 0o777, 0o700);
   assert.equal(cli(['import', '--db', db]).status, 2);
   assert.equal(cli(['import', snap, '--db', db, '--colour']).status, 2);
 });
