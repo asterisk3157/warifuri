@@ -2,16 +2,19 @@
 # Stops a commit that would publish a word from the maintainer's private list
 # (names, domains, paths, work areas). The list is never committed: it is read from
 # $WARIFURI_PRIVATE_TERMS, or from .private-terms.txt at the repository root
-# (ignored by git). One extended regular expression per line, matched without regard
+# (ignored by git; in a linked worktree, the one in the main worktree). One extended regular expression per line, matched without regard
 # to case; empty lines and lines starting with # are skipped.
 #
 # Usage: scripts/check-private-terms.sh          check the staged changes (pre-commit)
 #        scripts/check-private-terms.sh --all    check every tracked file
+#        scripts/check-private-terms.sh --file F check the text of F (a commit message, a PR description)
 # Without a list it says so and passes, so that contributors can commit.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+main_tree="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 list="${WARIFURI_PRIVATE_TERMS:-.private-terms.txt}"
+[ -n "${WARIFURI_PRIVATE_TERMS:-}" ] || [ -r "$list" ] || list="$main_tree/.private-terms.txt"
 if [ ! -r "$list" ]; then
   echo "check-private-terms: no list at $list, skipped" >&2
   exit 0
@@ -21,7 +24,10 @@ trap 'rm -f "$patterns"' EXIT
 grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$list" > "$patterns" || true
 [ -s "$patterns" ] || exit 0
 
-if [ "${1:-}" = "--all" ]; then
+if [ "${1:-}" = "--file" ]; then
+  [ -r "${2:-}" ] || { echo "check-private-terms: cannot read ${2:-(no file)}" >&2; exit 2; }
+  found="$(grep -n -i -E -f "$patterns" "$2" || true)"
+elif [ "${1:-}" = "--all" ]; then
   found="$(git grep -n -I -i -E -f "$patterns" -- . ':!.private-terms.txt' || true)"
 else
   # Only the lines this commit adds.
@@ -31,7 +37,11 @@ else
 fi
 
 if [ -n "$found" ]; then
-  echo "check-private-terms: private words found; nothing was committed:" >&2
+  if [ "${1:-}" = "--file" ]; then
+    echo "check-private-terms: private words found in $2:" >&2
+  else
+    echo "check-private-terms: private words found; nothing was committed:" >&2
+  fi
   echo "$found" >&2
   exit 1
 fi
