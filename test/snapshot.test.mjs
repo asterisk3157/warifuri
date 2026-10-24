@@ -55,10 +55,10 @@ function snapshot(extra = {}) {
     source: 'example-tracker',
     taken_at: '2026-10-24T08:00:00+09:00',
     places: [
-      { id: P1, name: 'thesis notes', area: 'research', paths: [{ machine: 'laptop', path: path.posix.join('/', 'home', 'alex', 'notes') }] },
+      { id: P1, name: 'thesis notes', profile: 'research', paths: [{ device: 'laptop', path: path.posix.join('/', 'home', 'alex', 'notes') }] },
     ],
     goals: [
-      { id: G1, title: 'Thesis draft', outcome: 'A full draft is with the advisor', due: '2026-12-01', mode: 'human_with_ai', area: 'research', state: 'ready' },
+      { id: G1, title: 'Thesis draft', outcome: 'A full draft is with the advisor', due: '2026-12-01', mode: 'human_with_ai', profile: 'research', state: 'ready' },
       { id: G2, title: 'Tidy the archive', mode: 'ai_worker', state: 'done', result: 'Archived' },
     ],
     tasks: [
@@ -158,11 +158,12 @@ test('structural problems are skipped with reasons', (t) => {
   doc.tasks.push({ id: 't_20261003090000_state1', title: 'Odd state', mode: 'ai_worker', state: 'paused' });
   doc.tasks.push({ id: 't_20261003090000_mode01', title: 'Odd mode', mode: 'robot', state: 'ready' });
   doc.tasks.push({ id: 't_20261003090000_date01', title: 'Odd date', mode: 'ai_worker', state: 'ready', due: 'next friday' });
-  doc.tasks.push({ id: 't_20261003090000_secr01', title: 'Odd secrecy', mode: 'ai_worker', state: 'ready', secrecy: 'secret' });
+  doc.tasks.push({ id: 't_20261003090000_deleg1', title: 'Odd delegated', mode: 'ai_worker', state: 'ready', delegated: 'yes' });
+  doc.tasks.push({ id: 't_20261003090000_body01', title: 'Body not text', mode: 'ai_worker', state: 'ready', body: 42 });
   doc.tasks.push({ id: 't_20261003090000_twice1', title: 'Twice A', mode: 'ai_worker', state: 'ready' });
   doc.tasks.push({ id: 't_20261003090000_twice1', title: 'Twice B', mode: 'ai_worker', state: 'ready' });
   doc.places.push({ id: 'p_20261003090000_noname' });
-  doc.places[0].paths.push({ machine: 'laptop', path: 'elsewhere' });
+  doc.places[0].paths.push({ device: 'laptop', path: 'elsewhere' });
   doc.blocks.push({ before_id: T1, after_id: 't_20261009090000_absent' });
   doc.blocks.push({ before_id: T3, after_id: T3 });
   doc.blocks.push({ before_id: T1, after_id: T2 });
@@ -176,7 +177,8 @@ test('structural problems are skipped with reasons', (t) => {
   assert.match(reason('t_20261003090000_state1'), /paused/);
   assert.match(reason('t_20261003090000_mode01'), /robot/);
   assert.match(reason('t_20261003090000_date01'), /日付として読めません/);
-  assert.match(reason('t_20261003090000_secr01'), /秘密度/);
+  assert.match(reason('t_20261003090000_deleg1'), /delegated/);
+  assert.match(reason('t_20261003090000_body01'), /body は文字列/);
   assert.equal(res.skipped.filter((s) => s.id === 't_20261003090000_twice1').length, 2);
   assert.match(reason('p_20261003090000_noname'), /名前/);
   assert.match(reason(`${P1}:laptop`), /道が2つ/);
@@ -354,4 +356,83 @@ test('cli: warifuri import end to end', () => {
   assert.equal(cli(['import', snap]).status, 2);
   assert.equal(cli(['import', '--db', db]).status, 2);
   assert.equal(cli(['import', snap, '--db', db, '--colour']).status, 2);
+});
+
+test('profiles, device paths and the new task fields are imported', (t) => {
+  const { L } = fresh(t);
+  const doc = snapshot();
+  Object.assign(doc.tasks[0], { body: 'Background and scope', load: 'light', next: 'Start with the 2024 review', delegated: true });
+  doc.places[0].paths.push({ device: 'desk', path: 'D:\\notes' });
+  doc.goals[0].secrecy = 'withhold'; // an old field is not read
+  doc.goals[0].area = 'elsewhere';
+  const res = L.replaceFromSnapshot(doc, ACTOR);
+  assert.deepEqual(res.flagged, []);
+  const task = L.get(T1);
+  assert.equal(task.body, 'Background and scope');
+  assert.equal(task.load, 'light');
+  assert.equal(task.next, 'Start with the 2024 review');
+  assert.equal(task.delegated, true);
+  assert.equal(task.profile, 'research');
+  assert.equal(L.get(T2).delegated, false);
+  const goal = L.get(G1);
+  assert.equal(goal.profile, 'research');
+  assert.ok(!('secrecy' in goal) && !('area' in goal));
+  assert.equal(L.get(P1).profile, 'research');
+  assert.equal(L.placePath(P1, 'desk'), 'D:\\notes');
+  assert.equal(L.placeFor('desk', 'd:\\notes\\2026').id, P1);
+});
+
+test('a bad load is left out with a note; a long body is kept with review', (t) => {
+  const { L } = fresh(t);
+  const doc = snapshot();
+  doc.tasks.push({ id: 't_20261003090000_load01', title: 'Odd load', mode: 'ai_worker', state: 'ready', load: 'huge' });
+  doc.tasks.push({ id: 't_20261003090000_long01', title: 'Long body', mode: 'ai_worker', state: 'ready', body: 'x'.repeat(2001) });
+  const res = L.replaceFromSnapshot(doc, ACTOR);
+  assert.deepEqual(res.flagged.map((f) => f.id).sort(), ['t_20261003090000_load01', 't_20261003090000_long01']);
+  const odd = L.get('t_20261003090000_load01');
+  assert.equal(odd.load, null);
+  assert.ok(odd.review.some((p) => p.includes('huge')));
+  const long = L.get('t_20261003090000_long01');
+  assert.equal(long.body.length, 2001);
+  assert.ok(long.review.some((p) => p.includes('2000字')));
+  // The next write must fix it.
+  assert.throws(() => L.update(long.id, { title: 'Still long' }, ACTOR), /2000字/);
+  assert.equal(L.update(long.id, { body: 'See docs/plan.md' }, ACTOR).review, null);
+});
+
+test('原則1 on import: a goal with a human-time task is flagged when it lacks outcome or due', (t) => {
+  const { L } = fresh(t);
+  const doc = snapshot();
+  doc.goals.push({ id: 'g_20261003090000_aigoal', title: 'AI goal', mode: 'ai_worker', state: 'ready' });
+  doc.tasks.push({ id: 't_20261003090000_byhand', title: 'By hand', mode: 'human', done_when: 'Done', goal_id: 'g_20261003090000_aigoal', state: 'ready' });
+  const res = L.replaceFromSnapshot(doc, ACTOR);
+  assert.deepEqual(res.flagged.map((f) => f.id), ['g_20261003090000_aigoal']);
+  const goal = L.get('g_20261003090000_aigoal');
+  assert.ok(goal.review.some((p) => p.includes('原則1') && p.includes('人の時間を使うタスクを持つゴール')));
+  // G2 is ai_worker with only an ai_worker task (none here): not flagged.
+  assert.equal(L.get(G2).review, null);
+  // The task cannot be written until its goal is fixed.
+  assert.throws(() => L.update('t_20261003090000_byhand', { title: 'By hand, carefully' }, ACTOR), /原則1/);
+  L.update(goal.id, { outcome: 'It is done', due: '2026-12-24' }, ACTOR);
+  assert.equal(L.update('t_20261003090000_byhand', { title: 'By hand, carefully' }, ACTOR).title, 'By hand, carefully');
+});
+
+test('holds survive an import when their task comes back open', (t) => {
+  const { L, importRecords } = fresh(t);
+  L.replaceFromSnapshot(snapshot(), ACTOR);
+  L.issueKey('laptop', ACTOR);
+  L.start(T1, { device: 'laptop', placeId: P1 }, ACTOR);
+  L.start(T2, { device: 'laptop' }, ACTOR);
+  const res = L.replaceFromSnapshot(snapshot(), ACTOR);
+  assert.deepEqual(res.dropped_holds, []);
+  assert.equal(L.get(T1).hold.place_id, P1);
+
+  const second = snapshot();
+  second.tasks[1].state = 'done';
+  second.tasks[1].result = 'Written';
+  const again = L.replaceFromSnapshot(second, ACTOR);
+  assert.deepEqual(again.dropped_holds, [T2]);
+  assert.equal(L.get(T2).hold, null);
+  assert.deepEqual(JSON.parse(importRecords().at(-1).changes).dropped_holds, [T2]);
+  assert.equal(L.listDevices().length, 1); // devices stay
 });

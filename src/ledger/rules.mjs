@@ -7,7 +7,8 @@ export const STATES = ['ready', 'running', 'waiting', 'deferred', 'done', 'disca
 export const CLOSED_STATES = ['done', 'discarded'];
 export const MODES = ['ai_worker', 'human_with_ai', 'human'];
 export const HUMAN_TIME_MODES = ['human_with_ai', 'human'];
-export const SECRECY = ['open', 'withhold'];
+export const LOADS = ['heavy', 'normal', 'light'];
+export const BODY_MAX = 2000;
 export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
 
 // Fields that belong to a state. Leaving the state clears them.
@@ -18,6 +19,8 @@ export const STATE_FIELDS = {
   deferred: ['defer_until'],
 };
 export const ALL_STATE_FIELDS = ['waiting_on', 'waiting_for', 'result', 'reason', 'defer_until'];
+// Moving a task to one of these lets go of its hold, and may leave a `next` for whoever picks it up.
+export const RELEASING_STATES = ['done', 'discarded', 'waiting', 'deferred'];
 
 // A caller-supplied id: one lowercase letter, 14 digits (YYYYMMDDHHMMSS), 6 lowercase alnum.
 export const ID_PATTERN = /^[a-z]_[0-9]{14}_[a-z0-9]{6}$/;
@@ -50,11 +53,20 @@ export function isValidId(value) {
 const isBlank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 const isFlag = (v) => v === 0 || v === 1;
 const isNonNegInt = (v) => Number.isInteger(v) && v >= 0;
+const isText = (v) => v === undefined || v === null || typeof v === 'string';
+// Length in characters as a person counts them (code points, not UTF-16 units).
+export const charLength = (s) => [...s].length;
 
 export function checkActor(actor) {
   return typeof actor === 'string' && actor.trim() !== ''
     ? []
     : ['だれが書いたか(actor)が要ります。記録に残すためです(原則18)'];
+}
+
+// The device a write came from is optional, but when given it is a non-empty string.
+export function checkWriterDevice(device) {
+  if (device === undefined || device === null) return [];
+  return typeof device === 'string' && device.trim() !== '' ? [] : ['device は空でない文字列です'];
 }
 
 function checkCommon(row, kind) {
@@ -86,17 +98,32 @@ export function checkStateFields(row) {
   return p;
 }
 
-export function checkGoal(row) {
-  const p = checkCommon(row, 'ゴール');
-  // A goal that takes a person's time is an outcome and a date, both set by the person (原則1, 2).
-  if (HUMAN_TIME_MODES.includes(row.mode)) {
-    if (isBlank(row.due)) p.push('人の時間を使うゴールには期日が要ります(原則2)');
-    else if (row.due_provisional === 1) p.push('人の時間を使うゴールの期日は、人が決めたものにします。仮の期日では足りません(原則2)');
-    if (isBlank(row.outcome)) p.push('人の時間を使うゴールには、あるべき姿(outcome)が要ります(原則1)');
-  }
-  if (!isFlag(row.human_led)) p.push('human_led は 0 か 1 です');
-  if (!SECRECY.includes(row.secrecy)) p.push(`秘密度は ${SECRECY.join(', ')} のどちらかです`);
+// What a human-time goal needs: an outcome and a due date the person set (原則1, 2).
+// byTask: the goal counts as human-time only because it has a human-time task.
+function humanTimeGoalProblems(row, byTask) {
+  const p = [];
+  const why = byTask ? '人の時間を使うタスクを持つゴールは、人の時間を使うゴールとして扱います(原則1)。そのため、' : '';
+  if (isBlank(row.due)) p.push(`${why}人の時間を使うゴールには期日が要ります(原則2)`);
+  else if (row.due_provisional === 1) p.push(`${why}人の時間を使うゴールの期日は、人が決めたものにします。仮の期日では足りません(原則2)`);
+  if (isBlank(row.outcome)) p.push(`${why}人の時間を使うゴールには、あるべき姿(outcome)が要ります(原則1)`);
   return p;
+}
+
+// ctx.hasHumanTimeTask: whether any task of this goal uses a person's time (原則1).
+export function checkGoal(row, ctx = {}) {
+  const p = checkCommon(row, 'ゴール');
+  if (HUMAN_TIME_MODES.includes(row.mode)) p.push(...humanTimeGoalProblems(row, false));
+  else if (ctx.hasHumanTimeTask) p.push(...humanTimeGoalProblems(row, true));
+  if (!isFlag(row.human_led)) p.push('human_led は 0 か 1 です');
+  if (!isText(row.profile)) p.push('profile は文字列です');
+  return p;
+}
+
+// Problems with putting a human-time task under `goal` (原則1): the goal would become a
+// human-time goal, so it needs what one needs. Empty when the task is not human-time.
+export function checkGoalTakesHumanTask(task, goal) {
+  if (!goal || !HUMAN_TIME_MODES.includes(task.mode) || HUMAN_TIME_MODES.includes(goal.mode)) return [];
+  return humanTimeGoalProblems(goal, true).map((s) => `ゴール ${goal.id}: ${s}`);
 }
 
 // ctx.goalExists / ctx.placeExists: whether goal_id / place_id name existing rows.
@@ -110,9 +137,15 @@ export function checkTask(row, ctx = {}) {
   if (row.estimate_min !== null && row.estimate_min !== undefined && !isNonNegInt(row.estimate_min)) {
     p.push('見積り(estimate_min)は0以上の整数(分)です');
   }
-  if (row.secrecy !== null && row.secrecy !== undefined && !SECRECY.includes(row.secrecy)) {
-    p.push(`秘密度は ${SECRECY.join(', ')} のどちらか、または空(ゴールか置き場から受け継ぐ)です`);
+  if (!isText(row.body)) p.push('説明(body)は文字列です');
+  else if (typeof row.body === 'string' && charLength(row.body) > BODY_MAX) {
+    p.push(`説明(body)は${BODY_MAX}字までです(いまは${charLength(row.body)}字)。長い仕様や手順はリポジトリの文書に置き、その場所を書きます`);
   }
+  if (row.load !== null && row.load !== undefined && !LOADS.includes(row.load)) {
+    p.push(`重さ(load)は ${LOADS.join(', ')} のどれか、または空です`);
+  }
+  if (!isText(row.next)) p.push('次の一手(next)は文字列です');
+  if (!isFlag(row.delegated)) p.push('delegated(任せるの印)は 0 か 1 です');
   return p;
 }
 
@@ -139,15 +172,15 @@ export function checkHabit(row, ctx = {}) {
 export function checkPlace(row) {
   const p = [];
   if (isBlank(row.name)) p.push('置き場には名前が要ります');
-  if (!SECRECY.includes(row.secrecy)) p.push(`秘密度は ${SECRECY.join(', ')} のどちらかです`);
-  const machines = new Set();
+  if (!isText(row.profile)) p.push('profile は文字列です');
+  const devices = new Set();
   for (const item of row.paths ?? []) {
-    if (isBlank(item?.machine) || isBlank(item?.path)) {
-      p.push('置き場の道には、機械(machine)と道(path)の両方が要ります');
-    } else if (machines.has(item.machine)) {
-      p.push(`機械 ${item.machine} の道が2つあります。1つの機械に道は1つです`);
+    if (isBlank(item?.device) || isBlank(item?.path) || typeof item.device !== 'string' || typeof item.path !== 'string') {
+      p.push('置き場の道には、デバイス(device)と道(path)の両方が文字列で要ります');
+    } else if (devices.has(item.device)) {
+      p.push(`デバイス ${item.device} の道が2つあります。1つのデバイスに道は1つです`);
     } else {
-      machines.add(item.machine);
+      devices.add(item.device);
     }
   }
   return p;

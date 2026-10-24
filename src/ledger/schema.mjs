@@ -6,7 +6,7 @@ export const SCHEMA_VERSION = 1;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
-const ENUM_SECRECY = "('open','withhold')";
+const ENUM_LOAD = "('heavy','normal','light')";
 
 // review (goals, tasks): a JSON array of problems found when the row was imported from a
 // snapshot that broke the rules, or NULL. Cleared by the next write that passes the rules.
@@ -23,8 +23,7 @@ export const MIGRATIONS = [
     state           TEXT NOT NULL CHECK (state IN ${ENUM_STATE}),
     mode            TEXT NOT NULL CHECK (mode IN ${ENUM_MODE}),
     human_led       INTEGER NOT NULL DEFAULT 0 CHECK (human_led IN (0, 1)),
-    area            TEXT,
-    secrecy         TEXT NOT NULL DEFAULT 'open' CHECK (secrecy IN ${ENUM_SECRECY}),
+    profile         TEXT,
     waiting_on      TEXT,
     waiting_for     TEXT,
     result          TEXT,
@@ -39,26 +38,30 @@ export const MIGRATIONS = [
   CREATE TABLE IF NOT EXISTS places (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
-    area       TEXT,
-    secrecy    TEXT NOT NULL DEFAULT 'open' CHECK (secrecy IN ${ENUM_SECRECY}),
+    profile    TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
 
+  -- One directory per place and device. The device need not have a row in devices: a place
+  -- may be registered (or imported) before that device gets its key.
   CREATE TABLE IF NOT EXISTS place_paths (
     place_id TEXT NOT NULL REFERENCES places(id),
-    machine  TEXT NOT NULL,
+    device   TEXT NOT NULL,
     path     TEXT NOT NULL,
-    PRIMARY KEY (place_id, machine)
+    PRIMARY KEY (place_id, device)
   );
+  CREATE INDEX IF NOT EXISTS place_paths_device ON place_paths(device);
 
   CREATE TABLE IF NOT EXISTS tasks (
     id              TEXT PRIMARY KEY,
     title           TEXT NOT NULL,
+    body            TEXT,
     done_when       TEXT,
     goal_id         TEXT REFERENCES goals(id),
     state           TEXT NOT NULL CHECK (state IN ${ENUM_STATE}),
     mode            TEXT NOT NULL CHECK (mode IN ${ENUM_MODE}),
+    load            TEXT CHECK (load IS NULL OR load IN ${ENUM_LOAD}),
     estimate_min    INTEGER CHECK (estimate_min IS NULL OR estimate_min >= 0),
     due             TEXT,
     due_provisional INTEGER NOT NULL DEFAULT 0 CHECK (due_provisional IN (0, 1)),
@@ -68,7 +71,8 @@ export const MIGRATIONS = [
     result          TEXT,
     reason          TEXT,
     defer_until     TEXT,
-    secrecy         TEXT CHECK (secrecy IS NULL OR secrecy IN ${ENUM_SECRECY}),
+    next            TEXT,
+    delegated       INTEGER NOT NULL DEFAULT 0 CHECK (delegated IN (0, 1)),
     review          TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
@@ -105,21 +109,32 @@ export const MIGRATIONS = [
     updated_at       TEXT NOT NULL
   );
 
-  -- One row per machine allowed to use the MCP endpoint. Only the sha256 of its key is kept.
-  -- read_withheld: 1 when the machine may read rows whose secrecy is 'withhold'.
-  CREATE TABLE IF NOT EXISTS machines (
-    name          TEXT PRIMARY KEY,
-    key_hash      TEXT NOT NULL UNIQUE,
-    read_withheld INTEGER NOT NULL DEFAULT 0 CHECK (read_withheld IN (0, 1)),
-    created_at    TEXT NOT NULL,
-    revoked_at    TEXT
+  -- One row per device (a machine that uses the ledger, whatever harness runs on it).
+  -- key_hash is the sha256 of its machine key, or NULL while it has none; revoked_at is set
+  -- when its key is revoked, and cleared when a new key is issued.
+  CREATE TABLE IF NOT EXISTS devices (
+    name       TEXT PRIMARY KEY,
+    key_hash   TEXT UNIQUE,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
   );
+
+  -- 持つ: which task a device is working on, in which place, since when. A task is held in
+  -- one place at most, and a device holds at most one task per place (NULL: no place).
+  CREATE TABLE IF NOT EXISTS holds (
+    task_id  TEXT PRIMARY KEY REFERENCES tasks(id),
+    device   TEXT NOT NULL REFERENCES devices(name),
+    place_id TEXT REFERENCES places(id),
+    since    TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS holds_device_place ON holds(device, ifnull(place_id, ''));
 
   CREATE TABLE IF NOT EXISTS records (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     at        TEXT NOT NULL,
     actor     TEXT NOT NULL CHECK (length(actor) > 0),
-    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','machine')),
+    device    TEXT,
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device')),
     entity_id TEXT NOT NULL,
     action    TEXT NOT NULL,
     changes   TEXT NOT NULL

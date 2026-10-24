@@ -268,7 +268,7 @@ test('update refuses fields it does not own', (t) => {
 
 test('records keep actor, action and before/after for each write', (t) => {
   const { L } = fresh(t);
-  const g = L.createGoal(humanGoal({ area: 'research', outcome: 'A full draft is with the advisor' }), ACTOR);
+  const g = L.createGoal(humanGoal({ profile: 'research', outcome: 'A full draft is with the advisor' }), ACTOR);
   L.update(g.id, { title: 'Write the full draft' }, AGENT);
   L.update(g.id, { title: 'Write the full draft' }, AGENT); // no change, no record
   const recs = L.records(g.id);
@@ -312,9 +312,9 @@ test('ids: generated from the clock, or supplied by the caller', (t) => {
 
 test('board: open goals with their tasks, then tasks with no goal, with filters', (t) => {
   const { L } = fresh(t);
-  const research = L.createGoal(humanGoal({ area: 'research', due: '2026-12-01' }), ACTOR);
-  const club = L.createGoal({ title: 'Plan the club camp', outcome: 'The camp is booked', mode: 'human', due: '2026-11-20', area: 'club' }, ACTOR);
-  const closed = L.createGoal({ title: 'Old goal', mode: 'ai_worker', area: 'research' }, ACTOR);
+  const research = L.createGoal(humanGoal({ profile: 'research', due: '2026-12-01' }), ACTOR);
+  const club = L.createGoal({ title: 'Plan the club camp', outcome: 'The camp is booked', mode: 'human', due: '2026-11-20', profile: 'club' }, ACTOR);
+  const closed = L.createGoal({ title: 'Old goal', mode: 'ai_worker', profile: 'research' }, ACTOR);
   L.setState(closed.id, 'done', { result: 'Finished' }, ACTOR);
 
   const r1 = L.createTask(aiTask({ goal_id: research.id }), ACTOR);
@@ -322,7 +322,7 @@ test('board: open goals with their tasks, then tasks with no goal, with filters'
   const r3 = L.createTask(aiTask({ title: 'Finished task', goal_id: research.id }), ACTOR);
   L.setState(r3.id, 'done', { result: 'ok' }, ACTOR);
   const c1 = L.createTask({ title: 'Book the bus', mode: 'human', done_when: 'Bus booked', goal_id: club.id }, ACTOR);
-  const home = L.createPlace({ name: 'notes', area: 'research' }, ACTOR);
+  const home = L.createPlace({ name: 'notes', profile: 'research' }, ACTOR);
   const loose1 = L.createTask(aiTask({ title: 'Loose in research', place_id: home.id }), ACTOR);
   const loose2 = L.createTask(aiTask({ title: 'Loose anywhere' }), ACTOR);
 
@@ -336,7 +336,7 @@ test('board: open goals with their tasks, then tasks with no goal, with filters'
   assert.equal(withClosed.goals.length, 3);
   assert.equal(withClosed.goals.find((g) => g.id === research.id).tasks.length, 3);
 
-  const byArea = L.board({ area: 'research' });
+  const byArea = L.board({ profile: 'research' });
   assert.deepEqual(byArea.goals.map((g) => g.id), [research.id]);
   assert.deepEqual(byArea.unassigned.map((x) => x.id), [loose1.id]);
 
@@ -369,16 +369,15 @@ test('search: title contains the text, case ignored, goals and tasks, limited', 
   assert.equal(L.search('nothing like this').length, 0);
 });
 
-test('places: one path per machine', (t) => {
+test('places: one path per device', (t) => {
   const { L, count } = fresh(t);
   const p = L.createPlace(
     {
       name: 'thesis',
-      area: 'research',
-      secrecy: 'withhold',
+      profile: 'research',
       paths: [
-        { machine: 'laptop', path: path.posix.join('/', 'home', 'alex', 'thesis') },
-        { machine: 'desktop', path: path.win32.join('D:\\', 'work', 'thesis') },
+        { device: 'laptop', path: path.posix.join('/', 'home', 'alex', 'thesis') },
+        { device: 'desktop', path: path.win32.join('D:\\', 'work', 'thesis') },
       ],
     },
     ACTOR,
@@ -387,21 +386,22 @@ test('places: one path per machine', (t) => {
   assert.equal(L.placePath(p.id, 'laptop'), '/home/alex/thesis');
   assert.equal(L.placePath(p.id, 'desktop'), 'D:\\work\\thesis');
   assert.equal(L.placePath(p.id, 'phone'), null);
-  assert.deepEqual(L.get(p.id).paths.map((x) => x.machine), ['desktop', 'laptop']);
+  assert.deepEqual(L.get(p.id).paths.map((x) => x.device), ['desktop', 'laptop']);
   assert.equal(L.records(p.id)[0].changes.paths.after.length, 2);
 
   refuses(
-    () => L.createPlace({ name: 'dup', paths: [{ machine: 'laptop', path: 'a' }, { machine: 'laptop', path: 'b' }] }, ACTOR),
+    () => L.createPlace({ name: 'dup', paths: [{ device: 'laptop', path: '/a' }, { device: 'laptop', path: '/b' }] }, ACTOR),
     '道が2つあります',
   );
-  refuses(() => L.createPlace({ name: 'half', paths: [{ machine: 'laptop' }] }, ACTOR), '両方');
-  refuses(() => L.createPlace({ name: 'x', secrecy: 'secret' }, ACTOR), '秘密度');
+  refuses(() => L.createPlace({ name: 'half', paths: [{ device: 'laptop' }] }, ACTOR), '両方');
+  refuses(() => L.createPlace({ name: 'x', secrecy: 'withhold' }, ACTOR), 'secrecy はここでは書けません');
+  refuses(() => L.createPlace({ name: 'same dir', paths: [{ device: 'laptop', path: '/home/alex/thesis/' }] }, ACTOR), 'もう置き場');
   assert.equal(count('places'), 1);
   assert.equal(count('place_paths'), 2);
 
   const task = L.createTask(aiTask({ place_id: p.id }), ACTOR);
   assert.equal(task.place_id, p.id);
-  assert.equal(task.secrecy, null); // inherits later
+  assert.equal(task.profile, 'research'); // no goal: the place's profile
 });
 
 test('habits: create and update with checks', (t) => {
@@ -417,6 +417,11 @@ test('habits: create and update with checks', (t) => {
   refuses(() => L.updateHabit(h.id, { duration_min: -5 }, ACTOR), 'duration_min');
   assert.equal(L.records(h.id).length, 2);
   assert.deepEqual(L.records(h.id)[1].changes.active, { before: 1, after: 0 });
+  L.updateHabit(h.id, { active: true }, ACTOR);
+  const stopped = L.stopHabit(h.id, ACTOR);
+  assert.equal(stopped.active, false);
+  assert.equal(L.records(h.id).at(-1).action, 'stop');
+  refuses(() => L.stopHabit('h_20261024000000_nohabt', ACTOR), '習慣はありません');
 });
 
 test('autonomy: stored per kind, starting at ask', (t) => {
@@ -469,4 +474,112 @@ test('schema: version 1 is recorded, and a newer file is refused', (t) => {
   reopened.close();
   raw.prepare("UPDATE meta SET value = '99' WHERE key = 'schema_version'").run();
   assert.throws(() => openLedger(file), /newer than this warifuri/);
+});
+
+test('原則1: a goal with a human-time task is a human-time goal', (t) => {
+  const { L, count } = fresh(t);
+  const ai = L.createGoal({ title: 'Tidy notes', mode: 'ai_worker' }, ACTOR);
+  const provisional = L.createGoal({ title: 'Plan', mode: 'ai_worker', outcome: 'A plan exists', due: '2026-11-01', due_provisional: true }, ACTOR);
+  const human = { title: 'Read with AI', mode: 'human_with_ai', done_when: 'Notes written' };
+
+  // Creating a human-time task under a goal that lacks an outcome or a set due date is refused.
+  const err = refuses(() => L.createTask({ ...human, goal_id: ai.id }, ACTOR), '原則1', '期日', 'outcome');
+  assert.ok(err.problems.every((p) => p.includes(ai.id)));
+  refuses(() => L.createTask({ ...human, mode: 'human', goal_id: provisional.id }, ACTOR), '原則1', '仮の期日');
+  assert.equal(count('tasks'), 0);
+
+  // An ai_worker task may go under it; turning that task human-time is refused.
+  const task = L.createTask(aiTask({ goal_id: ai.id }), ACTOR);
+  refuses(() => L.update(task.id, { mode: 'human', done_when: 'Done by hand' }, ACTOR), '原則1');
+  // Moving a human-time task under it is refused too.
+  const loose = L.createTask(human, ACTOR);
+  refuses(() => L.update(loose.id, { goal_id: ai.id }, ACTOR), '原則1');
+
+  // Once the goal has what a human-time goal needs, the task may go there.
+  L.update(ai.id, { outcome: 'Notes are in one place', due: '2026-12-01' }, ACTOR);
+  assert.equal(L.update(loose.id, { goal_id: ai.id }, ACTOR).goal_id, ai.id);
+
+  // Now the goal itself may not lose them, though its own mode is ai_worker.
+  refuses(() => L.update(ai.id, { due: null }, ACTOR), '人の時間を使うタスクを持つゴール', '原則1');
+  refuses(() => L.update(ai.id, { due_provisional: true }, ACTOR), '原則1', '仮の期日');
+  refuses(() => L.update(ai.id, { outcome: '' }, ACTOR), '原則1', 'outcome');
+  // Without its human-time task, it may again.
+  L.update(loose.id, { goal_id: null }, ACTOR);
+  assert.equal(L.update(ai.id, { due: null }, ACTOR).due, null);
+});
+
+test('task fields: body up to 2000 characters, load enum, next, delegated', (t) => {
+  const { L } = fresh(t);
+  const full = L.createTask(aiTask({ body: 'あ'.repeat(2000), load: 'heavy', next: 'Read chapter 2 first', delegated: true }), ACTOR);
+  assert.equal([...full.body].length, 2000);
+  assert.equal(full.load, 'heavy');
+  assert.equal(full.next, 'Read chapter 2 first');
+  assert.equal(full.delegated, true);
+  // Characters, not UTF-16 units: 2000 emoji fit.
+  assert.ok(L.createTask(aiTask({ body: '😀'.repeat(2000) }), ACTOR));
+
+  refuses(() => L.createTask(aiTask({ body: 'x'.repeat(2001) }), ACTOR), '2000字まで', '2001字');
+  refuses(() => L.update(full.id, { body: 'あ'.repeat(2001) }, ACTOR), '2000字まで');
+  refuses(() => L.createTask(aiTask({ body: 42 }), ACTOR), '説明(body)は文字列');
+  refuses(() => L.createTask(aiTask({ load: 'huge' }), ACTOR), '重さ(load)');
+  refuses(() => L.update(full.id, { load: 'Heavy' }, ACTOR), '重さ(load)');
+  refuses(() => L.createTask(aiTask({ delegated: 'yes' }), ACTOR), 'delegated');
+  refuses(() => L.createGoal({ title: 'x', mode: 'ai_worker', delegated: true }, ACTOR), 'delegated はここでは書けません');
+
+  const plain = L.createTask(aiTask(), ACTOR);
+  assert.equal(plain.body, null);
+  assert.equal(plain.load, null);
+  assert.equal(plain.next, null);
+  assert.equal(plain.delegated, false);
+  for (const load of ['heavy', 'normal', 'light', null]) assert.equal(L.update(plain.id, { load }, ACTOR).load, load);
+  assert.equal(L.update(plain.id, { delegated: true, next: 'Ask about scope' }, ACTOR).delegated, true);
+
+  const g = L.createGoal(humanGoal({ human_led: true }), ACTOR);
+  assert.equal(g.human_led, true);
+});
+
+test('reopen: done or discarded back to ready, clearing result or reason', (t) => {
+  const { L } = fresh(t);
+  const task = L.createTask(aiTask(), ACTOR);
+  refuses(() => L.reopen(task.id, ACTOR), '閉じていません');
+  L.setState(task.id, 'done', { result: 'Listed' }, AGENT);
+  const back = L.reopen(task.id, ACTOR);
+  assert.equal(back.state, 'ready');
+  assert.equal(back.result, null);
+  assert.equal(back.closed_at, null);
+  assert.equal(L.records(task.id).at(-1).action, 'reopen');
+
+  const g = L.createGoal(humanGoal(), ACTOR);
+  L.setState(g.id, 'discarded', { reason: 'Plans changed' }, ACTOR);
+  const goal = L.reopen(g.id, ACTOR);
+  assert.equal(goal.state, 'ready');
+  assert.equal(goal.reason, null);
+  refuses(() => L.reopen('t_20261024000000_nosuch', ACTOR), 'ありません');
+});
+
+test('records keep the device a write came from', (t) => {
+  const { L } = fresh(t);
+  const task = L.createTask(aiTask(), { actor: 'agent', device: 'laptop' });
+  L.update(task.id, { title: 'Renamed' }, ACTOR);
+  const [created, renamed] = L.records(task.id);
+  assert.equal(created.actor, 'agent');
+  assert.equal(created.device, 'laptop');
+  assert.equal(renamed.device, null);
+  refuses(() => L.update(task.id, { title: 'x' }, { actor: 'agent', device: '' }), 'device');
+});
+
+test('a task belongs to its goal\'s profile, else to its place\'s', (t) => {
+  const { L } = fresh(t);
+  const place = L.createPlace({ name: 'club repo', profile: 'club' }, ACTOR);
+  const g = L.createGoal(humanGoal({ profile: 'research' }), ACTOR);
+  const underGoal = L.createTask(aiTask({ goal_id: g.id, place_id: place.id }), ACTOR);
+  const loose = L.createTask(aiTask({ place_id: place.id }), ACTOR);
+  const nowhere = L.createTask(aiTask(), ACTOR);
+  assert.equal(L.get(underGoal.id).profile, 'research');
+  assert.equal(L.get(loose.id).profile, 'club');
+  assert.equal(nowhere.profile, null);
+  // Not stored: it follows the goal.
+  L.update(g.id, { profile: 'thesis' }, ACTOR);
+  assert.equal(L.get(underGoal.id).profile, 'thesis');
+  assert.deepEqual(L.board({ profile: 'club' }).unassigned.map((x) => x.id), [loose.id]);
 });

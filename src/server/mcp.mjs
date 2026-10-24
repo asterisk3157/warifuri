@@ -1,8 +1,8 @@
 // The MCP endpoint: an HTTP server whose /mcp speaks MCP over Streamable HTTP (stateless:
 // a new McpServer and transport for each request) and whose /health says "ok".
-// Every /mcp request carries one machine's key (Authorization: Bearer <key>). The tools
-// only read; what they return is reduced by secrecy.mjs for machines that may not read
-// withheld rows. Keys are never logged.
+// Every /mcp request carries one device's machine key (Authorization: Bearer <key>); the key
+// tells which device is calling. The tools only read, and return the ledger as it is: whoever
+// holds a valid key sees everything. Keys are never logged.
 //
 // The ledger is opened once by the caller and kept open. An import from another process
 // may replace its rows while this server runs; SQLite in WAL mode lets that writer commit
@@ -13,7 +13,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { STATES, MODES } from '../ledger/rules.mjs';
-import { redactBoard, redactItem, redactSearch } from '../ledger/secrecy.mjs';
 
 const VERSION = '0.0.0';
 
@@ -27,8 +26,8 @@ function toolError(message) {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
 
-// One McpServer for one request, seeing the ledger as `machine` may.
-function buildServer(ledger, machine) {
+// One McpServer for one request from `device` ({ name }).
+function buildServer(ledger, device) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
 
@@ -36,10 +35,13 @@ function buildServer(ledger, machine) {
     'board',
     {
       description:
-        'List open goals with their tasks, and the tasks with no goal. Filter by area, state or mode; ' +
-        'review: true shows only rows flagged on import; include_closed: true adds done and discarded rows.',
+        'List open goals with their tasks, and the tasks with no goal; each task shows who holds it. ' +
+        'place: the directory you work in; the place it falls in on your device gives the profile to show. ' +
+        'profile: show that profile (wins over place). Without place or profile, everything is shown. ' +
+        'state and mode filter; review: true shows only rows flagged on import; include_closed: true adds done and discarded rows.',
       inputSchema: {
-        area: z.string().optional(),
+        place: z.string().min(1).optional(),
+        profile: z.string().optional(),
         state: z.enum(STATES).optional(),
         mode: z.enum(MODES).optional(),
         review: z.boolean().optional(),
@@ -47,37 +49,75 @@ function buildServer(ledger, machine) {
       },
       annotations: readOnly,
     },
-    async ({ area, state, mode, review, include_closed }) => {
-      const board = ledger.board({ area, state, mode, review: review ?? false, includeClosed: include_closed ?? false });
-      return result(redactBoard(board, ledger.secrecyIndex(), machine));
-    },
+    async ({ place, profile, state, mode, review, include_closed }) =>
+      result(
+        ledger.board({
+          dir: place,
+          device: device.name,
+          profile,
+          state,
+          mode,
+          review: review ?? false,
+          includeClosed: include_closed ?? false,
+        }),
+      ),
   );
 
   server.registerTool(
     'get',
     {
-      description: 'Read one goal, task, habit or place by id, with its order and records.',
+      description: 'Read one goal, task, habit or place by id, with its order, hold and records.',
       inputSchema: { id: z.string().min(1) },
       annotations: readOnly,
     },
     async ({ id }) => {
       const item = ledger.get(id);
       if (!item) return toolError(`${id} というゴール・タスク・習慣・置き場はありません`);
-      return result(redactItem(item, ledger.secrecyIndex(), machine));
+      return result(item);
     },
   );
 
   server.registerTool(
     'search',
     {
-      description: 'Find goals and tasks whose title contains the text. Use it before creating one, to avoid duplicates.',
+      description: 'Find goals and tasks whose title contains the text, closed ones too. Use it before creating one, to avoid duplicates.',
       inputSchema: { text: z.string(), limit: z.number().int().min(1).max(100).optional() },
       annotations: readOnly,
     },
-    async ({ text, limit }) => {
-      const found = ledger.search(text, { limit: limit ?? 20 });
-      return result(redactSearch(found, ledger.secrecyIndex(), machine));
+    async ({ text, limit }) => result(ledger.search(text, { limit: limit ?? 20 })),
+  );
+
+  server.registerTool(
+    'flow',
+    {
+      description:
+        "A goal's flow as a Mermaid flowchart: its tasks, the order between them as arrows, and colours for " +
+        'done, running (held), next (ready with nothing open before it) and waiting.',
+      inputSchema: { goal_id: z.string().min(1) },
+      annotations: readOnly,
     },
+    async ({ goal_id: goalId }) => {
+      const mermaid = ledger.flow(goalId);
+      if (mermaid === null) return toolError(`${goalId} というゴールはありません`);
+      return { content: [{ type: 'text', text: mermaid }], structuredContent: { goal_id: goalId, mermaid } };
+    },
+  );
+
+  server.registerTool(
+    'stale',
+    {
+      description:
+        'Candidates for tidying, with reasons: tasks held with no change for held_days (default 3), ready and ' +
+        'untouched for ready_days (30), waiting with no change for waiting_days (14). It changes nothing.',
+      inputSchema: {
+        held_days: z.number().min(0).optional(),
+        ready_days: z.number().min(0).optional(),
+        waiting_days: z.number().min(0).optional(),
+      },
+      annotations: readOnly,
+    },
+    async ({ held_days: heldDays, ready_days: readyDays, waiting_days: waitingDays }) =>
+      result(ledger.stale({ heldDays, readyDays, waitingDays })),
   );
 
   return server;
@@ -90,7 +130,7 @@ function sendText(res, status, text, headers = {}) {
 
 function unauthorized(res) {
   res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
-  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: a valid machine key is required' }, id: null }));
+  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: a valid device key is required' }, id: null }));
 }
 
 // The key from "Authorization: Bearer <key>", or null.
@@ -100,9 +140,9 @@ function bearerKey(req) {
 }
 
 async function handleMcp(ledger, req, res) {
-  const machine = ledger.machineForKey(bearerKey(req));
-  if (!machine) return unauthorized(res);
-  const server = buildServer(ledger, machine);
+  const device = ledger.deviceForKey(bearerKey(req));
+  if (!device) return unauthorized(res);
+  const server = buildServer(ledger, device);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});

@@ -2,29 +2,32 @@
 // The warifuri command. Thin: it reads arguments and files, calls the ledger, prints.
 //
 //   warifuri import <snapshot.json> --db <ledger.sqlite> [--actor <name>]
-//   warifuri key add <name> --db <ledger.sqlite> [--read-withheld]
+//   warifuri key add <device> --db <ledger.sqlite>
 //   warifuri key list --db <ledger.sqlite>
-//   warifuri key revoke <name> --db <ledger.sqlite>
+//   warifuri key revoke <device> --db <ledger.sqlite>
+//   warifuri backup --db <ledger.sqlite> --dir <dir> [--keep 7]
 //   warifuri serve --db <ledger.sqlite> [--host 127.0.0.1] [--port 8787]
 //
 // Exit codes: 0 done (even when rows were flagged or skipped), 1 the snapshot or the ledger
-// could not be read, the snapshot's envelope is wrong or the ledger refused, 2 the command
-// line is wrong.
+// could not be read, the snapshot's envelope is wrong, the ledger refused or the backup
+// failed, 2 the command line is wrong.
 
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { createServer } from '../src/server/mcp.mjs';
+import { backupLedger } from '../src/ledger/backup.mjs';
 
 const USAGE = [
   'usage: warifuri import <snapshot.json> --db <ledger.sqlite> [--actor <name>]',
-  '       warifuri key add <name> --db <ledger.sqlite> [--read-withheld]',
+  '       warifuri key add <device> --db <ledger.sqlite>',
   '       warifuri key list --db <ledger.sqlite>',
-  '       warifuri key revoke <name> --db <ledger.sqlite>',
+  '       warifuri key revoke <device> --db <ledger.sqlite>',
+  '       warifuri backup --db <ledger.sqlite> --dir <dir> [--keep 7]',
   '       warifuri serve --db <ledger.sqlite> [--host 127.0.0.1] [--port 8787]',
   '',
   'serve listens on 127.0.0.1 unless --host says otherwise. Listening beyond this machine',
-  'is your choice; the machine keys are then the only guard, so put HTTPS in front.',
+  'is your choice; the device keys are then the only guard, so put HTTPS in front.',
 ].join('\n');
 
 function usage(message) {
@@ -86,7 +89,8 @@ function fail(err, what) {
   return 1;
 }
 
-// warifuri key add|list|revoke. The actor in the records is the person at this command line.
+// warifuri key add|list|revoke. add creates the device when it is new. The actor in the
+// records is the person at this command line.
 function runKey(args) {
   const [sub, ...rest] = args;
   let parsed;
@@ -94,7 +98,7 @@ function runKey(args) {
     parsed = parseArgs({
       args: rest,
       allowPositionals: true,
-      options: { db: { type: 'string' }, 'read-withheld': { type: 'boolean', default: false } },
+      options: { db: { type: 'string' } },
     });
   } catch (err) {
     return usage(err.message);
@@ -103,24 +107,23 @@ function runKey(args) {
   if (!['add', 'list', 'revoke'].includes(sub)) return usage('key takes add, list or revoke');
   if (!values.db) return usage('--db is required');
   if (sub === 'list' && positionals.length !== 0) return usage('key list takes no name');
-  if (sub !== 'list' && positionals.length !== 1) return usage(`key ${sub} takes one machine name`);
-  if (sub !== 'add' && values['read-withheld']) return usage('--read-withheld goes with key add');
+  if (sub !== 'list' && positionals.length !== 1) return usage(`key ${sub} takes one device name`);
 
   let ledger;
   try {
     ledger = openLedger(values.db);
     if (sub === 'add') {
-      const { name, key } = ledger.addMachine(positionals[0], { readWithheld: values['read-withheld'] }, { actor: 'cli' });
-      process.stdout.write(`key for ${name}:\n${key}\nThis key will not be shown again. Keep it in that machine's settings.\n`);
+      const { name, key } = ledger.issueKey(positionals[0], { actor: 'cli' });
+      process.stdout.write(`key for ${name}:\n${key}\nThis key will not be shown again. Keep it in that device's settings.\n`);
     } else if (sub === 'revoke') {
-      ledger.revokeMachine(positionals[0], { actor: 'cli' });
+      ledger.revokeKey(positionals[0], { actor: 'cli' });
       process.stdout.write(`revoked: ${positionals[0]}\n`);
     } else {
-      const rows = ledger.listMachines();
-      if (rows.length === 0) process.stdout.write('no machines\n');
-      for (const m of rows) {
-        const flags = [m.read_withheld ? 'reads withheld' : null, m.revoked_at ? `revoked ${m.revoked_at}` : null].filter(Boolean);
-        process.stdout.write(`${m.name}  added ${m.created_at}${flags.length ? `  (${flags.join(', ')})` : ''}\n`);
+      const rows = ledger.listDevices();
+      if (rows.length === 0) process.stdout.write('no devices\n');
+      for (const d of rows) {
+        const state = d.has_key ? 'key in use' : d.revoked_at ? `key revoked ${d.revoked_at}` : 'no key';
+        process.stdout.write(`${d.name}  added ${d.created_at}  (${state})\n`);
       }
     }
     return 0;
@@ -128,6 +131,33 @@ function runKey(args) {
     return fail(err, `key ${sub} failed`);
   } finally {
     ledger?.close();
+  }
+}
+
+// warifuri backup: a dated copy of the ledger in dir; only the newest --keep copies stay.
+function runBackup(args) {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      options: { db: { type: 'string' }, dir: { type: 'string' }, keep: { type: 'string', default: '7' } },
+    });
+  } catch (err) {
+    return usage(err.message);
+  }
+  const { values } = parsed;
+  if (!values.db) return usage('--db is required');
+  if (!values.dir) return usage('--dir is required');
+  const keep = Number(values.keep);
+  if (!Number.isInteger(keep) || keep < 1) return usage('--keep must be a whole number of 1 or more');
+  try {
+    const { file, removed } = backupLedger(values.db, values.dir, { keep });
+    const out = [`backup: ${file}`];
+    if (removed.length) out.push(`removed ${removed.length} older backup${removed.length === 1 ? '' : 's'}`);
+    process.stdout.write(`${out.join('\n')}\n`);
+    return 0;
+  } catch (err) {
+    return fail(err, 'backup failed');
   }
 }
 
@@ -183,6 +213,7 @@ function main(argv) {
   const [command, ...rest] = argv;
   if (command === 'import') return runImport(rest);
   if (command === 'key') return runKey(rest);
+  if (command === 'backup') return runBackup(rest);
   if (command === 'serve') return runServe(rest);
   if (command === undefined || command === '--help' || command === '-h') return usage();
   return usage(`unknown command: ${command}`);
