@@ -1,18 +1,21 @@
 // The MCP endpoint: an HTTP server whose /mcp speaks MCP over Streamable HTTP (stateless:
 // a new McpServer and transport for each request) and whose /health says "ok".
-// Every /mcp request carries one device's machine key (Authorization: Bearer <key>); the key
-// tells which device is calling. The tools only read, and return the ledger as it is: whoever
-// holds a valid key sees everything. Keys are never logged.
+// Every /mcp request carries a bearer that tells which device is calling: a device's machine
+// key (wf_…), or, when OAuth is configured (oauth.mjs), an access token issued after the
+// person logged in with GitHub and chose the device. The tools only read, and return the
+// ledger as it is: whoever holds a valid bearer sees everything. Bearers are never logged.
 //
 // The ledger is opened once by the caller and kept open. An import from another process
 // may replace its rows while this server runs; SQLite in WAL mode lets that writer commit
 // while this connection keeps reading, and each read sees the latest committed rows.
 
 import http from 'node:http';
+import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { STATES, MODES } from '../ledger/rules.mjs';
+import { createOAuth } from './oauth.mjs';
 
 const VERSION = '0.0.0';
 
@@ -123,26 +126,28 @@ function buildServer(ledger, device) {
   return server;
 }
 
-function sendText(res, status, text, headers = {}) {
-  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', ...headers });
-  res.end(text);
+function sendText(res, status, text) {
+  res.status(status).type('text/plain; charset=utf-8').send(text);
 }
 
-function unauthorized(res) {
-  res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
-  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: a valid device key is required' }, id: null }));
+// Without OAuth, /mcp takes device keys only, and answers a bad one with a JSON-RPC error.
+function deviceKeyAuth(ledger) {
+  return (req, res, next) => {
+    const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization ?? '');
+    const device = ledger.deviceForKey(m ? m[1] : null);
+    if (!device) {
+      res.status(401).set('WWW-Authenticate', 'Bearer');
+      res.json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: a valid device key is required' }, id: null });
+      return;
+    }
+    req.auth = { token: m[1], clientId: 'device-key', scopes: [], extra: { device: device.name } };
+    next();
+  };
 }
 
-// The key from "Authorization: Bearer <key>", or null.
-function bearerKey(req) {
-  const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization ?? '');
-  return m ? m[1] : null;
-}
-
+// req.auth is set by the bearer check before this runs; its device is the caller.
 async function handleMcp(ledger, req, res) {
-  const device = ledger.deviceForKey(bearerKey(req));
-  if (!device) return unauthorized(res);
-  const server = buildServer(ledger, device);
+  const server = buildServer(ledger, { name: req.auth.extra.device });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -152,22 +157,42 @@ async function handleMcp(ledger, req, res) {
   await transport.handleRequest(req, res);
 }
 
-export function createServer({ ledger }) {
-  return http.createServer((req, res) => {
-    const { pathname } = new URL(req.url ?? '/', 'http://localhost');
-    if (pathname === '/health' && req.method === 'GET') return sendText(res, 200, 'ok');
-    if (pathname === '/mcp' && ['POST', 'GET', 'DELETE'].includes(req.method)) {
-      handleMcp(ledger, req, res).catch((err) => {
-        process.stderr.write(`warifuri: /mcp failed: ${err.message}\n`);
-        if (!res.headersSent) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null }));
-        } else {
-          res.end();
-        }
-      });
-      return undefined;
-    }
-    return sendText(res, 404, 'not found');
+// The express app. oauth: the config from oauthConfig(), or null for device keys only.
+// github: { webUrl, apiUrl, fetch } stands in for GitHub in tests. log: where errors go.
+export function createApp({ ledger, oauth = null, github, log = (line) => process.stderr.write(`${line}\n`) }) {
+  const app = express();
+  app.disable('x-powered-by');
+  app.get('/health', (req, res) => sendText(res, 200, 'ok'));
+
+  let auth = deviceKeyAuth(ledger);
+  if (oauth) {
+    const { router, bearer } = createOAuth({ ledger, config: oauth, github, log });
+    app.use(router);
+    auth = bearer;
+  }
+  const mcp = (req, res) =>
+    handleMcp(ledger, req, res).catch((err) => {
+      log(`warifuri: /mcp failed: ${err.message}`);
+      if (!res.headersSent) {
+        res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });
+      } else {
+        res.end();
+      }
+    });
+  app.post('/mcp', auth, mcp);
+  app.get('/mcp', auth, mcp);
+  app.delete('/mcp', auth, mcp);
+
+  app.use((req, res) => sendText(res, 404, 'not found'));
+  // Errors from the routes above; the message may come from a library, so it is not echoed.
+  app.use((err, req, res, _next) => {
+    log(`warifuri: ${req.method} ${req.path} failed: ${err.message}`);
+    if (res.headersSent) return res.end();
+    return sendText(res, err.status && err.status < 500 ? err.status : 500, err.status && err.status < 500 ? 'bad request' : 'internal error');
   });
+  return app;
+}
+
+export function createServer(options) {
+  return http.createServer(createApp(options));
 }

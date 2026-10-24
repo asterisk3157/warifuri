@@ -5,7 +5,8 @@
 // carrying every problem found.
 // replaceFromSnapshot() is the one write that takes rows breaking the rules: it stores them
 // with `review` set, and the next write to such a row must pass the rules (which clears it).
-// Devices hold the keys for the MCP endpoint; only a hash of each key is stored.
+// Devices hold the keys for the MCP endpoint; only a hash of each key is stored. OAuth
+// clients, codes and tokens (oauth.mjs) also resolve to a device, and are stored as hashes too.
 // Nothing is hidden from a reader: whoever may open the ledger sees all of it.
 
 import { DatabaseSync } from 'node:sqlite';
@@ -14,6 +15,7 @@ import { migrate } from './schema.mjs';
 import { checkEnvelope, prepareSnapshot } from './snapshot.mjs';
 import { comparablePath, deepestContaining } from './paths.mjs';
 import { renderFlow } from './flow.mjs';
+import { oauthStore } from './oauth.mjs';
 import {
   STATES,
   CLOSED_STATES,
@@ -931,6 +933,15 @@ export function openLedger(path, options = {}) {
     return row ? { name: row.name } : null;
   }
 
+  // OAuth storage (oauth.mjs). Writes from the command line or the consent page name who
+  // wrote them, like every other write.
+  const store = oauthStore({ db, one, all, transaction, record, now });
+  const oauth = {
+    ...store,
+    approve: (id, device, opts) => store.approve(id, device, requireWriter({ ...opts, device })),
+    revokeClient: (clientId, opts) => store.revokeClient(clientId, requireWriter(opts)),
+  };
+
   // Replaces goals, tasks, blocks and places with a snapshot (docs/snapshot.md), in one
   // transaction with one record. Habits, devices, autonomy and records stay. A hold stays when
   // its task comes back open (and its place, if any, comes back); others are dropped. Rows that
@@ -1022,6 +1033,7 @@ export function openLedger(path, options = {}) {
     revokeKey,
     listDevices,
     deviceForKey,
+    oauth,
     close: () => {
       if (db.isOpen) db.close();
     },

@@ -119,6 +119,63 @@ export const MIGRATIONS = [
     revoked_at TEXT
   );
 
+  -- OAuth (warifuri is its own authorization server; GitHub only checks who the person is).
+  -- No secret is stored in plain: ids that work as credentials (the pending id kept in the
+  -- browser's cookie, the GitHub state, the consent form's CSRF token, codes and tokens) are
+  -- kept as sha256 hashes. Clients are public (PKCE, no client secret); metadata is the
+  -- registration as JSON.
+  CREATE TABLE IF NOT EXISTS oauth_clients (
+    client_id  TEXT PRIMARY KEY,
+    metadata   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  -- An authorization request waiting for the GitHub login and the consent page (10 minutes).
+  CREATE TABLE IF NOT EXISTS oauth_pending (
+    id_hash           TEXT PRIMARY KEY,
+    client_id         TEXT NOT NULL REFERENCES oauth_clients(client_id),
+    redirect_uri      TEXT NOT NULL,
+    code_challenge    TEXT NOT NULL,
+    scopes            TEXT NOT NULL,
+    state             TEXT,
+    github_state_hash TEXT,
+    github_login      TEXT,
+    csrf_hash         TEXT,
+    created_at        TEXT NOT NULL,
+    expires_at        TEXT NOT NULL
+  );
+
+  -- Single-use authorization codes (10 minutes). family names the tokens issued from the code,
+  -- so that a second use of the code can revoke them.
+  CREATE TABLE IF NOT EXISTS oauth_codes (
+    code_hash      TEXT PRIMARY KEY,
+    client_id      TEXT NOT NULL REFERENCES oauth_clients(client_id),
+    redirect_uri   TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    device         TEXT NOT NULL REFERENCES devices(name),
+    scopes         TEXT NOT NULL,
+    family         TEXT,
+    created_at     TEXT NOT NULL,
+    expires_at     TEXT NOT NULL,
+    used_at        TEXT
+  );
+
+  -- Access and refresh tokens. A family is one grant: the tokens from one code and every
+  -- refresh after it.
+  CREATE TABLE IF NOT EXISTS oauth_tokens (
+    hash       TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('access','refresh')),
+    client_id  TEXT NOT NULL REFERENCES oauth_clients(client_id),
+    device     TEXT NOT NULL REFERENCES devices(name),
+    family     TEXT NOT NULL,
+    scopes     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS oauth_tokens_family ON oauth_tokens(family);
+  CREATE INDEX IF NOT EXISTS oauth_tokens_client ON oauth_tokens(client_id);
+
   -- 持つ: which task a device is working on, in which place, since when. A task is held in
   -- one place at most, and a device holds at most one task per place (NULL: no place).
   CREATE TABLE IF NOT EXISTS holds (
@@ -134,7 +191,7 @@ export const MIGRATIONS = [
     at        TEXT NOT NULL,
     actor     TEXT NOT NULL CHECK (length(actor) > 0),
     device    TEXT,
-    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device')),
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device','oauth')),
     entity_id TEXT NOT NULL,
     action    TEXT NOT NULL,
     changes   TEXT NOT NULL

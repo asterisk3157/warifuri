@@ -6,7 +6,14 @@
 //   warifuri key list --db <ledger.sqlite>
 //   warifuri key revoke <device> --db <ledger.sqlite>
 //   warifuri backup --db <ledger.sqlite> --dir <dir> [--keep 7]
+//   warifuri oauth clients --db <ledger.sqlite>
+//   warifuri oauth revoke <client_id> --db <ledger.sqlite>
 //   warifuri serve --db <ledger.sqlite> [--host 127.0.0.1] [--port 8787]
+//                  [--public-url <url>] [--github-user <login>]
+//
+// serve turns on the GitHub login when the public URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+// and the GitHub user are all set (flags win over WARIFURI_PUBLIC_URL and WARIFURI_GITHUB_USER;
+// the GitHub values come from the environment only). Otherwise only device keys work.
 //
 // Exit codes: 0 done (even when rows were flagged or skipped), 1 the snapshot or the ledger
 // could not be read, the snapshot's envelope is wrong, the ledger refused or the backup
@@ -16,6 +23,7 @@ import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { createServer } from '../src/server/mcp.mjs';
+import { oauthConfig } from '../src/server/oauth.mjs';
 import { backupLedger } from '../src/ledger/backup.mjs';
 
 const USAGE = [
@@ -24,10 +32,15 @@ const USAGE = [
   '       warifuri key list --db <ledger.sqlite>',
   '       warifuri key revoke <device> --db <ledger.sqlite>',
   '       warifuri backup --db <ledger.sqlite> --dir <dir> [--keep 7]',
+  '       warifuri oauth clients --db <ledger.sqlite>',
+  '       warifuri oauth revoke <client_id> --db <ledger.sqlite>',
   '       warifuri serve --db <ledger.sqlite> [--host 127.0.0.1] [--port 8787]',
+  '                      [--public-url <url>] [--github-user <login>]',
   '',
   'serve listens on 127.0.0.1 unless --host says otherwise. Listening beyond this machine',
-  'is your choice; the device keys are then the only guard, so put HTTPS in front.',
+  'is your choice; the GitHub login and the device keys are then the only guard, so put',
+  'HTTPS in front. The GitHub login needs the public URL (or WARIFURI_PUBLIC_URL), the',
+  'GitHub user (or WARIFURI_GITHUB_USER), GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.',
 ].join('\n');
 
 function usage(message) {
@@ -134,6 +147,48 @@ function runKey(args) {
   }
 }
 
+// warifuri oauth clients|revoke. revoke ends every token of a client; the client stays
+// registered and has to ask the person again.
+function runOAuth(args) {
+  const [sub, ...rest] = args;
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: { db: { type: 'string' } } });
+  } catch (err) {
+    return usage(err.message);
+  }
+  const { values, positionals } = parsed;
+  if (!['clients', 'revoke'].includes(sub)) return usage('oauth takes clients or revoke');
+  if (!values.db) return usage('--db is required');
+  if (sub === 'clients' && positionals.length !== 0) return usage('oauth clients takes no argument');
+  if (sub === 'revoke' && positionals.length !== 1) return usage('oauth revoke takes one client id');
+
+  let ledger;
+  try {
+    ledger = openLedger(values.db);
+    if (sub === 'revoke') {
+      const out = ledger.oauth.revokeClient(positionals[0], { actor: 'cli' });
+      if (!out) {
+        process.stderr.write(`warifuri: no OAuth client ${positionals[0]}\n`);
+        return 1;
+      }
+      process.stdout.write(`revoked ${out.revoked} token${out.revoked === 1 ? '' : 's'} of ${out.client_id}\n`);
+    } else {
+      const rows = ledger.oauth.listClients();
+      if (rows.length === 0) process.stdout.write('no OAuth clients\n');
+      for (const c of rows) {
+        const devices = c.devices.length ? `in use by ${c.devices.join(', ')}` : 'no live tokens';
+        process.stdout.write(`${c.client_id}  ${c.client_name ?? '(no name)'}  registered ${c.created_at}  (${devices})\n`);
+      }
+    }
+    return 0;
+  } catch (err) {
+    return fail(err, `oauth ${sub} failed`);
+  } finally {
+    ledger?.close();
+  }
+}
+
 // warifuri backup: a dated copy of the ledger in dir; only the newest --keep copies stay.
 function runBackup(args) {
   let parsed;
@@ -167,7 +222,13 @@ function runServe(args) {
   try {
     parsed = parseArgs({
       args,
-      options: { db: { type: 'string' }, host: { type: 'string', default: '127.0.0.1' }, port: { type: 'string', default: '8787' } },
+      options: {
+        db: { type: 'string' },
+        host: { type: 'string', default: '127.0.0.1' },
+        port: { type: 'string', default: '8787' },
+        'public-url': { type: 'string' },
+        'github-user': { type: 'string' },
+      },
     });
   } catch (err) {
     return usage(err.message);
@@ -176,6 +237,8 @@ function runServe(args) {
   if (!values.db) return usage('--db is required');
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) return usage('--port must be a number from 0 to 65535');
+  const oauth = oauthConfig({ flags: { publicUrl: values['public-url'], githubUser: values['github-user'] } });
+  if (oauth.problems) return usage(oauth.problems.join('; '));
 
   let ledger;
   try {
@@ -183,7 +246,7 @@ function runServe(args) {
   } catch (err) {
     return fail(err, `cannot open ${values.db}`);
   }
-  const server = createServer({ ledger });
+  const server = createServer({ ledger, oauth: oauth.config });
   server.on('error', (err) => {
     process.stderr.write(`warifuri: cannot listen: ${err.message}\n`);
     ledger.close();
@@ -193,6 +256,11 @@ function runServe(args) {
     const addr = server.address();
     const host = addr.family === 'IPv6' ? `[${addr.address}]` : addr.address;
     process.stdout.write(`warifuri: serving http://${host}:${addr.port}/mcp\n`);
+    if (oauth.config) {
+      process.stdout.write(`warifuri: GitHub login on for ${oauth.config.githubUser}, at ${oauth.config.publicUrl}/mcp\n`);
+    } else {
+      process.stdout.write(`warifuri: GitHub login off (missing ${oauth.missing.join(', ')}); only device keys work\n`);
+    }
   });
   let stopping = false;
   const stop = () => {
@@ -213,6 +281,7 @@ function main(argv) {
   const [command, ...rest] = argv;
   if (command === 'import') return runImport(rest);
   if (command === 'key') return runKey(rest);
+  if (command === 'oauth') return runOAuth(rest);
   if (command === 'backup') return runBackup(rest);
   if (command === 'serve') return runServe(rest);
   if (command === undefined || command === '--help' || command === '-h') return usage();

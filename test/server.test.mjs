@@ -13,7 +13,10 @@ const ACTOR = { actor: 'human' };
 
 // A ledger with two profiles, a place on the laptop, a held task, and three device keys.
 async function start(t) {
-  const ledger = openLedger(':memory:');
+  // A clock that moves 1 ms on every read, so rows made one after another keep their order
+  // (the ledger orders by created_at, then by the random part of the id).
+  let tick = 0;
+  const ledger = openLedger(':memory:', { now: () => new Date(Date.now() + (tick += 1)) });
   const research = ledger.createGoal({ title: 'Research goal', mode: 'ai_worker', outcome: 'visible outcome', profile: 'research' }, ACTOR);
   const researchTask = ledger.createTask({ title: 'Research task', mode: 'ai_worker', goal_id: research.id, body: 'the whole body' }, ACTOR);
   const club = ledger.createGoal({ title: 'Club goal', mode: 'ai_worker', profile: 'club' }, ACTOR);

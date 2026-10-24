@@ -124,6 +124,10 @@ claude mcp add --transport http warifuri https://<サーバー>/mcp
 
 ログインしてよい人は、設定に GitHub のユーザー名で1人だけ書きます。そこにない人は、ログインできても断ります。warifuri は、自分で OAuth の口になり、本人の確認だけを GitHub に任せます。GitHub のトークンをそのまま台帳の鍵として使うことはしません。
 
+GitHub でのログインには、GitHub の OAuth App を1つ作ります。GitHub の Settings の Developer settings にある OAuth Apps で新しく登録し、Authorization callback URL に `<公開の URL>/oauth/github/callback` を書きます。公開の URL は、ハーネスから見えるサーバーの URL です。`https://` で始まり、道を含まない形にします(手元で試すときだけ `http://localhost` も使えます)。サーバーには、公開の URL を `WARIFURI_PUBLIC_URL` で、ログインしてよい人の GitHub のユーザー名を `WARIFURI_GITHUB_USER` で、OAuth App の Client ID と Client Secret を `GITHUB_CLIENT_ID` と `GITHUB_CLIENT_SECRET` で渡します。前の2つは `warifuri serve` の `--public-url` と `--github-user` でも渡せて、そのときは引数のほうを使います。Secret は環境変数でしか受けつけません。どれか1つでも欠けると、ログインは使えず、機械の鍵だけで動きます。起動したときに、そのことを表示します。
+
+GitHub には、ログインの名前を読む以外の権限を求めません。名前を読んだら、GitHub のトークンは捨てます。ハーネスが受け取るのは warifuri が出すトークンです。1時間で切れ、30日もつ更新用のトークンで取り直します。どちらも許可の画面で選んだデバイスに結びつき、MCP の口では、機械の鍵と同じように、どのデバイスからの呼び出しかを表します。つないだアプリの一覧は `warifuri oauth clients` で見られ、あるアプリのトークンをすべて取り消すには `warifuri oauth revoke <client_id>` を使います。
+
 ### 届かないとき
 
 台帳に届かないときも、作業は止めません。着手の確かめのフックは、台帳に届かなければ通します。エージェントは、届くようになったら、届かなかったあいだの作業を登録して閉じます(指示書のひな形にそう書く)。登録し忘れたものは、あとで人が `stale` や一覧を見て拾います。
@@ -153,6 +157,7 @@ npm install -g <パッケージ名>
 | `warifuri serve` | サーバーを動かす |
 | `warifuri connect` | 使う機械で、ハーネスに登録する |
 | `warifuri key add` | デバイスの機械の鍵を発行する |
+| `warifuri oauth clients` / `warifuri oauth revoke` | GitHub でログインしてつないだアプリを一覧する、そのトークンを取り消す |
 | `warifuri backup` | 台帳とプロフィールと設定を日付つきで写す。直近7日分を残す |
 | `warifuri pack` / `warifuri init --from` | 別の機械に引っ越す |
 
