@@ -12,6 +12,9 @@
 //   warifuri oauth revoke <client_id>
 //   warifuri serve [--host 127.0.0.1] [--port 8787]
 //                  [--public-url <url>] [--github-user <login>] [--trust-proxy <value>]
+//   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
+//                    [--no-hook] [--no-skills] [--force] [--dry-run]
+//   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
 //
 // Every command takes --home <dir> (the data directory) and --db <ledger.sqlite>. The flags
 // override the settings of src/config.mjs, which come from the environment, then from
@@ -30,6 +33,8 @@ import { createServer } from '../src/server/mcp.mjs';
 import { oauthConfig, cleanClientName } from '../src/server/oauth.mjs';
 import { backupLedger } from '../src/ledger/backup.mjs';
 import { loadConfig, flagOptions, describeConfig, initHome } from '../src/config.mjs';
+import { connect, redact } from '../src/client/connect.mjs';
+import { decide, readKey } from '../src/client/gate.mjs';
 
 const USAGE = [
   'usage: warifuri init',
@@ -43,6 +48,9 @@ const USAGE = [
   '       warifuri oauth revoke <client_id>',
   '       warifuri serve [--host 127.0.0.1] [--port 8787]',
   '                      [--public-url <url>] [--github-user <login>] [--trust-proxy <value>]',
+  '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
+  '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
+  '       warifuri hook gate',
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
   'when neither is given) and --db <ledger.sqlite> (or WARIFURI_DB; ledger.sqlite in the',
@@ -60,6 +68,13 @@ const USAGE = [
   'claude.com and the hosts in WARIFURI_REDIRECT_HOSTS (comma-separated).',
   'Behind a tunnel or reverse proxy on this machine, give --trust-proxy loopback (or',
   'WARIFURI_TRUST_PROXY), so the rate limits count each caller and not the tunnel.',
+  '',
+  'connect sets up this machine to use a server (--url, or WARIFURI_SERVER_URL; a server on',
+  'this machine when neither is given): it registers the MCP server in Claude Code and Codex,',
+  'puts the device key in WARIFURI_DEVICE_KEY_FILE (issued here when the ledger is on this',
+  'machine), wires the start gate hook and copies the skills. --dry-run only shows the plan.',
+  'hook gate is that hook: it reads the harness JSON on stdin and stops an edit in a place',
+  'where this device holds no task. It lets the edit through whenever it cannot ask.',
 ].join('\n');
 
 function usage(message) {
@@ -362,6 +377,76 @@ function runServe(args) {
   return undefined;
 }
 
+// warifuri connect: see src/client/connect.mjs.
+function runConnect(args) {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      options: {
+        ...flagOptions('connect'),
+        device: { type: 'string' },
+        harness: { type: 'string', default: 'all' },
+        'no-hook': { type: 'boolean', default: false },
+        'no-skills': { type: 'boolean', default: false },
+        force: { type: 'boolean', default: false },
+        'dry-run': { type: 'boolean', default: false },
+      },
+    });
+  } catch (err) {
+    return usage(err.message);
+  }
+  const { values } = parsed;
+  if (!['claude', 'codex', 'all'].includes(values.harness)) return usage('--harness takes claude, codex or all');
+  if (values.device !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(values.device)) {
+    return usage('--device takes letters, digits and . _ - (1 to 64)');
+  }
+  const cfg = settingsFor('connect', values);
+  if (cfg === 2) return 2;
+  warn(cfg);
+  const homeIsDefault = cfg.entries.find((e) => e.setting.name === 'WARIFURI_HOME').source === 'default';
+  let out;
+  try {
+    out = connect(
+      cfg,
+      { device: values.device, harness: values.harness, hook: !values['no-hook'], skills: !values['no-skills'], force: values.force, dryRun: values['dry-run'] },
+      { homeIsDefault },
+    );
+  } catch (err) {
+    process.stderr.write(`warifuri: connect failed: ${redact(err.message)}\n`);
+    return 1;
+  }
+  if (out.lines.length) process.stdout.write(`${out.lines.map(redact).join('\n')}\n`);
+  for (const p of out.problems) process.stderr.write(`warifuri: ${redact(p)}\n`);
+  return out.problems.length ? 1 : 0;
+}
+
+// warifuri hook gate: the start gate. It always exits 0; a refusal is the JSON it prints.
+// Anything it cannot read or reach lets the edit through.
+async function runHook(args) {
+  const rest = args.slice(1);
+  let output = null;
+  try {
+    const { values } = parseArgs({ args: rest, options: flagOptions('hook') });
+    const cfg = loadConfig({ flags: values, command: 'hook' });
+    let payload = null;
+    try {
+      payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+    } catch {
+      payload = null;
+    }
+    if (payload && cfg.problems.length === 0) {
+      const v = cfg.values;
+      output = await decide(payload, { url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE });
+    }
+  } catch {
+    output = null;
+  }
+  // Exit at once: an open connection to the server must not keep the hook waiting.
+  await new Promise((resolve) => (output ? process.stdout.write(`${output}\n`, resolve) : resolve()));
+  process.exit(0);
+}
+
 function main(argv) {
   const [command, ...rest] = argv;
   if (command === 'init') return runInit(rest);
@@ -371,6 +456,12 @@ function main(argv) {
   if (command === 'oauth') return runOAuth(rest);
   if (command === 'backup') return runBackup(rest);
   if (command === 'serve') return runServe(rest);
+  if (command === 'connect') return runConnect(rest);
+  if (command === 'hook') {
+    if (rest[0] !== 'gate') return usage('hook takes gate');
+    runHook(rest);
+    return undefined;
+  }
   if (command === undefined || command === '--help' || command === '-h') return usage();
   return usage(`unknown command: ${command}`);
 }
