@@ -18,6 +18,21 @@ warifuri is a secretary for people who work with AI agents: a ledger of goals an
 - **Two READMEs.** `README.md` (English) and `README.ja.md` (Japanese) say the same things. Change both in the same commit.
 - **Commit locally only.** Pushing, opening pull requests and releasing are done after the maintainer approves.
 
+## Commits
+
+Use Conventional Commits with the description in plain Japanese (常体, no です・ます):
+
+```
+<type>(<scope>): <what changed, as one short sentence>
+
+<why, in one or two lines, only when the subject does not already say it>
+```
+
+- **type** is one of `feat`, `fix`, `docs`, `refactor`, `test`, `ci`, `build`, `chore`. A breaking change adds `!` after the type or scope and a `BREAKING CHANGE:` line in the body.
+- **scope** is optional and names the area: `ledger`, `mcp`, `oauth`, `cli`, `snapshot`, `docs`, `ci`.
+- The description says what is now true, the way you would tell a colleague: 「鍵を取り消したら、その機械のログインも切れるようにした」. No trailing period, no lists of files, no adjectives about the change.
+- One commit, one purpose. Changes that would be reverted separately go in separate commits.
+
 ## Writing
 
 Keep the README to what warifuri is, its status and links; explanations go in `docs/`, written as prose like a technical article. Say what something does, without examples that stand in for an argument or claims about people in general. Write Japanese in です・ます.
