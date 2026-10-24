@@ -6,15 +6,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { openLedger } from '../src/ledger/ledger.mjs';
 import { backupLedger, backupName, listBackups } from '../src/ledger/backup.mjs';
+import { cli } from './cli.mjs';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-backup-'));
 after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
-const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'warifuri.mjs');
-const cli = (args) => spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, ...args], { encoding: 'utf8' });
 
 function ledgerFile() {
   const dir = fs.mkdtempSync(path.join(tmpRoot, 'case-'));
@@ -60,7 +57,11 @@ test('cli: warifuri backup', () => {
   assert.match(ok.stdout, /backup: .*ledger-\d{8}-\d{6}\.sqlite/);
   assert.equal(listBackups(out).length, 1);
   assert.equal(cli(['backup', '--db', db]).status, 2);
-  assert.equal(cli(['backup', '--dir', out]).status, 2);
+  // Without --db the ledger is the one in the data directory; here there is none.
+  const home = path.join(dir, 'home');
+  const none = cli(['backup', '--dir', out], { home });
+  assert.equal(none.status, 1);
+  assert.ok(none.stderr.includes(path.join(home, 'ledger.sqlite')), none.stderr);
   assert.equal(cli(['backup', '--db', db, '--dir', out, '--keep', '0']).status, 2);
   assert.equal(cli(['backup', '--db', path.join(dir, 'none.sqlite'), '--dir', out]).status, 1);
 });

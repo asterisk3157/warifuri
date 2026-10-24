@@ -6,14 +6,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
+import { cli } from './cli.mjs';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-snapshot-'));
 after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
-const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'warifuri.mjs');
 
 const ACTOR = { actor: 'import' };
 let fileCounter = 0;
@@ -305,9 +303,6 @@ test('board({ review: true }) shows only flagged rows', (t) => {
   assert.deepEqual(flagged.unassigned.map((x) => x.id), ['t_20261003090000_loose1']);
 });
 
-function cli(args) {
-  return spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, ...args], { encoding: 'utf8' });
-}
 
 test('cli: warifuri import end to end', () => {
   const dir = fs.mkdtempSync(path.join(tmpRoot, 'cli-'));
@@ -353,7 +348,11 @@ test('cli: warifuri import end to end', () => {
 
   assert.equal(cli([]).status, 2);
   assert.equal(cli(['export']).status, 2);
-  assert.equal(cli(['import', snap]).status, 2);
+  // Without --db, the ledger is made in the data directory.
+  const home = path.join(dir, 'home');
+  assert.equal(cli(['import', snap], { home }).status, 0);
+  assert.ok(fs.existsSync(path.join(home, 'ledger.sqlite')));
+  assert.equal(fs.statSync(home).mode & 0o777, 0o700);
   assert.equal(cli(['import', '--db', db]).status, 2);
   assert.equal(cli(['import', snap, '--db', db, '--colour']).status, 2);
 });
