@@ -179,7 +179,7 @@ test('structural problems are skipped with reasons', (t) => {
   assert.match(reason('t_20261003090000_body01'), /body は文字列/);
   assert.equal(res.skipped.filter((s) => s.id === 't_20261003090000_twice1').length, 2);
   assert.match(reason('p_20261003090000_noname'), /名前/);
-  assert.match(reason(`${P1}:laptop`), /道が2つ/);
+  assert.match(reason(`${P1}:laptop`), /パスが2つ/);
   assert.match(reason(`${T1}>t_20261009090000_absent`), /がありません/);
   assert.match(reason(`${T3}>${T3}`), /自分自身/);
   assert.match(reason(`${T1}>${T2}`), /2回/);
@@ -198,7 +198,7 @@ test('a dangling goal_id or place_id keeps the task, with the link cut and a not
   assert.equal(orphan.goal_id, null);
   assert.equal(orphan.place_id, null);
   assert.ok(orphan.review.some((p) => p.includes('g_20260101000000_gone01') && p.includes('ゴールなし')));
-  assert.ok(orphan.review.some((p) => p.includes('p_20260101000000_gone01') && p.includes('置き場なし')));
+  assert.ok(orphan.review.some((p) => p.includes('p_20260101000000_gone01') && p.includes('作業フォルダなし')));
   assert.equal(L.get('t_20261003090000_child1').goal_id, null);
   assert.ok(res.flagged.some((f) => f.id === 't_20261003090000_child1'));
 });

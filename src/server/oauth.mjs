@@ -324,9 +324,9 @@ export function createOAuth({ ledger, config, github = {}, log }) {
       res,
       status,
       'warifuri への接続の許可',
-      `<p><strong>${escapeHtml(name)}</strong>(アプリが自分で名乗った名前)が、${escapeHtml(pending.github_login)} として warifuri の台帳を使おうとしています。` +
+      `<p><strong>${escapeHtml(name)}</strong>(アプリが自分で名乗った名前)が、${escapeHtml(pending.github_login)} として warifuri のデータベースを使おうとしています。` +
         `戻り先は <strong>${escapeHtml(host)}</strong> です。</p>` +
-        `<p>許可すると、このアプリは台帳の全部を読めます。名前はアプリが自由に名乗れるので、戻り先の <code>${escapeHtml(pending.redirect_uri)}</code> に心当たりがあるかで確かめてください。心当たりがなければ断ってください。</p>` +
+        `<p>許可すると、このアプリはデータベースの全部を読めます。名前はアプリが自由に名乗れるので、戻り先の <code>${escapeHtml(pending.redirect_uri)}</code> に心当たりがあるかで確かめてください。心当たりがなければ断ってください。</p>` +
         (error ? `<p class="error">${escapeHtml(error)}</p>` : '') +
         `<form method="post" action="${CONSENT_PATH}">` +
         `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">` +

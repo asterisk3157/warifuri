@@ -129,7 +129,7 @@ test('start refuses a second task in the same place and returns the one held the
   const a = await task(laptop, 'A');
   const b = await task(laptop, 'B');
   await call(laptop, 'start', { task_id: a.id, place: '/home/alex/repo' });
-  const text = await refused(laptop, 'start', { task_id: b.id, place: '/home/alex/repo/src' }, /もうタスク .* を持っています/);
+  const text = await refused(laptop, 'start', { task_id: b.id, place: '/home/alex/repo/src' }, /もうタスク .* に着手しています/);
   const held = JSON.parse(text.slice(text.indexOf('{'))).held;
   assert.equal(held.id, a.id);
   assert.equal(held.hold.device, 'laptop');
@@ -155,10 +155,10 @@ test('start with a directory in no place, or a place that does not exist, says w
   const laptop = await connect(keys.laptop);
   const desk = await connect(keys.desk);
   const a = await task(laptop, 'A');
-  await refused(laptop, 'start', { task_id: a.id, place: '/home/alex/elsewhere' }, /どの置き場にも入っていません。place で置き場を登録/);
+  await refused(laptop, 'start', { task_id: a.id, place: '/home/alex/elsewhere' }, /どの作業フォルダにも入っていません。place で作業フォルダを登録/);
   // The laptop's path means nothing on the desk.
-  await refused(desk, 'start', { task_id: a.id, place: '/home/alex/repo' }, /デバイス desk のどの置き場にも/);
-  await refused(laptop, 'start', { task_id: a.id, place: 'p_00000000000000_nobody' }, /置き場 p_00000000000000_nobody がありません/);
+  await refused(desk, 'start', { task_id: a.id, place: '/home/alex/repo' }, /デバイス desk のどの作業フォルダにも/);
+  await refused(laptop, 'start', { task_id: a.id, place: 'p_00000000000000_nobody' }, /作業フォルダ p_00000000000000_nobody がありません/);
   await refused(laptop, 'start', { task_id: a.id, place: 'repo' }, /id か、絶対パス/);
 });
 
@@ -174,7 +174,7 @@ test('release needs a one-line next; the task goes back to ready', async (t) => 
   assert.equal(released.next, 'Rerun the failing test first');
   assert.equal(released.hold, null);
   assert.equal(ledger.records(a.id).at(-1).action, 'release');
-  await refused(laptop, 'release', { task_id: a.id, next: 'again' }, /持っていません/);
+  await refused(laptop, 'release', { task_id: a.id, next: 'again' }, /作業中ではありません/);
 });
 
 test('close needs a result or a reason, keeps what was learned in the record, and reopen brings it back', async (t) => {
@@ -240,8 +240,8 @@ test('place registers a place with the calling device\'s path, and changes it by
   assert.deepEqual(renamed.paths, [{ device: 'desk', path: 'C:\\Users\\alex\\notes' }]);
 
   await refused(laptop, 'place', { name: 'x', path: 'relative/dir' }, /絶対パス/);
-  await refused(laptop, 'place', { name: 'clash', path: '/home/alex/repo' }, /もう置き場 .* が使っています/);
-  await refused(laptop, 'place', { id: 'p_00000000000000_nobody', name: 'x' }, /置き場はありません/);
+  await refused(laptop, 'place', { name: 'clash', path: '/home/alex/repo' }, /もう作業フォルダ .* が使っています/);
+  await refused(laptop, 'place', { id: 'p_00000000000000_nobody', name: 'x' }, /作業フォルダはありません/);
   await refused(laptop, 'place', { path: '/home/alex/unnamed' }, /名前が要ります/);
 });
 

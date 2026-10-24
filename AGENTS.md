@@ -14,7 +14,7 @@ warifuri is a secretary for people who work with AI agents: a ledger of goals an
 - **Nothing private.** This repository will become public. Never commit, or write in a commit message or pull request, personal names, home directory paths, private domains, host names, or anything about anyone's work. Before every commit, `scripts/check-private-terms.sh` runs (through lefthook) against the maintainer's private list; you can run `scripts/check-private-terms.sh --all` yourself. Examples use a made-up person.
 - **Vanilla first.** warifuri must run from settings alone. Anything specific to one person's environment belongs in their own settings repository or a personal plug-in, not here.
 - **Plug-ins touch the core only through its API**, never each other.
-- **Words.** Say "schedule" and "block" (スケジュール, ブロック). Do not use 時間割 or コマ.
+- **Words.** Say "schedule" and "block" (スケジュール, 予定). Do not use 時間割 or コマ.
 - **Two READMEs.** `README.md` (English) and `README.ja.md` (Japanese) say the same things. Change both in the same commit.
 - **Commit locally only.** Pushing, opening pull requests and releasing are done after the maintainer approves.
 
@@ -65,7 +65,7 @@ WARIFURI_GITHUB_ID を設定していないときは、最初にログインし�
 | Avoid | Write |
 |---|---|
 | `fix(oauth): 認証まわりの不具合を修正` | `fix(oauth): 取り消したデバイスが許可の画面に出ていたのを直した` |
-| `feat(mcp): 書き込み系ツールの追加` | `feat(mcp): 台帳に書く道具を足した` |
+| `feat(mcp): 書き込み系ツールの追加` | `feat(mcp): データベースに書くツールを足した` |
 | `docs: ドキュメントを整備し、可読性を向上` | `docs: 設定の項目を一覧にした` |
 | `chore: 各種設定を更新` | `chore: express を 5.3.0 に上げた` |
 | 本文 「〜があったため、〜することで修正を行いました！」 | 本文 「〜してしまう不具合がありました。〜するようにして直しました！」 |

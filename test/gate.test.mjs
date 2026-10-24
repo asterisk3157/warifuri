@@ -94,7 +94,7 @@ test('a place with no held task is refused with what to do, for Claude Code and 
   assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
   const reason = out.hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /置き場「work」/);
+  assert.match(reason, /作業フォルダ「work」/);
   assert.match(reason, /search/);
   assert.match(reason, /create_task/);
   assert.ok(reason.includes(`place="${path.join(work, 'free')}"`));

@@ -67,9 +67,9 @@ export function denyReason(place, dir) {
   const name = place?.name ?? '';
   const profile = place?.profile ? `(プロフィール ${place.profile})` : '';
   return (
-    `warifuri の着手の確かめ: 置き場「${name}」${profile}で、このデバイスが持っているタスクがありません。` +
+    `warifuri の着手ゲート: 作業フォルダ「${name}」${profile}で、このデバイスで作業中のタスクがありません。` +
     `編集の前に、MCP の warifuri で (1) search で同じタスクがないかを探し、(2) なければ create_task で作り、` +
-    `(3) start に task_id と place="${dir}" を渡して持ってください。持ったら、編集をやり直してください。`
+    `(3) start に task_id と place="${dir}" を渡して着手してください。着手したら、編集をやり直してください。`
   );
 }
 

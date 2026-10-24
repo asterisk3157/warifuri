@@ -199,7 +199,7 @@ test('context by place directory, place id or profile, and one file by name', as
 
   const refusals = [
     [{ profile: '研究', name: '../knowledge.md' }, /ありません/],
-    [{ place: '/elsewhere' }, /どの置き場にも入っていません.*もう一度 context/],
+    [{ place: '/elsewhere' }, /どの作業フォルダにも入っていません.*もう一度 context/],
     [{ place: places.loose.id }, /プロフィールが付いていません/],
     [{}, /place か profile/],
   ];

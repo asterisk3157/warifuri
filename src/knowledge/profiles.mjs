@@ -161,7 +161,7 @@ const localDate = (d) =>
 export function checkNoteText(text) {
   if (typeof text !== 'string' || text.trim() === '') return ['書く中身(text)が空です'];
   if ([...text].length > MAX_NOTE_CHARS) {
-    return [`1回に書けるのは ${MAX_NOTE_CHARS} 文字までです。長い知識は、人が knowledge/ にファイルとして置きます`];
+    return [`1回に書けるのは ${MAX_NOTE_CHARS} 文字までです。長いナレッジは、人が knowledge/ にファイルとして置きます`];
   }
   return [];
 }

@@ -196,7 +196,7 @@ test('rule 6: goal_id must name an existing goal', (t) => {
   assert.equal(task.goal_id, g.id);
   refuses(() => L.update(task.id, { goal_id: 'g_20261024000000_zzzzzz' }, ACTOR), 'がありません');
   assert.equal(L.update(task.id, { goal_id: null }, ACTOR).goal_id, null);
-  refuses(() => L.createTask(aiTask({ place_id: 'p_20261024000000_nplace' }), ACTOR), '置き場');
+  refuses(() => L.createTask(aiTask({ place_id: 'p_20261024000000_nplace' }), ACTOR), '作業フォルダ');
 });
 
 test('rule 7: blocks need two existing tasks, no self edge, no cycle', (t) => {
@@ -403,11 +403,11 @@ test('places: one path per device', (t) => {
 
   refuses(
     () => L.createPlace({ name: 'dup', paths: [{ device: 'laptop', path: '/a' }, { device: 'laptop', path: '/b' }] }, ACTOR),
-    '道が2つあります',
+    'パスが2つあります',
   );
   refuses(() => L.createPlace({ name: 'half', paths: [{ device: 'laptop' }] }, ACTOR), '両方');
   refuses(() => L.createPlace({ name: 'x', secrecy: 'withhold' }, ACTOR), 'secrecy はここでは書けません');
-  refuses(() => L.createPlace({ name: 'same dir', paths: [{ device: 'laptop', path: '/home/alex/thesis/' }] }, ACTOR), 'もう置き場');
+  refuses(() => L.createPlace({ name: 'same dir', paths: [{ device: 'laptop', path: '/home/alex/thesis/' }] }, ACTOR), 'もう作業フォルダ');
   assert.equal(count('places'), 1);
   assert.equal(count('place_paths'), 2);
 
@@ -444,7 +444,7 @@ test('autonomy: stored per kind, starting at ask', (t) => {
   assert.equal(a.approvals_in_row, 1);
   const up = L.setAutonomy('reschedule_block', { level: 'act_then_tell', approvals_in_row: 3 }, { actor: 'secretary' });
   assert.equal(up.level, 'act_then_tell');
-  refuses(() => L.setAutonomy('reschedule_block', { level: 'always' }, ACTOR), '自律の段');
+  refuses(() => L.setAutonomy('reschedule_block', { level: 'always' }, ACTOR), '自律度');
   refuses(() => L.setAutonomy('reschedule_block', { revokes: -1 }, ACTOR), 'revokes');
   const recs = L.records('reschedule_block');
   assert.deepEqual(recs.map((r) => r.action), ['create', 'update']);

@@ -176,7 +176,7 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS oauth_tokens_family ON oauth_tokens(family);
   CREATE INDEX IF NOT EXISTS oauth_tokens_client ON oauth_tokens(client_id);
 
-  -- 持つ: which task a device is working on, in which place, since when. A task is held in
+  -- 着手: which task a device is working on, in which place, since when. A task is held in
   -- one place at most, and a device holds at most one task per place (NULL: no place).
   CREATE TABLE IF NOT EXISTS holds (
     task_id  TEXT PRIMARY KEY REFERENCES tasks(id),

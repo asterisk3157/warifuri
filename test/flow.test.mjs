@@ -113,7 +113,7 @@ test('stale: held without change, ready untouched, waiting without change', (t) 
   assert.deepEqual(late.held.map((x) => x.id), [held.id]);
   assert.equal(late.held[0].device, 'laptop');
   assert.equal(late.held[0].days, 34);
-  assert.match(late.held[0].reason, /laptop が持ったまま、34日/);
+  assert.match(late.held[0].reason, /laptop で作業中のまま、34日/);
   assert.deepEqual(late.ready.map((x) => x.id), [ready.id]);
   assert.match(late.ready[0].reason, /34日触られていません/);
   assert.deepEqual(late.waiting.map((x) => x.id), [waiting.id]);

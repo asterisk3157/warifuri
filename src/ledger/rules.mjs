@@ -133,7 +133,7 @@ export function checkTask(row, ctx = {}) {
     p.push('人の時間を使うタスクには完了の条件(done_when)が要ります(原則5)');
   }
   if (!isBlank(row.goal_id) && !ctx.goalExists) p.push(`ゴール ${row.goal_id} がありません`);
-  if (!isBlank(row.place_id) && !ctx.placeExists) p.push(`置き場 ${row.place_id} がありません`);
+  if (!isBlank(row.place_id) && !ctx.placeExists) p.push(`作業フォルダ ${row.place_id} がありません`);
   if (row.estimate_min !== null && row.estimate_min !== undefined && !isNonNegInt(row.estimate_min)) {
     p.push('見積り(estimate_min)は0以上の整数(分)です');
   }
@@ -171,14 +171,14 @@ export function checkHabit(row, ctx = {}) {
 
 export function checkPlace(row) {
   const p = [];
-  if (isBlank(row.name)) p.push('置き場には名前が要ります');
+  if (isBlank(row.name)) p.push('作業フォルダには名前が要ります');
   if (!isText(row.profile)) p.push('profile は文字列です');
   const devices = new Set();
   for (const item of row.paths ?? []) {
     if (isBlank(item?.device) || isBlank(item?.path) || typeof item.device !== 'string' || typeof item.path !== 'string') {
-      p.push('置き場の道には、デバイス(device)と道(path)の両方が文字列で要ります');
+      p.push('作業フォルダのパスには、デバイス(device)とパス(path)の両方が文字列で要ります');
     } else if (devices.has(item.device)) {
-      p.push(`デバイス ${item.device} の道が2つあります。1つのデバイスに道は1つです`);
+      p.push(`デバイス ${item.device} のパスが2つあります。1つのデバイスにパスは1つです`);
     } else {
       devices.add(item.device);
     }
@@ -188,8 +188,8 @@ export function checkPlace(row) {
 
 export function checkAutonomy(row) {
   const p = [];
-  if (isBlank(row.kind)) p.push('自律の段には、動きの種類(kind)が要ります');
-  if (!AUTONOMY_LEVELS.includes(row.level)) p.push(`自律の段は ${AUTONOMY_LEVELS.join(', ')} のどちらかです(原則13)`);
+  if (isBlank(row.kind)) p.push('自律度には、動きの種類(kind)が要ります');
+  if (!AUTONOMY_LEVELS.includes(row.level)) p.push(`自律度は ${AUTONOMY_LEVELS.join(', ')} のどちらかです(原則13)`);
   if (!isNonNegInt(row.approvals_in_row)) p.push('approvals_in_row は0以上の整数です');
   if (!isNonNegInt(row.revokes)) p.push('revokes は0以上の整数です');
   return p;
