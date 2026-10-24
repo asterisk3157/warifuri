@@ -112,7 +112,9 @@ export function flagOptions(command) {
   return out;
 }
 
-const expandTilde = (p) => (p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p);
+// ~ is the home directory; on Windows ~\ works as well as ~/.
+const expandTilde = (p) =>
+  p === '~' || p.startsWith('~/') || (path.sep === '\\' && p.startsWith('~\\')) ? path.join(os.homedir(), p.slice(1)) : p;
 const clean = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 
 // Reads one settings file of the data directory: { values, mode } or null when it is absent.
