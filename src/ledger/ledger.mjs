@@ -400,6 +400,16 @@ export function openLedger(path, options = {}) {
     return writeItem(item, next, w, 'reopen');
   }
 
+  // Back to ready from deferred or waiting (reopen is for closed rows).
+  function resume(id, opts) {
+    const item = findItem(id);
+    if (!item) throw new LedgerError([`${id} というゴールもタスクもありません`]);
+    if (!['deferred', 'waiting'].includes(item.row.state)) {
+      throw new LedgerError([`${id} は先送りでも待ちでもありません(いまは ${item.row.state})。閉じたものを戻すときは reopen です`]);
+    }
+    return setState(id, 'ready', {}, opts);
+  }
+
   // Is `target` reachable from `start` along before→after edges?
   function reachable(start, target) {
     return !!one(
@@ -564,6 +574,14 @@ export function openLedger(path, options = {}) {
 
   const pathsOf = (placeId) =>
     all('SELECT device, path FROM place_paths WHERE place_id = ? ORDER BY device', placeId).map(({ device, path }) => ({ device, path }));
+
+  // Every place with its paths, by profile then name.
+  function listPlaces({ profile } = {}) {
+    const rows = profile === undefined
+      ? all('SELECT id FROM places ORDER BY profile, name')
+      : all('SELECT id FROM places WHERE profile = ? ORDER BY name', profile);
+    return rows.map((r) => placeWithPaths(r.id));
+  }
 
   function placeWithPaths(id) {
     const row = getPlaceRow(id);
@@ -1018,6 +1036,7 @@ export function openLedger(path, options = {}) {
     update,
     setState,
     reopen,
+    resume,
     link,
     unlink,
     start,
@@ -1031,6 +1050,7 @@ export function openLedger(path, options = {}) {
     upsertPlace,
     placePath,
     placeFor,
+    listPlaces,
     setAutonomy,
     getAutonomy,
     get,
