@@ -24,12 +24,14 @@
 // failed, 2 the command line or the settings are wrong.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { createServer } from '../src/server/mcp.mjs';
 import { oauthConfig, cleanClientName } from '../src/server/oauth.mjs';
 import { backupLedger } from '../src/ledger/backup.mjs';
 import { loadConfig, flagOptions, describeConfig, initHome } from '../src/config.mjs';
+import { PROFILES_DIR } from '../src/knowledge/profiles.mjs';
 
 const USAGE = [
   'usage: warifuri init',
@@ -46,8 +48,9 @@ const USAGE = [
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
   'when neither is given) and --db <ledger.sqlite> (or WARIFURI_DB; ledger.sqlite in the',
-  'data directory). init writes warifuri.env and secrets.env there, and config shows every',
-  'setting and where it came from. Flags win over the environment, which wins over the files.',
+  'data directory). init writes warifuri.env and secrets.env there and makes an empty',
+  'profiles/, and config shows every setting and where it came from. Flags win over the',
+  'environment, which wins over the files.',
   '',
   'key revoke also ends every GitHub login of that device.',
   '',
@@ -88,8 +91,8 @@ function warn(cfg) {
   for (const w of cfg.warnings) process.stderr.write(`warifuri: warning: ${w}\n`);
 }
 
-// warifuri init: the data directory with a commented warifuri.env and an empty secrets.env.
-// A file that is already there is left as it is.
+// warifuri init: the data directory with a commented warifuri.env, an empty secrets.env and
+// an empty profiles/. A file that is already there is left as it is.
 function runInit(args) {
   let parsed;
   try {
@@ -102,6 +105,11 @@ function runInit(args) {
     for (const { file, created } of initHome(home)) {
       process.stdout.write(created ? `wrote ${file}\n` : `kept ${file} (already there)\n`);
     }
+    // The profiles' folder, empty: a profile's folder is made by its first note, or by hand.
+    const profiles = path.join(home, PROFILES_DIR);
+    const made = !fs.existsSync(profiles);
+    fs.mkdirSync(profiles, { recursive: true, mode: 0o700 });
+    process.stdout.write(made ? `made ${profiles}\n` : `kept ${profiles} (already there)\n`);
     return 0;
   } catch (err) {
     return fail(err, 'init failed');
@@ -327,7 +335,7 @@ function runServe(args) {
   }
   let server;
   try {
-    server = createServer({ ledger, oauth: oauth.config, trustProxy: values.WARIFURI_TRUST_PROXY });
+    server = createServer({ ledger, home: cfg.home, oauth: oauth.config, trustProxy: values.WARIFURI_TRUST_PROXY });
   } catch (err) {
     ledger.close();
     return usage(`WARIFURI_TRUST_PROXY (--trust-proxy): ${err.message}`);

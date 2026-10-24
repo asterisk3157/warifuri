@@ -148,6 +148,8 @@ test('init writes the two files once, secrets.env with mode 600, and never overw
   const again = cli(['init', '--home', dir]);
   assert.equal(again.status, 0, again.stderr);
   assert.match(again.stdout, /kept .*warifuri\.env/);
+  assert.match(again.stdout, /made .*profiles/);
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'profiles')), []);
   assert.equal(fs.readFileSync(settings, 'utf8'), 'WARIFURI_PORT=9999\n');
   assert.equal(fs.readFileSync(secrets, 'utf8'), 'WARIFURI_GITHUB_CLIENT_SECRET=keep\n');
 
