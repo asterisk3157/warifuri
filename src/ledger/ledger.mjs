@@ -133,9 +133,15 @@ function checkDeviceName(name) {
 export function openLedger(path, options = {}) {
   const now = options.now ?? (() => new Date());
   const db = new DatabaseSync(path);
-  db.exec('PRAGMA foreign_keys = ON');
-  if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
-  migrate(db);
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+    migrate(db);
+  } catch (err) {
+    // A refused file stays closed; on Windows an open handle would keep it locked.
+    db.close();
+    throw err;
+  }
 
   const nowIso = () => now().toISOString();
 
