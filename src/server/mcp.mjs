@@ -22,6 +22,7 @@ import { STATES, MODES, LOADS, isValidId } from '../ledger/rules.mjs';
 import { LedgerError } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
+import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
 
 const VERSION = '0.0.0';
 
@@ -58,8 +59,9 @@ const given = (args) => Object.fromEntries(Object.entries(args).filter(([, v]) =
 // Text a caller may clear with null.
 const clearable = z.string().nullable().optional();
 
-// One McpServer for one request from `device` ({ name, actor }).
-function buildServer(ledger, device) {
+// One McpServer for one request from `device` ({ name, actor }). knowledge: { home,
+// secretary } for the profiles' files (see createApp), or null.
+function buildServer(ledger, device, knowledge) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -166,27 +168,77 @@ function buildServer(ledger, device) {
       result(ledger.stale({ heldDays, readyDays, waitingDays })),
   );
 
-  registerWriteTools(server, ledger, device, { write, writer });
+  server.registerTool(
+    'context',
+    {
+      description:
+        "Read a profile's knowledge before working: people.md and knowledge.md as text, and the file names in " +
+        'knowledge/ and procedures/. place: the place id or the directory you work in (its place gives the profile); ' +
+        'profile: that profile (wins over place). name: one of the returned file names (such as procedures/release.md), ' +
+        'to read that file instead. Text past 64 KiB is cut (truncated: true). Notes marked 未確認 are guesses, not facts.',
+      inputSchema: {
+        place: z.string().min(1).optional(),
+        profile: z.string().min(1).optional(),
+        name: z.string().min(1).optional(),
+      },
+      annotations: readOnly,
+    },
+    guarded(async ({ place, profile, name }) => {
+      const home = knowledgeHome(knowledge);
+      const p = profileFor(ledger, device.name, { place, profile }, 'context');
+      return result(readContext(home, p, { name }));
+    }),
+  );
+
+  registerWriteTools(server, ledger, device, { write, writer, knowledge });
   return server;
 }
 
+// The data directory of the profiles, or a refusal when the server has none.
+function knowledgeHome(knowledge) {
+  if (!knowledge?.home) throw new LedgerError(['このサーバーには、プロフィールのフォルダが設定されていません']);
+  return knowledge.home;
+}
+
+// Whether agents' notes go to the inbox: the secretary setting given to createApp, or else
+// whether plugins.yaml lists the secretary (read on each note, so no restart is needed).
+const secretaryOn = (knowledge) => knowledge.secretary ?? secretaryConfigured(knowledge.home);
+
+// The profile named by profile, or else by the place (id or directory) it falls in.
+function profileFor(ledger, device, { place, profile }, tool) {
+  if (profile !== undefined) return profile;
+  if (place === undefined) throw new LedgerError([`${tool} には place か profile を渡します`]);
+  const p = resolvePlace(ledger, device, place, tool);
+  if (!p.profile) throw new LedgerError([`置き場 ${p.name}(${p.id})には、プロフィールが付いていません。place で付けます`]);
+  return p.profile;
+}
+
+// Appends a note to a profile's files and records it in the ledger as entity 'knowledge'.
+function addNote(ledger, knowledge, profile, { text, kind, task }, device, writer) {
+  const from = { device: device.name, task };
+  const note = writeNote(knowledge.home, profile, { text, kind, secretary: kind === 'agent' && secretaryOn(knowledge), from });
+  ledger.recordNote(profile, noteRecordChanges({ kind, file: note.file, mark: note.mark, text, from }), writer);
+  return note;
+}
+
 // A place given as its id, or as a directory on the caller's device (the deepest place
-// containing it). Throws a LedgerError naming what to do when neither finds one.
-function resolvePlace(ledger, device, value) {
+// containing it). Throws a LedgerError naming what to do when neither finds one; tool is
+// the tool to call again.
+function resolvePlace(ledger, device, value, tool = 'start') {
   const item = ledger.get(value);
   if (item?.kind === 'place') return item;
   if (comparablePath(value) !== null) {
     const place = ledger.placeFor(device, value);
     if (place) return place;
     throw new LedgerError([
-      `${value} は、デバイス ${device} のどの置き場にも入っていません。place で置き場を登録するか、いまの置き場にこのデバイスの道を足してから、もう一度 start します`,
+      `${value} は、デバイス ${device} のどの置き場にも入っていません。place で置き場を登録するか、いまの置き場にこのデバイスの道を足してから、もう一度 ${tool} します`,
     ]);
   }
   if (isValidId(value)) throw new LedgerError([`置き場 ${value} がありません`]);
   throw new LedgerError([`place には置き場の id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
-function registerWriteTools(server, ledger, device, { write, writer }) {
+function registerWriteTools(server, ledger, device, { write, writer, knowledge }) {
   const tool = (name, description, inputSchema, fn) =>
     server.registerTool(name, { description, inputSchema, annotations: write }, guarded(fn));
 
@@ -303,7 +355,8 @@ function registerWriteTools(server, ledger, device, { write, writer }) {
     'close',
     'Close a goal or task once you have checked the real thing: state done with a one-line result, or discarded ' +
       'with a reason. A held task is let go; next may leave a line for whoever reopens it. learned: what the work ' +
-      'taught that is worth keeping; for now it is kept only in the record of this close (the note tool comes later).',
+      'taught that is worth keeping, in 1–3 lines; it is kept in the record of this close and also written as an ' +
+      "agent's note to the profile of the goal or task (as note with kind agent does). noted says where it went.",
     {
       id: z.string().min(1),
       state: z.enum(['done', 'discarded']),
@@ -312,7 +365,46 @@ function registerWriteTools(server, ledger, device, { write, writer }) {
       learned: z.string().optional(),
       next: z.string().optional(),
     },
-    async ({ id, state, ...extra }) => result(ledger.setState(id, state, given(extra), writer)),
+    async ({ id, state, ...extra }) => {
+      const closed = ledger.setState(id, state, given(extra), writer);
+      if (extra.learned === undefined) return result(closed);
+      return result({ ...closed, noted: noteLearned(id, extra.learned) });
+    },
+  );
+
+  // The close is already written, so a note that cannot be written is reported, not thrown.
+  function noteLearned(id, text) {
+    const profile = ledger.get(id)?.profile ?? null;
+    if (!knowledge?.home) return { skipped: 'このサーバーには、プロフィールのフォルダが設定されていません。閉じたときの記録にだけ残しました' };
+    if (!profile) return { skipped: 'プロフィールが分からないので、閉じたときの記録にだけ残しました' };
+    try {
+      const n = addNote(ledger, knowledge, profile, { text, kind: 'agent', task: id }, device, writer);
+      return { profile, file: n.file, mark: n.mark };
+    } catch (err) {
+      const why = err instanceof LedgerError ? err.problems.join('。') : err.message;
+      return { skipped: `知識に書けなかったので、閉じたときの記録にだけ残しました(${why})` };
+    }
+  }
+
+  tool(
+    'note',
+    "Write to a profile's knowledge; it only appends. kind human: the person's own words, said in this " +
+      'conversation; they go straight into knowledge.md marked 本人の言葉. kind agent: your own insight; it goes ' +
+      "to the profile's inbox.md for the secretary to sort, or, with no secretary, into knowledge.md marked 未確認. " +
+      'Write facts and rules of the area in 1–3 lines, not progress. profile, or place (the place id or the directory ' +
+      'you work in) to use its profile. At most 4000 characters.',
+    {
+      profile: z.string().min(1).optional(),
+      place: z.string().min(1).optional(),
+      text: z.string(),
+      kind: z.enum(['human', 'agent']),
+    },
+    async ({ profile, place, text, kind }) => {
+      knowledgeHome(knowledge);
+      const p = profileFor(ledger, device.name, { place, profile }, 'note');
+      const n = addNote(ledger, knowledge, p, { text, kind }, device, writer);
+      return result({ profile: p, file: n.file, mark: n.mark, entry: n.entry });
+    },
   );
 
   tool(
@@ -389,8 +481,8 @@ function deviceKeyAuth(ledger) {
 const actorFor = (auth) => (auth.clientId === 'device-key' ? 'device-key' : `oauth:${auth.clientId}`);
 
 // req.auth is set by the bearer check before this runs; its device is the caller.
-async function handleMcp(ledger, req, res) {
-  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) });
+async function handleMcp(ledger, knowledge, req, res) {
+  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -457,8 +549,13 @@ function apiRouter(ledger, limit) {
 // behind a tunnel or reverse proxy; then the caller's address, which the rate limits count
 // by, is read from X-Forwarded-For. Off when left out. A value express cannot read throws.
 // apiLimit: the rate limit of /api per address; a hook may ask on every tool call, so it is generous.
+// home: the data directory, whose profiles/ the context and note tools use; without it they
+// refuse. secretary: true or false says whether agents' notes go to the inbox; left out, it
+// is read from plugins.yaml in home on each note.
 export function createApp({
   ledger,
+  home = null,
+  secretary,
   oauth = null,
   github,
   trustProxy,
@@ -476,8 +573,9 @@ export function createApp({
     app.use(router);
     auth = bearer;
   }
+  const knowledge = home ? { home, secretary } : null;
   const mcp = (req, res) =>
-    handleMcp(ledger, req, res).catch((err) => {
+    handleMcp(ledger, knowledge, req, res).catch((err) => {
       log(`warifuri: /mcp failed: ${err.message}`);
       if (!res.headersSent) {
         res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });
