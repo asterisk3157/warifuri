@@ -20,18 +20,61 @@ warifuri is a secretary for people who work with AI agents: a ledger of goals an
 
 ## Commits
 
-Use Conventional Commits with the description in plain Japanese (常体, no です・ます):
+Use Conventional Commits. The subject is plain Japanese 常体; the body is casual Japanese です・ます, written to the person who will read the pull request.
 
 ```
-<type>(<scope>): <what changed, as one short sentence>
+<type>(<scope>): <what is now true, one short sentence>
 
-<why, in one or two lines, only when the subject does not already say it>
+<what was wrong or missing, then what you did, in 1–3 short sentences>
 ```
 
 - **type** is one of `feat`, `fix`, `docs`, `refactor`, `test`, `ci`, `build`, `chore`. A breaking change adds `!` after the type or scope and a `BREAKING CHANGE:` line in the body.
 - **scope** is optional and names the area: `ledger`, `mcp`, `oauth`, `cli`, `snapshot`, `docs`, `ci`.
-- The description says what is now true, the way you would tell a colleague: 「鍵を取り消したら、その機械のログインも切れるようにした」. No trailing period, no lists of files, no adjectives about the change.
-- One commit, one purpose. Changes that would be reverted separately go in separate commits.
+
+### Subject
+
+- Say what changed, the way you would tell a colleague, ending in 〜した / 〜するようにした / 〜にした. No 〜しました, no noun endings (〜の追加).
+- Use native verbs: 足した, 外した, 直した, 分けた, まとめた. Not 追加, 削除, 修正, 対応, 整備, 実装, 改善, 強化.
+- Specific enough that the diff need not be opened. Not 〜まわり, 各種, 一部.
+- No reason in the subject, about 40 characters, at most one 、. Code names as they are (`closed_at`), no glosses in brackets. No 適切に, より, 大幅に, 〜を実現.
+
+### Body
+
+- Order: what was wrong or missing, then what you did. Write only when the subject alone does not tell it.
+- Casual です・ます. A 「！」 is fine where the change really helps someone (a fix they will feel, a new thing that now works); at most one per message, and never on `docs`, `refactor`, `chore`.
+- Do not write 〜を行いました or 〜することで; say the verb. When 「〜ため、〜することで〜」 piles up, split it into two sentences.
+- Do not call something a 不具合 unless it was one. Start by type:
+  - `fix`: 〜すると〜してしまう不具合がありました。〜するようにして直しました！
+  - `feat`: 〜できなかったので、〜を足しました！
+  - `docs`: 〜が分かりにくかったので、〜を書きました。
+  - `refactor`: 〜が2か所に分かれていたので、1か所にまとめました。動きは変わりません。
+- Keep each sentence on its own line, and put a blank line between the problem and what you did when both are long. No Markdown: GitHub shows commit bodies as plain text, so `**` would show as it is. No bullet lists of files.
+- Vary the wording with the content. The same sentence pattern in every commit reads as staged.
+
+Example:
+
+```
+fix(oauth): ユーザー名ではなく GitHub の数値 ID で本人を確かめるようにした
+
+GitHub のユーザー名は変えられるので、手放した名前を他人が取ると、その人もログインできてしまう不具合がありました。
+
+名前ではなく数値の ID で比べるようにして直しました！
+WARIFURI_GITHUB_ID を設定していないときは、最初にログインした人の ID を覚えて使います。
+```
+
+| Avoid | Write |
+|---|---|
+| `fix(oauth): 認証まわりの不具合を修正` | `fix(oauth): 取り消したデバイスが許可の画面に出ていたのを直した` |
+| `feat(mcp): 書き込み系ツールの追加` | `feat(mcp): 台帳に書く道具を足した` |
+| `docs: ドキュメントを整備し、可読性を向上` | `docs: 設定の項目を一覧にした` |
+| `chore: 各種設定を更新` | `chore: express を 5.3.0 に上げた` |
+| 本文 「〜があったため、〜することで修正を行いました！」 | 本文 「〜してしまう不具合がありました。〜するようにして直しました！」 |
+
+One commit, one purpose. Changes that would be reverted separately go in separate commits.
+
+## Pull requests
+
+The description follows the commit body's tone, and may use Markdown since GitHub renders it: a short paragraph on why, then **bold** for the few things a reviewer must look at, and line breaks between topics. Keep headings to two or three (なぜ, 変えたこと, 見てほしいところ) and drop the ones with nothing to say.
 
 ## Writing
 
