@@ -11,7 +11,7 @@ warifuri is a secretary for people who work with AI agents: a ledger of goals an
 
 ## Rules
 
-- **Nothing private.** This repository will become public. Never commit personal names, home directory paths, private domains, host names, or anything about anyone's work. Before every commit, `scripts/check-private-terms.sh` runs (through lefthook) against the maintainer's private list; you can run `scripts/check-private-terms.sh --all` yourself. Examples use a made-up person.
+- **Nothing private.** This repository will become public. Never commit, or write in a commit message or pull request, personal names, home directory paths, private domains, host names, or anything about anyone's work. Before every commit, `scripts/check-private-terms.sh` runs (through lefthook) against the maintainer's private list; you can run `scripts/check-private-terms.sh --all` yourself. Examples use a made-up person.
 - **Vanilla first.** warifuri must run from settings alone. Anything specific to one person's environment belongs in their own settings repository or a personal plug-in, not here.
 - **Plug-ins touch the core only through its API**, never each other.
 - **Words.** Say "schedule" and "block" (スケジュール, ブロック). Do not use 時間割 or コマ.
@@ -81,7 +81,7 @@ Write the description in plain, ordinary Japanese (です・ます), the way pul
 - `## レビューのポイント`: only what a reviewer must check; put the key sentence of each point in **bold**.
 - `## テスト`: what was run and the result.
 
-Say things directly. No casual headings (なぜ, 見てほしいところ), no 「！」, and no sentence that only introduces the next one.
+Say things directly. Never name the maintainer's own tools, services or plans (they are in the private list); describe what warifuri itself does. Check the description with `scripts/check-private-terms.sh --file <file>` before opening or editing a pull request. No casual headings (なぜ, 見てほしいところ), no 「！」, and no sentence that only introduces the next one.
 
 ## Writing
 
