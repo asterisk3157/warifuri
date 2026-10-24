@@ -128,7 +128,23 @@ warifuri は、台帳の中で見せる範囲を区切りません。ログイ�
 claude mcp add --transport http warifuri https://<サーバー>/mcp
 ```
 
-ハーネスごとの登録の仕方の違いは、`warifuri connect` が吸収します。使っているハーネスを見つけて、登録と、任意のもの(着手の確かめのフックと機械の鍵、エージェントへの指示書のひな形)を入れます。`connect` とフックを使うときだけ、使う機械にも warifuri を入れます。
+ハーネスごとの登録の仕方の違いは、`warifuri connect` が吸収します。`connect` とフックを使うときだけ、使う機械にも warifuri を入れます。
+
+```bash
+warifuri connect --url https://<サーバー> --device <デバイスの名前>
+```
+
+`connect` は、PATH にある `claude` と `codex` を見つけ、それぞれに MCP の口を `warifuri` の名前で登録します(Claude Code は `claude mcp add --scope user --transport http`、Codex は `codex mcp add --url`)。`--harness` で片方だけにもできます。サーバーの URL はデータのフォルダの `warifuri.env` に `WARIFURI_SERVER_URL` として書き、フックはそこから読みます。`--url` を省くと、この機械のサーバー(`http://127.0.0.1:<ポート>`、GitHub のログインがあればその公開の URL)を使います。
+
+サーバーの台帳が同じ機械にあるときは、`connect` が台帳を直接開いて、このデバイスの機械の鍵を発行し、`WARIFURI_DEVICE_KEY_FILE`(既定はデータのフォルダの `device.key`)に本人だけが読める形で置きます。鍵のファイルがあり、その鍵がまだ使えるなら、新しくは発行しません。この場合に GitHub のログインを設定していなければ、ハーネスは鍵で台帳に入ります。Claude Code には `Authorization` のヘッダーとして登録し、Codex には `WARIFURI_DEVICE_KEY` の環境変数から読むように登録します。Codex を使う人は、Codex を起動する環境で、この変数に鍵のファイルの中身を入れておきます。サーバーが別の機械にあるときは、ハーネスには URL だけを登録し、最初の利用のときに GitHub でログインします。着手の確かめに使う鍵は、サーバーの機械で `warifuri key add <デバイスの名前>` を実行して、出た鍵を鍵のファイルに1行で書きます。`connect` はその手順を表示します。鍵は画面にもログにも出しません。
+
+あわせて、着手の確かめのフック(下の節)を Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に足し、パッケージの `harness/skills/` にある指示書を、それぞれの skills のフォルダに写します。ほかのフックや設定はそのまま残し、ファイルを書き換える前に、元のファイルを `<ファイル>.bak-warifuri-<日時>` として隣に写します。すでに入っているものは書き換えないので、何度実行しても同じ形になります。指示書は、すでにあるファイルを残し、`--force` のときだけ上書きします。`--no-hook` と `--no-skills` でそれぞれを省けて、`--dry-run` では何も変えずに、することだけを出します。Windows では、ホームを `%USERPROFILE%` から読み、`warifuri.cmd` もコマンドとして探します。
+
+### 着手の確かめ
+
+着手の確かめは、ファイルを編集する道具(Claude Code の Edit、Write、MultiEdit、NotebookEdit と、Codex の apply_patch)の前に走る PreToolUse のフックで、`warifuri hook gate` が中身です。ハーネスが渡す JSON を標準入力で受け、編集するファイルのディレクトリ(まだないディレクトリなら、一番近い親)を `GET /api/held` で聞きます。そのデバイスがタスクを持っていれば通し、どの置き場にも入らないディレクトリでも通します。置き場に入るのにタスクを持っていないときだけ止め、`search` で同じタスクを探し、なければ `create_task` で作り、`start` に `place` としてそのディレクトリを渡して持つよう、エージェントに返します。Claude Code と Codex は同じ形の JSON を受け取るので、1つのコマンドで両方に使えます。Codex では、足したフックを `/hooks` で一度信頼すると動きます。
+
+フックは、止めるべきか分からないときは止めません。URL や鍵がない、台帳が3秒で答えない、200 以外を返す、受け取った JSON が読めない、のどれでも通します。`WARIFURI_GATE=off` にすると、いつでも通します。
 
 ログインしてよい人は、設定に GitHub のユーザー名で1人だけ書きます。そこにない人は、ログインできても断ります。ただし、GitHub のユーザー名は手放されると別の人が取れるので、本人かどうかは名前ではなく GitHub の数値の ID で比べます。`WARIFURI_GITHUB_ID` に ID を書けばそれを使い、書かなければ、名前が合った最初のログインの ID を台帳に覚えて、それからは ID だけを比べます。覚えた ID は `warifuri oauth clients` の最初の行に出ます。warifuri は、自分で OAuth の口になり、本人の確認だけを GitHub に任せます。GitHub のトークンをそのまま台帳の鍵として使うことはしません。
 
@@ -168,7 +184,7 @@ npm install -g <パッケージ名>
 | `warifuri init` | データのフォルダを作り、設定ファイル `warifuri.env` のひな形と空の `secrets.env` を置く。あるファイルは書き換えない。このあと、GitHub のログインの設定、最初のプロフィール、秘書を入れるか、常駐の登録(Linux は systemd、Mac は launchd、Windows はタスク スケジューラ)も対話で聞くようにする |
 | `warifuri config` | すべての設定の値と、それをどこから読んだかを出す。秘密は伏せる |
 | `warifuri serve` | サーバーを動かす |
-| `warifuri connect` | 使う機械で、ハーネスに登録する |
+| `warifuri connect` | 使う機械で、ハーネスに登録し、機械の鍵、着手の確かめのフック、指示書を入れる |
 | `warifuri key add` | デバイスの機械の鍵を発行する |
 | `warifuri oauth clients` / `warifuri oauth revoke` | GitHub でログインしてつないだアプリを一覧する、そのトークンを取り消す |
 | `warifuri backup` | 台帳とプロフィールと設定を日付つきで写す。直近7日分を残す |
