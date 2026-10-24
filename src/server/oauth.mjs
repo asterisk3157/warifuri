@@ -242,11 +242,13 @@ export function createOAuth({ ledger, config, github = {}, log }) {
       if (token.startsWith('wf_')) {
         const device = ledger.deviceForKey(token);
         if (!device) throw new InvalidTokenError('invalid token');
+        ledger.markSeen(device.name);
         // Device keys do not expire; the SDK asks for an expiry, so this one is nominal.
         return { token, clientId: 'device-key', scopes: [], expiresAt: Math.floor(Date.now() / 1000) + 60, resource: resourceUrl, extra: { device: device.name } };
       }
       const access = store.verifyAccess(token);
       if (!access) throw new InvalidTokenError('invalid or expired token');
+      ledger.markSeen(access.device);
       return {
         token,
         clientId: access.client_id,

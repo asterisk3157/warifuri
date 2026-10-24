@@ -188,6 +188,7 @@ function runImport(args) {
       ...res.skipped.map((s) => `  ${s.kind} ${s.id}: ${s.problems.join(' / ')}`),
     ];
     if (res.detached_habits.length) out.push(`habits whose goal is gone (link removed): ${res.detached_habits.join(', ')}`);
+    if (res.dropped_bookings) out.push(`bookings whose task is gone (deleted): ${res.dropped_bookings}`);
     process.stdout.write(`${out.join('\n')}\n`);
     return 0;
   } catch (err) {
@@ -241,7 +242,8 @@ function runKey(args) {
       if (rows.length === 0) process.stdout.write('no devices\n');
       for (const d of rows) {
         const state = d.has_key ? 'key in use' : d.revoked_at ? `revoked ${d.revoked_at}` : 'no key';
-        process.stdout.write(`${d.name}  added ${d.created_at}  (${state})\n`);
+        const seen = d.last_seen_at ? `  seen ${d.last_seen_at}` : '';
+        process.stdout.write(`${d.name}  added ${d.created_at}${seen}  (${state})\n`);
       }
     }
     return 0;

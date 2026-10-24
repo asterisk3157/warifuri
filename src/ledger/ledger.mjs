@@ -5,6 +5,8 @@
 // carrying every problem found.
 // replaceFromSnapshot() is the one write that takes rows breaking the rules: it stores them
 // with `review` set, and the next write to such a row must pass the rules (which clears it).
+// Bookings (予定) give time to a task, a habit or a fixed appointment; they may overlap, and
+// unlike tasks they may be deleted (unbook), with the deleted row kept in the record.
 // Devices hold the keys for the MCP endpoint; only a hash of each key is stored. OAuth
 // clients, codes and tokens (oauth.mjs) also resolve to a device, and are stored as hashes too.
 // Nothing is hidden from a reader: whoever may open the ledger sees all of it.
@@ -23,6 +25,7 @@ import {
   ALL_STATE_FIELDS,
   RELEASING_STATES,
   isValidId,
+  isValidDateTime,
   checkActor,
   checkWriterDevice,
   checkGoal,
@@ -31,6 +34,7 @@ import {
   checkBlock,
   checkHabit,
   checkPlace,
+  checkBooking,
   checkAutonomy,
   checkStateExtra,
   applyState,
@@ -57,6 +61,9 @@ const TASK_COLUMNS = [
 ];
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'profile', 'created_at', 'updated_at'];
+const BOOKING_COLUMNS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'created_at', 'updated_at'];
+// Fields book() takes; id names the booking to change.
+const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note'];
 
 // Fields a caller may change with update(); state and its fields go through setState().
 const GOAL_EDITABLE = ['title', 'outcome', 'due', 'due_provisional', 'mode', 'human_led', 'profile'];
@@ -66,9 +73,13 @@ const TASK_EDITABLE = [
 ];
 const HABIT_EDITABLE = ['title', 'rule', 'duration_min', 'goal_id', 'active'];
 const FLAG_FIELDS = ['due_provisional', 'human_led', 'active', 'delegated'];
-const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p' };
+const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p', booking: 'b' };
 const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const DAY_MS = 24 * 60 * 60 * 1000;
+// A device's last_seen_at is written at most once in this long.
+const SEEN_MS = 60 * 1000;
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const blank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
 // A task with the profile it belongs to: its goal's if it has a goal, else its place's (原則20).
 const TASK_SELECT =
@@ -187,12 +198,14 @@ export function openLedger(path, options = {}) {
   const getPlaceRow = (id) => one('SELECT * FROM places WHERE id = ?', id);
   const getDeviceRow = (name) => one('SELECT * FROM devices WHERE name = ?', name);
   const getHoldRow = (taskId) => one('SELECT * FROM holds WHERE task_id = ?', taskId);
+  const getBookingRow = (id) => one('SELECT * FROM bookings WHERE id = ?', id);
 
   function idTaken(id) {
     return !!one(
       'SELECT 1 FROM goals WHERE id = ? UNION ALL SELECT 1 FROM tasks WHERE id = ? ' +
-        'UNION ALL SELECT 1 FROM habits WHERE id = ? UNION ALL SELECT 1 FROM places WHERE id = ?',
-      id, id, id, id,
+        'UNION ALL SELECT 1 FROM habits WHERE id = ? UNION ALL SELECT 1 FROM places WHERE id = ? ' +
+        'UNION ALL SELECT 1 FROM bookings WHERE id = ?',
+      id, id, id, id, id,
     );
   }
 
@@ -699,6 +712,128 @@ export function openLedger(path, options = {}) {
     return best ? placeWithPaths(best.place_id) : null;
   }
 
+  // Bookings that share some time with [startsAt, endsAt), other than exceptId.
+  const overlapping = (startsAt, endsAt, exceptId) =>
+    all('SELECT * FROM bookings WHERE starts_at < ? AND ends_at > ? AND id <> ? ORDER BY starts_at, id', endsAt, startsAt, exceptId ?? '').map(
+      (r) => ({ ...r }),
+    );
+
+  // Creates a booking, or changes the one whose id is given (only the fields given change).
+  // kind task needs an existing task_id, habit an existing habit_id, and their title defaults
+  // to the task's or habit's; fixed needs a title. Times take an offset and are stored in UTC.
+  // Overlaps are allowed: the result lists the bookings sharing time with this one.
+  function book(fields, opts) {
+    const w = requireWriter(opts);
+    const input = fields ?? {};
+    const problems = unknownFields(input, BOOKING_FIELDS);
+    const { id, ...given } = input;
+    const before = blank(id) ? null : getBookingRow(id);
+    if (!blank(id) && !before) throw new LedgerError([`${id} という予定はありません`]);
+    const next = before
+      ? { ...before }
+      : { id: null, title: null, kind: undefined, task_id: null, habit_id: null, starts_at: undefined, ends_at: undefined, note: null };
+    for (const [k, v] of Object.entries(given)) if (v !== undefined && BOOKING_FIELDS.includes(k)) next[k] = v;
+    // A link that does not belong to the kind is dropped, unless the caller gave it.
+    if (next.kind !== 'task' && given.task_id === undefined) next.task_id = null;
+    if (next.kind !== 'habit' && given.habit_id === undefined) next.habit_id = null;
+    const task = next.kind === 'task' && !blank(next.task_id) ? getTaskRow(next.task_id) : null;
+    const habit = next.kind === 'habit' && !blank(next.habit_id) ? getHabitRow(next.habit_id) : null;
+    const linked = task ?? habit;
+    const relinked = !before || next.kind !== before.kind || next.task_id !== before.task_id || next.habit_id !== before.habit_id;
+    if (linked && blank(given.title) && (given.title !== undefined || relinked)) next.title = linked.title;
+    problems.push(...checkBooking(next, { taskExists: !!task, habitExists: !!habit }));
+    if (problems.length) throw new LedgerError(problems);
+    next.starts_at = new Date(next.starts_at).toISOString();
+    next.ends_at = new Date(next.ends_at).toISOString();
+    for (const k of ['task_id', 'habit_id', 'note']) next[k] = next[k] ?? null;
+    const t = nowIso();
+    const view = (row) => ({ booking: { ...row }, overlaps: overlapping(row.starts_at, row.ends_at, row.id) });
+    if (before) {
+      const changes = diff(before, next, BOOKING_COLUMNS);
+      if (Object.keys(changes).length === 0) return view(before);
+      next.updated_at = t;
+      return transaction(() => {
+        updateRow('bookings', BOOKING_COLUMNS, next);
+        record(w, 'booking', next.id, 'update', changes);
+        return view(getBookingRow(next.id));
+      });
+    }
+    next.id = chooseId('booking', undefined, problems);
+    next.created_at = t;
+    next.updated_at = t;
+    return transaction(() => {
+      insert('bookings', BOOKING_COLUMNS, next);
+      record(w, 'booking', next.id, 'create', diff(null, next, BOOKING_COLUMNS));
+      return view(getBookingRow(next.id));
+    });
+  }
+
+  // Deletes a booking (the task or habit stays: 原則3). The record keeps the row as it was.
+  function unbook(id, opts) {
+    const w = requireWriter(opts);
+    const before = blank(id) ? null : getBookingRow(id);
+    if (!before) throw new LedgerError([`${id} という予定はありません`]);
+    return transaction(() => {
+      db.prepare('DELETE FROM bookings WHERE id = ?').run(id);
+      record(w, 'booking', id, 'delete', diff(before, null, BOOKING_COLUMNS));
+      return { ...before };
+    });
+  }
+
+  // A bound of schedule(): YYYY-MM-DD is that day's midnight on the server's clock (local
+  // time), or an ISO datetime with an offset. Returns ms, or null with a problem pushed.
+  function parseBound(value, name, problems) {
+    const m = typeof value === 'string' ? DATE_ONLY.exec(value) : null;
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      if (d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3])) return d.getTime();
+    } else if (isValidDateTime(value)) {
+      return Date.parse(value);
+    }
+    problems.push(`${name} は YYYY-MM-DD か、時差つきの ISO 日時で書きます`);
+    return null;
+  }
+
+  // Bookings sharing time with [from, to), by start. from defaults to today's midnight (the
+  // server's local day), to to one day after from. Each comes with its task (title, state),
+  // habit, goal (the task's or the habit's) and profile: the goal's, else the task's place's.
+  function schedule({ from, to } = {}) {
+    const problems = [];
+    let fromMs;
+    if (from === undefined) {
+      const d = now();
+      fromMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    } else fromMs = parseBound(from, 'from', problems);
+    let toMs;
+    if (to !== undefined) toMs = parseBound(to, 'to', problems);
+    else if (fromMs !== null) {
+      const d = new Date(fromMs);
+      d.setDate(d.getDate() + 1);
+      toMs = d.getTime();
+    }
+    if (!problems.length && toMs <= fromMs) problems.push('to は from より後にします');
+    if (problems.length) throw new LedgerError(problems);
+    const fromIso = new Date(fromMs).toISOString();
+    const toIso = new Date(toMs).toISOString();
+    const rows = all(
+      'SELECT b.*, t.title AS t_title, t.state AS t_state, h.title AS h_title, g.id AS g_id, g.title AS g_title, ' +
+        'COALESCE(g.profile, p.profile) AS profile FROM bookings b ' +
+        'LEFT JOIN tasks t ON t.id = b.task_id LEFT JOIN habits h ON h.id = b.habit_id ' +
+        'LEFT JOIN goals g ON g.id = COALESCE(t.goal_id, h.goal_id) LEFT JOIN places p ON p.id = t.place_id ' +
+        'WHERE b.starts_at < ? AND b.ends_at > ? ORDER BY b.starts_at, b.ends_at, b.id',
+      toIso,
+      fromIso,
+    );
+    const bookings = rows.map(({ t_title, t_state, h_title, g_id, g_title, profile, ...b }) => ({
+      ...b,
+      task: b.task_id ? { id: b.task_id, title: t_title, state: t_state } : null,
+      habit: b.habit_id ? { id: b.habit_id, title: h_title } : null,
+      goal: g_id ? { id: g_id, title: g_title } : null,
+      profile: profile ?? null,
+    }));
+    return { from: fromIso, to: toIso, bookings };
+  }
+
   function getAutonomy(kind) {
     return one('SELECT * FROM autonomy WHERE kind = ?', kind) ?? null;
   }
@@ -907,7 +1042,33 @@ export function openLedger(path, options = {}) {
     has_key: r.key_hash !== null && r.revoked_at === null,
     created_at: r.created_at,
     revoked_at: r.revoked_at,
+    last_seen_at: r.last_seen_at,
   });
+
+  // Notes that a device called the server with its key or a login token. Written at most
+  // once a minute per device, and not recorded: it is a sign of life, not a change. A busy
+  // database is not worth failing a request over, so a failed write is ignored.
+  const lastSeen = new Map();
+  function markSeen(name) {
+    const t = now();
+    const ms = t.getTime();
+    if (typeof name !== 'string' || ms - (lastSeen.get(name) ?? -Infinity) < SEEN_MS) return false;
+    try {
+      const out = db
+        .prepare('UPDATE devices SET last_seen_at = ? WHERE name = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)')
+        .run(t.toISOString(), name, new Date(ms - SEEN_MS).toISOString());
+      if (out.changes > 0) {
+        lastSeen.set(name, ms);
+        return true;
+      }
+      // Another connection may have written it lately: wait a minute from that time.
+      const stored = one('SELECT last_seen_at FROM devices WHERE name = ?', name)?.last_seen_at;
+      lastSeen.set(name, stored ? Date.parse(stored) : ms);
+      return false;
+    } catch {
+      return false;
+    }
+  }
 
   // Registers a device without a key, or returns the one already there.
   function addDevice(name, opts) {
@@ -987,7 +1148,8 @@ export function openLedger(path, options = {}) {
   };
 
   // Replaces goals, tasks, blocks and places with a snapshot (docs/snapshot.md), in one
-  // transaction with one record. Habits, devices, autonomy and records stay. A hold stays when
+  // transaction with one record. Habits, devices, autonomy and records stay; bookings stay
+  // unless their task is gone (dropped_bookings counts those deleted). A hold stays when
   // its task comes back open (and its place, if any, comes back); others are dropped. Rows that
   // cannot be stored are skipped; rows that break the rules are stored with `review`. A habit
   // whose goal is not in the snapshot loses that link. A bad envelope throws and changes nothing.
@@ -1016,6 +1178,12 @@ export function openLedger(path, options = {}) {
       ).map((r) => r.id);
       const detach = db.prepare('UPDATE habits SET goal_id = NULL, updated_at = ? WHERE id = ?');
       for (const id of detached) detach.run(t, id);
+      // Bookings of tasks that did not come back go; the record keeps them.
+      const droppedBookings = all(
+        'SELECT * FROM bookings WHERE task_id IS NOT NULL AND task_id NOT IN (SELECT id FROM tasks) ORDER BY starts_at, id',
+      ).map((r) => ({ ...r }));
+      const unbookStmt = db.prepare('DELETE FROM bookings WHERE id = ?');
+      for (const b of droppedBookings) unbookStmt.run(b.id);
 
       const openTasks = new Set(snap.tasks.filter((x) => !CLOSED_STATES.includes(x.state)).map((x) => x.id));
       const placeIds = new Set(snap.places.map((x) => x.id));
@@ -1038,9 +1206,13 @@ export function openLedger(path, options = {}) {
       };
       if (detached.length) changes.detached_habits = detached;
       if (droppedHolds.length) changes.dropped_holds = droppedHolds;
+      if (droppedBookings.length) changes.dropped_bookings = droppedBookings;
       const source = typeof doc.source === 'string' && doc.source.trim() !== '' ? doc.source : 'snapshot';
       record(w, 'import', source, 'replace', changes);
-      return { counts, flagged: snap.flagged, skipped: snap.skipped, detached_habits: detached, dropped_holds: droppedHolds };
+      return {
+        counts, flagged: snap.flagged, skipped: snap.skipped, detached_habits: detached, dropped_holds: droppedHolds,
+        dropped_bookings: droppedBookings.length,
+      };
     });
   }
 
@@ -1080,6 +1252,10 @@ export function openLedger(path, options = {}) {
     revokeKey,
     listDevices,
     deviceForKey,
+    markSeen,
+    book,
+    unbook,
+    schedule,
     oauth,
     // A flag of its own: DatabaseSync#isOpen is newer than the Node versions warifuri runs on.
     close: () => {

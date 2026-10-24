@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -231,6 +231,51 @@ export const MIGRATIONS = [
   INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
     SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v2;
   DROP TABLE records_v2;
+  CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
+  CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+  `
+  -- 予定: time given to a task, a habit, or a fixed appointment (原則3: the task is the
+  -- source, the booking may be moved or removed). Times are UTC ISO strings ending in Z, so
+  -- they compare as text. A booking of a task or habit names it; a fixed one has only a title.
+  CREATE TABLE IF NOT EXISTS bookings (
+    id         TEXT PRIMARY KEY,
+    title      TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('task','habit','fixed')),
+    task_id    TEXT REFERENCES tasks(id),
+    habit_id   TEXT REFERENCES habits(id),
+    starts_at  TEXT NOT NULL,
+    ends_at    TEXT NOT NULL,
+    note       TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (ends_at > starts_at)
+  );
+  CREATE INDEX IF NOT EXISTS bookings_starts ON bookings(starts_at);
+  CREATE INDEX IF NOT EXISTS bookings_task ON bookings(task_id);
+
+  -- When the device last called the server with its key or a login token (kept at most once
+  -- a minute, so it is not written on every call).
+  ALTER TABLE devices ADD COLUMN last_seen_at TEXT;
+
+  -- Records may also name 'booking'. The table is rebuilt as in version 3.
+  ALTER TABLE records RENAME TO records_v3;
+  CREATE TABLE records (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    actor     TEXT NOT NULL CHECK (length(actor) > 0),
+    device    TEXT,
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device','oauth','knowledge','booking')),
+    entity_id TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    changes   TEXT NOT NULL
+  );
+  INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
+    SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v3;
+  DROP TABLE records_v3;
   CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
   CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;

@@ -18,7 +18,7 @@ import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { STATES, MODES, LOADS, isValidId } from '../ledger/rules.mjs';
+import { STATES, MODES, LOADS, BOOKING_KINDS, isValidId } from '../ledger/rules.mjs';
 import { LedgerError } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
@@ -190,6 +190,20 @@ function buildServer(ledger, device, knowledge) {
     }),
   );
 
+  server.registerTool(
+    'schedule',
+    {
+      description:
+        'List the bookings (time given to a task, a habit or a fixed appointment) that share time with [from, to), by ' +
+        'start. from and to: YYYY-MM-DD (midnight on the server\'s clock) or an ISO datetime with offset; to is ' +
+        'exclusive, so from 2026-11-01 to 2026-11-03 is two days. from defaults to today, to to one day after from. ' +
+        'Each booking comes with its task (title, state), habit, goal and profile.',
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+      annotations: readOnly,
+    },
+    guarded(async ({ from, to }) => result(ledger.schedule({ from, to }))),
+  );
+
   registerWriteTools(server, ledger, device, { write, writer, knowledge });
   return server;
 }
@@ -239,8 +253,8 @@ function resolvePlace(ledger, device, value, tool = 'start') {
 }
 
 function registerWriteTools(server, ledger, device, { write, writer, knowledge }) {
-  const tool = (name, description, inputSchema, fn) =>
-    server.registerTool(name, { description, inputSchema, annotations: write }, guarded(fn));
+  const tool = (name, description, inputSchema, fn, annotations = write) =>
+    server.registerTool(name, { description, inputSchema, annotations }, guarded(fn));
 
   tool(
     'create_goal',
@@ -438,6 +452,33 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
   );
 
   tool(
+    'book',
+    'Book time: kind task (task_id) or habit (habit_id) gives time to it, and its title defaults to theirs; kind ' +
+      'fixed is an appointment and needs a title. starts_at and ends_at: ISO datetimes with offset (Z or +09:00), ' +
+      'stored in UTC; at most 24 hours. With id, changes that booking (only the fields given change). Bookings may ' +
+      'overlap: overlaps lists the ones sharing time with this one, so you can move one if that was not meant.',
+    {
+      id: z.string().min(1).optional(),
+      kind: z.enum(BOOKING_KINDS).optional(),
+      task_id: clearable,
+      habit_id: clearable,
+      title: z.string().optional(),
+      starts_at: z.string().optional(),
+      ends_at: z.string().optional(),
+      note: clearable,
+    },
+    async (args) => result(ledger.book(given(args), writer)),
+  );
+
+  tool(
+    'unbook',
+    'Delete a booking. The task or habit it gave time to stays; the record keeps the booking as it was.',
+    { id: z.string().min(1) },
+    async ({ id }) => result(ledger.unbook(id, writer)),
+    { ...write, destructiveHint: true },
+  );
+
+  tool(
     'place',
     'Register a place (a working directory that belongs to a profile), or change one by id. path: its directory on ' +
       'this device, absolute; null removes this device\'s path. Paths of other devices are set from those devices.',
@@ -471,6 +512,7 @@ function deviceKeyAuth(ledger) {
       res.json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: a valid device key is required' }, id: null });
       return;
     }
+    ledger.markSeen(device.name);
     req.auth = { token: m[1], clientId: 'device-key', scopes: [], extra: { device: device.name } };
     next();
   };
@@ -525,6 +567,7 @@ function apiRouter(ledger, limit) {
       res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'a valid device key is required' });
       return;
     }
+    ledger.markSeen(device.name);
     req.device = device.name;
     next();
   });
