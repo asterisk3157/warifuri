@@ -283,6 +283,13 @@ test('the full flow: registration, GitHub, consent, code with PKCE, tokens on /m
   const board = JSON.parse(out.content[0].text);
   assert.equal(board.scope.place.id, place.id);
   assert.equal(board.goals.length, 1);
+  // Writes through the token are recorded as that client, from the chosen device.
+  const made = JSON.parse((await mcp.callTool({ name: 'create_task', arguments: { title: 'Read papers', mode: 'ai_worker' } })).content[0].text);
+  const created = s.ledger.records(made.id)[0];
+  assert.deepEqual([created.actor, created.device], [`oauth:${id}`, 'laptop']);
+  // /api takes machine keys only.
+  const api = await s.go('/api/held?dir=/home/alex/thesis', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  assert.equal(api.status, 401);
 
   // Records say what happened and to which device, and hold no secret.
   const records = s.ledger.records(id);

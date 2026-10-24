@@ -1,6 +1,6 @@
 // End-to-end tests for the MCP endpoint (src/server/mcp.mjs): device keys, the read tools
 // (board, get, search, flow, stale) and the absence of any redaction, through the SDK's own
-// client over HTTP.
+// client over HTTP. The write tools and /api are in write.test.mjs.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -85,14 +85,17 @@ test('/mcp refuses a missing, wrong or revoked key with 401', async (t) => {
   await assert.rejects(client.connect(transport));
 });
 
-test('tools/list shows the read tools only', async (t) => {
+test('tools/list shows the read tools, marked read-only, and the write tools', async (t) => {
   const { connect, keys } = await start(t);
   const client = await connect(keys.laptop);
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((x) => x.name).sort(), ['board', 'flow', 'get', 'search', 'stale']);
+  const reads = ['board', 'flow', 'get', 'search', 'stale'];
+  const writes = ['close', 'create_goal', 'create_task', 'defer', 'link', 'place', 'release', 'reopen', 'start', 'unlink', 'update', 'wait'];
+  assert.deepEqual(tools.map((x) => x.name).sort(), [...reads, ...writes].sort());
   for (const tool of tools) {
     assert.ok(tool.description.length > 0);
-    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.annotations.readOnlyHint, reads.includes(tool.name), tool.name);
+    assert.equal('device' in tool.inputSchema.properties, false, tool.name);
   }
 });
 
@@ -168,7 +171,7 @@ test('get with an unknown id is a tool error; bad input is refused', async (t) =
   assert.equal(bad.isError, true);
   const { data } = await call(client, 'board', { state: 'ready', mode: 'ai_worker', review: false, include_closed: true });
   assert.ok(Array.isArray(data.goals));
-  // No write tool is exposed yet: calling one fails either as a tool error or a protocol error.
-  const write = await client.callTool({ name: 'create_task', arguments: { title: 'x' } }).catch((err) => ({ thrown: err }));
-  assert.ok(write.thrown || write.isError === true);
+  // An unknown tool fails either as a tool error or a protocol error.
+  const unknown = await client.callTool({ name: 'delete_everything', arguments: {} }).catch((err) => ({ thrown: err }));
+  assert.ok(unknown.thrown || unknown.isError === true);
 });

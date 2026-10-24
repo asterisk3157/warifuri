@@ -351,12 +351,14 @@ export function openLedger(path, options = {}) {
   const holdChange = (h) => (h ? { device: h.device, place_id: h.place_id } : null);
 
   // Moves a goal or task to `state`. A task moved to done, discarded, waiting or deferred lets
-  // go of its hold, and extra.next may leave a line for whoever picks it up next.
+  // go of its hold, and extra.next may leave a line for whoever picks it up next. On closing,
+  // extra.learned (what the work taught) is kept in the record of the close, until the
+  // knowledge has its own way in.
   function setState(id, state, extra = {}, opts) {
     const w = requireWriter(opts);
     const item = findItem(id);
     if (!item) throw new LedgerError([`${id} というゴールもタスクもありません`]);
-    const { next: nextStep, ...fields } = extra ?? {};
+    const { next: nextStep, learned, ...fields } = extra ?? {};
     const problems = [];
     if (!STATES.includes(state)) problems.push(`状態は ${STATES.join(', ')} のどれかです`);
     else problems.push(...checkStateExtra(state, fields));
@@ -364,16 +366,21 @@ export function openLedger(path, options = {}) {
       if (item.kind !== 'task') problems.push('next はタスクにだけ書けます');
       else if (!RELEASING_STATES.includes(state)) problems.push(`next は、手放すとき(${RELEASING_STATES.join(', ')})だけ書けます`);
     }
+    if (learned !== undefined) {
+      if (!CLOSED_STATES.includes(state)) problems.push(`分かったこと(learned)は、閉じるとき(${CLOSED_STATES.join(', ')})だけ渡せます`);
+      else if (typeof learned !== 'string' || learned.trim() === '') problems.push('分かったこと(learned)は空でない文字列です');
+    }
     if (problems.length) throw new LedgerError(problems);
     const next = applyState(item.row, state, fields, nowIso());
     if (nextStep !== undefined) next.next = nextStep;
     problems.push(...validate(item.kind, next));
     if (problems.length) throw new LedgerError(problems);
     next.review = null; // the row now passes the rules
+    const noted = learned !== undefined ? { learned: { before: null, after: learned } } : {};
     const hold = item.kind === 'task' && RELEASING_STATES.includes(state) ? getHoldRow(id) : null;
-    if (!hold) return writeItem(item, next, w, 'state');
+    if (!hold) return writeItem(item, next, w, 'state', { changes: noted });
     return writeItem(item, next, w, 'state', {
-      changes: { hold: { before: holdChange(hold), after: null } },
+      changes: { ...noted, hold: { before: holdChange(hold), after: null } },
       also: () => db.prepare('DELETE FROM holds WHERE task_id = ?').run(id),
     });
   }
