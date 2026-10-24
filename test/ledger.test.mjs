@@ -506,6 +506,13 @@ test('原則1: a goal with a human-time task is a human-time goal', (t) => {
   // Without its human-time task, it may again.
   L.update(loose.id, { goal_id: null }, ACTOR);
   assert.equal(L.update(ai.id, { due: null }, ACTOR).due, null);
+
+  // A discarded human-time task does not count: it is work that will not be done.
+  const kept = L.createGoal({ title: 'Kept', mode: 'ai_worker', outcome: 'Done', due: '2026-12-01' }, ACTOR);
+  const dropped = L.createTask({ ...human, goal_id: kept.id }, ACTOR);
+  refuses(() => L.update(kept.id, { due: null }, ACTOR), '原則1');
+  L.setState(dropped.id, 'discarded', { reason: 'Not needed' }, ACTOR);
+  assert.equal(L.update(kept.id, { due: null }, ACTOR).due, null);
 });
 
 test('task fields: body up to 2000 characters, load enum, next, delegated', (t) => {

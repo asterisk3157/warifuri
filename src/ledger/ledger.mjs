@@ -219,9 +219,11 @@ export function openLedger(path, options = {}) {
     return { state, extra };
   }
 
+  // A discarded task is work that will not be done, so it does not make its goal take a
+  // person's time.
   const goalHasHumanTimeTask = (goalId) =>
     !!one(
-      `SELECT 1 FROM tasks WHERE goal_id = ? AND mode IN (${HUMAN_TIME_MODES.map(() => '?').join(', ')})`,
+      `SELECT 1 FROM tasks WHERE goal_id = ? AND state <> 'discarded' AND mode IN (${HUMAN_TIME_MODES.map(() => '?').join(', ')})`,
       goalId,
       ...HUMAN_TIME_MODES,
     );
