@@ -130,7 +130,7 @@ claude mcp add --transport http warifuri https://<サーバー>/mcp
 
 ログインしてよい人は、設定に GitHub のユーザー名で1人だけ書きます。そこにない人は、ログインできても断ります。ただし、GitHub のユーザー名は手放されると別の人が取れるので、本人かどうかは名前ではなく GitHub の数値の ID で比べます。`WARIFURI_GITHUB_ID` に ID を書けばそれを使い、書かなければ、名前が合った最初のログインの ID を台帳に覚えて、それからは ID だけを比べます。覚えた ID は `warifuri oauth clients` の最初の行に出ます。warifuri は、自分で OAuth の口になり、本人の確認だけを GitHub に任せます。GitHub のトークンをそのまま台帳の鍵として使うことはしません。
 
-GitHub でのログインには、GitHub の OAuth App を1つ作ります。GitHub の Settings の Developer settings にある OAuth Apps で新しく登録し、Authorization callback URL に `<公開の URL>/oauth/github/callback` を書きます。公開の URL は、ハーネスから見えるサーバーの URL です。`https://` で始まり、道を含まない形にします(手元で試すときだけ `http://localhost` も使えます)。サーバーには、公開の URL を `WARIFURI_PUBLIC_URL` で、ログインしてよい人の GitHub のユーザー名を `WARIFURI_GITHUB_USER` で、OAuth App の Client ID と Client Secret を `GITHUB_CLIENT_ID` と `GITHUB_CLIENT_SECRET` で渡します。前の2つは `warifuri serve` の `--public-url` と `--github-user` でも渡せて、そのときは引数のほうを使います。Secret は環境変数でしか受けつけません。どれか1つでも欠けると、ログインは使えず、機械の鍵だけで動きます。起動したときに、そのことを表示します。
+GitHub でのログインには、GitHub の OAuth App を1つ作ります。GitHub の Settings の Developer settings にある OAuth Apps で新しく登録し、Authorization callback URL に `<公開の URL>/oauth/github/callback` を書きます。公開の URL は、ハーネスから見えるサーバーの URL です。`https://` で始まり、道を含まない形にします(手元で試すときだけ `http://localhost` も使えます)。サーバーには、公開の URL を `WARIFURI_PUBLIC_URL` で、ログインしてよい人の GitHub のユーザー名を `WARIFURI_GITHUB_USER` で、OAuth App の Client ID と Client Secret を `WARIFURI_GITHUB_CLIENT_ID` と `WARIFURI_GITHUB_CLIENT_SECRET` で渡します。Secret は秘密なので `secrets.env` に書くか、`WARIFURI_GITHUB_CLIENT_SECRET_FILE` でファイルの場所を渡します。前の2つは `warifuri serve` の `--public-url` と `--github-user` でも渡せて、そのときは引数のほうを使います。書く場所と読む順は[設定](configuration.md)にまとめました。どれか1つでも欠けると、ログインは使えず、機械の鍵だけで動きます。起動したときに、そのことを表示します。`warifuri config` でも、ログインが使えるかと、足りない項目を確かめられます。
 
 GitHub には、ログインの名前と ID を読む以外の権限を求めません。読んだら、GitHub のトークンは捨てます。ハーネスが受け取るのは warifuri が出すトークンです。1時間で切れ、30日もつ更新用のトークンで取り直します。更新を続けても、最初にログインしてから90日たつと切れるので、そのときはログインし直します。どちらも許可の画面で選んだデバイスに結びつき、MCP の口では、機械の鍵と同じように、どのデバイスからの呼び出しかを表します。つないだアプリの一覧は `warifuri oauth clients` で見られ、あるアプリのトークンをすべて取り消すには `warifuri oauth revoke <client_id>` を使います。機械をなくしたときは `warifuri key revoke <デバイスの名前>` を使います。そのデバイスの鍵と、そのデバイスで GitHub からつないだログインが、まとめて切れます。取り消したデバイスの名前は、許可の画面で選べず、新しい名前としても使えません。
 
@@ -163,7 +163,8 @@ npm install -g <パッケージ名>
 
 | コマンド | すること |
 |---|---|
-| `warifuri init` | データのフォルダ、設定ファイル、GitHub のログインの設定、最初のプロフィールを対話で作る。秘書を入れるかも聞く。常駐の登録(Linux は systemd、Mac は launchd、Windows はタスク スケジューラ)もする |
+| `warifuri init` | データのフォルダを作り、設定ファイル `warifuri.env` のひな形と空の `secrets.env` を置く。あるファイルは書き換えない。このあと、GitHub のログインの設定、最初のプロフィール、秘書を入れるか、常駐の登録(Linux は systemd、Mac は launchd、Windows はタスク スケジューラ)も対話で聞くようにする |
+| `warifuri config` | すべての設定の値と、それをどこから読んだかを出す。秘密は伏せる |
 | `warifuri serve` | サーバーを動かす |
 | `warifuri connect` | 使う機械で、ハーネスに登録する |
 | `warifuri key add` | デバイスの機械の鍵を発行する |
@@ -173,7 +174,7 @@ npm install -g <パッケージ名>
 
 ### データのまとめ方と引っ越し
 
-台帳、プロフィール、設定、秘密は、サーバーの機械の1つのフォルダ(例: `~/.warifuri/`)にまとめます。ほかの機械には写しを持ちません。サーバーの機械に固有の値(URL、ポート、データの場所、GitHub のログインの設定、ログインしてよい人、時間帯、報告の時刻、秘書のハーネス、差し込みの設定)は、1つの設定ファイル `warifuri.yaml` に集め、コードには書きません。warifuri は git を使いません。変更の履歴は台帳の記録と毎日の写しで持ちます。フォルダを自分で git にしたい人は、そうしてもかまいません。
+台帳、プロフィール、設定、秘密は、サーバーの機械の1つのフォルダ(既定は `~/.warifuri/`)にまとめます。ほかの機械には写しを持ちません。サーバーの機械に固有の値(URL、ポート、データの場所、GitHub のログインの設定、ログインしてよい人、時間帯、報告の時刻、秘書のハーネス、差し込みの設定)は、1つの設定ファイル `warifuri.env` に集め、コードには書きません。秘密だけは、同じフォルダの `secrets.env` に分けます。項目の一覧と読む順は[設定](configuration.md)に書きました。warifuri は git を使いません。変更の履歴は台帳の記録と毎日の写しで持ちます。フォルダを自分で git にしたい人は、そうしてもかまいません。
 
 引っ越しは3段です。
 
@@ -263,7 +264,7 @@ knowledge.md がおよそ200行を超えたら、話題ごとに `knowledge/` �
 
 | ファイル | 中身 |
 |---|---|
-| `warifuri.yaml` | サーバーの機械に固有の値(上の節) |
+| `warifuri.env` | サーバーの機械に固有の値(上の節) |
 | `principles.md` | 原則の書き換え。秘書とエージェントへの指示として配られる |
 | `profiles/` | プロフィール(上の節) |
 | `life.md` | 生活の前提と、予定の固さ |
@@ -271,6 +272,6 @@ knowledge.md がおよそ200行を超えたら、話題ごとに `knowledge/` �
 | `habits.yaml` | 最初に入れる繰り返しの予定。台帳の習慣の表に入り、あとは `habit` の道具で直す |
 | `limits.yaml` | 1日の上限、ブロックの区切り、置ける時刻 |
 | `plugins.yaml` | 入れる差し込み |
-| `.env` | 秘密(GitHub の OAuth App の Secret など) |
+| `secrets.env` | 秘密(GitHub の OAuth App の Secret など)。本人だけが読めるようにする |
 
 名前、ドメイン、プロフィールの名前は設定から読み、コードには書きません。置き場のディレクトリの道は、台帳の置き場の表に持ちます。秘書を入れた場合は、最初の会話で秘書が life.md、places.md、`profiles/`、habits.yaml を一緒に作ります。設定のひな形は、架空の人の例として `examples/` に置き、写して書き換えれば動く形にします。
