@@ -33,8 +33,8 @@ const GITHUB_TIMEOUT_MS = 10_000;
 // What makes OAuth possible; with any of these missing, only device keys work.
 const NEEDED = [
   ['publicUrl', 'WARIFURI_PUBLIC_URL (--public-url)'],
-  ['githubClientId', 'GITHUB_CLIENT_ID'],
-  ['githubClientSecret', 'GITHUB_CLIENT_SECRET'],
+  ['githubClientId', 'WARIFURI_GITHUB_CLIENT_ID'],
+  ['githubClientSecret', 'WARIFURI_GITHUB_CLIENT_SECRET'],
   ['githubUser', 'WARIFURI_GITHUB_USER (--github-user)'],
 ];
 
@@ -43,8 +43,8 @@ class InvalidRedirectUriError extends OAuthError {
   static errorCode = 'invalid_redirect_uri';
 }
 
-// Reads the OAuth settings from the environment and the serve flags (flags win). The GitHub
-// secret, the GitHub id and the extra redirect hosts come from the environment only. Returns
+// Reads the OAuth settings from env, the settings as src/config.mjs resolved them, and the
+// serve flags (flags win). Returns
 // { config } when OAuth is on, { config: null, missing } when something is left out, and
 // { problems } when a value is wrong.
 export function oauthConfig({ env = process.env, flags = {} } = {}) {
@@ -54,8 +54,8 @@ export function oauthConfig({ env = process.env, flags = {} } = {}) {
   };
   const values = {
     publicUrl: pick(flags.publicUrl, 'WARIFURI_PUBLIC_URL'),
-    githubClientId: pick(undefined, 'GITHUB_CLIENT_ID'),
-    githubClientSecret: pick(undefined, 'GITHUB_CLIENT_SECRET'),
+    githubClientId: pick(undefined, 'WARIFURI_GITHUB_CLIENT_ID'),
+    githubClientSecret: pick(undefined, 'WARIFURI_GITHUB_CLIENT_SECRET'),
     githubUser: pick(flags.githubUser, 'WARIFURI_GITHUB_USER'),
   };
   const missing = NEEDED.filter(([k]) => values[k] === undefined).map(([, label]) => label);

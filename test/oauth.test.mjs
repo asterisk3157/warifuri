@@ -8,7 +8,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,12 +16,12 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { openLedger } from '../src/ledger/ledger.mjs';
 import { createApp } from '../src/server/mcp.mjs';
 import { oauthConfig } from '../src/server/oauth.mjs';
+import { cli } from './cli.mjs';
 
 const GITHUB_SECRET = 'github-secret-for-tests';
 const REDIRECT = 'http://127.0.0.1:9999/callback';
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
-const CLI = new URL('../bin/warifuri.mjs', import.meta.url).pathname;
 const OWNER_ID = 1001;
 
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
@@ -80,7 +79,7 @@ async function start(t, { env = {}, trustProxy } = {}) {
   const server = http.createServer();
   const base = await listen(server);
   const { config } = oauthConfig({
-    env: { WARIFURI_PUBLIC_URL: base, GITHUB_CLIENT_ID: 'gh-client', GITHUB_CLIENT_SECRET: GITHUB_SECRET, WARIFURI_GITHUB_USER: 'Alex-Example', ...env },
+    env: { WARIFURI_PUBLIC_URL: base, WARIFURI_GITHUB_CLIENT_ID: 'gh-client', WARIFURI_GITHUB_CLIENT_SECRET: GITHUB_SECRET, WARIFURI_GITHUB_USER: 'Alex-Example', ...env },
   });
   assert.ok(config);
   const logs = [];
@@ -475,7 +474,7 @@ test('metadata: the authorization server and the protected resource /mcp', async
 });
 
 test('OAuth is off when a setting is missing, and refuses wrong settings', async (t) => {
-  const full = { WARIFURI_PUBLIC_URL: 'https://ledger.example', GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
+  const full = { WARIFURI_PUBLIC_URL: 'https://ledger.example', WARIFURI_GITHUB_CLIENT_ID: 'id', WARIFURI_GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
   assert.ok(oauthConfig({ env: full }).config);
   // Flags win over the environment.
   assert.equal(oauthConfig({ env: full, flags: { githubUser: 'sam' } }).config.githubUser, 'sam');
@@ -494,11 +493,7 @@ test('OAuth is off when a setting is missing, and refuses wrong settings', async
   // serve refuses a --trust-proxy that express cannot read, before it listens.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-serve-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const serve = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, 'serve', '--db', path.join(dir, 'l.sqlite'), '--trust-proxy', 'true'], {
-    encoding: 'utf8',
-    env: { PATH: process.env.PATH },
-    timeout: 10_000,
-  });
+  const serve = cli(['serve', '--db', path.join(dir, 'l.sqlite'), '--trust-proxy', 'true'], { home: dir });
   assert.equal(serve.status, 2);
   assert.match(serve.stderr, /--trust-proxy/);
 
@@ -594,7 +589,7 @@ test('the GitHub user is matched by id: pinned at the first login, or set with W
   assert.equal((await e.callback(wrong.cookie, wrong.githubState, 'code-alex-example')).status, 403);
   assert.ok((await e.login(c2.client_id, { as: 'someone-else@4004' })).code);
   assert.equal(e.ledger.oauth.githubId(), null);
-  const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
+  const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', WARIFURI_GITHUB_CLIENT_ID: 'id', WARIFURI_GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
   assert.equal(oauthConfig({ env: { ...env, WARIFURI_GITHUB_ID: '42' } }).config.githubId, '42');
   for (const bad of ['alex', '-1', '0', '1.5']) assert.ok(oauthConfig({ env: { ...env, WARIFURI_GITHUB_ID: bad } }).problems, bad);
 });
@@ -632,7 +627,7 @@ test('redirect URIs: loopback http, or https on the allowed hosts only; the cons
   assert.match(html, /<strong>Test &lt;client&gt;<\/strong>\(アプリが自分で名乗った名前\)/);
   assert.match(html, /戻り先は <strong>127\.0\.0\.1:9999<\/strong>/);
 
-  const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
+  const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', WARIFURI_GITHUB_CLIENT_ID: 'id', WARIFURI_GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
   assert.deepEqual(oauthConfig({ env }).config.redirectHosts, ['claude.ai', 'claude.com']);
   assert.ok(oauthConfig({ env: { ...env, WARIFURI_REDIRECT_HOSTS: 'https://x.example/' } }).problems);
 });
@@ -654,7 +649,6 @@ test('client names lose control characters and are cut at 64; the command line p
   const L = openLedger(db);
   L.oauth.registerClient({ client_id: 'old', redirect_uris: [REDIRECT], client_name: '\u001b]0;pwned\u0007Old app' });
   L.close();
-  const cli = (args) => spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, ...args], { encoding: 'utf8' });
   const before = cli(['oauth', 'clients', '--db', db]);
   assert.equal(before.status, 0, before.stderr);
   assert.doesNotMatch(before.stdout, /[\u0000-\u0009\u000b-\u001f\u007f]/);
