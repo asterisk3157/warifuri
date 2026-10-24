@@ -285,3 +285,26 @@ test('/api is rate-limited per address', async (t) => {
   assert.equal(limited.status, 429);
   assert.ok(Number(limited.headers.get('retry-after')) > 0);
 });
+
+test('resume brings a deferred or waiting task back to ready, and refuses anything else', async (t) => {
+  const { connect, keys } = await start(t);
+  const laptop = await connect(keys.laptop);
+  const { data: task } = await call(laptop, 'create_task', { title: 'Wait for the review', mode: 'ai_worker' });
+  await call(laptop, 'wait', { id: task.id, waiting_on: 'reviewer', waiting_for: 'comments' });
+  const { data: back } = await call(laptop, 'resume', { id: task.id });
+  assert.deepEqual([back.state, back.waiting_on, back.waiting_for], ['ready', null, null]);
+  await call(laptop, 'defer', { id: task.id, defer_until: '2026-12-01' });
+  assert.equal((await call(laptop, 'resume', { id: task.id })).data.defer_until, null);
+  await refused(laptop, 'resume', { id: task.id }, /先送りでも待ちでもありません/);
+});
+
+test('places lists every place with its paths, including places with no task, and filters by profile', async (t) => {
+  const { connect, ledger, keys } = await start(t);
+  ledger.createPlace({ name: 'lab', profile: 'research', paths: [{ device: 'desk', path: '/srv/lab' }] }, ACTOR);
+  const laptop = await connect(keys.laptop);
+  const { data } = await call(laptop, 'places');
+  assert.deepEqual(data.places.map((p) => p.name), ['repo', 'repo docs', 'lab']);
+  assert.deepEqual(data.places[2].paths, [{ device: 'desk', path: '/srv/lab' }]);
+  const { data: only } = await call(laptop, 'places', { profile: 'research' });
+  assert.deepEqual(only.places.map((p) => p.name), ['lab']);
+});
