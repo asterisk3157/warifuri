@@ -1,12 +1,17 @@
 // End-to-end tests for the GitHub login (src/server/oauth.mjs, src/ledger/oauth.mjs): client
 // registration, /authorize sending the browser to GitHub, the callback, the consent page,
 // codes with PKCE, tokens on /mcp, refresh rotation and reuse, expiry, revocation, device keys
-// alongside, OAuth turned off, and the metadata. GitHub is a local stub; nothing leaves the machine.
+// alongside, the GitHub id, redirect hosts, rate limits behind a proxy, OAuth turned off, and the
+// metadata. GitHub is a local stub; nothing leaves the machine.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { openLedger } from '../src/ledger/ledger.mjs';
@@ -17,10 +22,14 @@ const GITHUB_SECRET = 'github-secret-for-tests';
 const REDIRECT = 'http://127.0.0.1:9999/callback';
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const CLI = new URL('../bin/warifuri.mjs', import.meta.url).pathname;
+const OWNER_ID = 1001;
 
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
 
-// A stand-in for GitHub: GitHub's code "code-<login>" gives a token that reads as <login>.
+// A stand-in for GitHub: GitHub's code "code-<login>" gives a token that reads as <login>,
+// with the owner's id for alex-example and another id for anyone else; "code-<login>@<id>"
+// gives that id.
 async function githubStub(t) {
   const seen = [];
   const server = http.createServer((req, res) => {
@@ -42,13 +51,14 @@ async function githubStub(t) {
         return;
       }
       if (req.method === 'GET' && url.pathname === '/user') {
-        const m = /^Bearer gho_(.+)$/.exec(req.headers.authorization ?? '');
+        const m = /^Bearer gho_([^@]+)(?:@(\d+))?$/.exec(req.headers.authorization ?? '');
         if (!m) {
           res.statusCode = 401;
           res.end('{}');
           return;
         }
-        res.end(JSON.stringify({ login: m[1], id: 1 }));
+        const id = m[2] ? Number(m[2]) : m[1].toLowerCase() === 'alex-example' ? OWNER_ID : 2002;
+        res.end(JSON.stringify({ login: m[1], id }));
         return;
       }
       res.statusCode = 404;
@@ -61,7 +71,8 @@ async function githubStub(t) {
 }
 
 // A ledger with a clock the test can move, a warifuri server with OAuth on, and helpers.
-async function start(t) {
+// env adds to the OAuth settings; trustProxy goes to createApp.
+async function start(t, { env = {}, trustProxy } = {}) {
   let offset = 0;
   let tick = 0;
   const ledger = openLedger(':memory:', { now: () => new Date(Date.now() + offset + (tick += 1)) });
@@ -69,11 +80,11 @@ async function start(t) {
   const server = http.createServer();
   const base = await listen(server);
   const { config } = oauthConfig({
-    env: { WARIFURI_PUBLIC_URL: base, GITHUB_CLIENT_ID: 'gh-client', GITHUB_CLIENT_SECRET: GITHUB_SECRET, WARIFURI_GITHUB_USER: 'Alex-Example' },
+    env: { WARIFURI_PUBLIC_URL: base, GITHUB_CLIENT_ID: 'gh-client', GITHUB_CLIENT_SECRET: GITHUB_SECRET, WARIFURI_GITHUB_USER: 'Alex-Example', ...env },
   });
   assert.ok(config);
   const logs = [];
-  server.on('request', createApp({ ledger, oauth: config, github: { webUrl: github.base, apiUrl: github.base }, log: (l) => logs.push(l) }));
+  server.on('request', createApp({ ledger, oauth: config, github: { webUrl: github.base, apiUrl: github.base }, trustProxy, log: (l) => logs.push(l) }));
   const clients = [];
   t.after(async () => {
     for (const c of clients) await c.close();
@@ -86,10 +97,10 @@ async function start(t) {
   const form = (path, fields, headers = {}) =>
     go(path, { method: 'POST', body: new URLSearchParams(fields), headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers } });
 
-  async function register(meta = {}) {
+  async function register(meta = {}, headers = {}) {
     const res = await go('/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: 'Test <client>', token_endpoint_auth_method: 'none', ...meta }),
     });
     return { res, body: await res.json() };
@@ -124,14 +135,22 @@ async function start(t) {
 
   const csrfOf = (html) => /name="csrf" value="([^"]+)"/.exec(html)?.[1];
 
-  // The whole browser part, up to the code: authorize, GitHub, consent with `device`.
-  async function login(clientId, { device = 'laptop', as = 'alex-example' } = {}) {
+  // The browser up to the consent page: authorize and GitHub. Returns the cookie, the page's
+  // HTML and the PKCE verifier.
+  async function consentPage(clientId, { as = 'alex-example' } = {}) {
     const { verifier, challenge } = pkce();
     const a = await authorize(clientId, challenge);
     const cb = await callback(a.cookie, a.githubState, `code-${as}`);
     assert.equal(cb.status, 303);
     const page = await go('/oauth/consent', { headers: { Cookie: a.cookie } });
-    const csrf = csrfOf(await page.text());
+    return { cookie: a.cookie, html: await page.text(), verifier };
+  }
+
+  // The whole browser part, up to the code: authorize, GitHub, consent with `device`.
+  async function login(clientId, { device = 'laptop', as = 'alex-example' } = {}) {
+    const { cookie, html, verifier } = await consentPage(clientId, { as });
+    const a = { cookie };
+    const csrf = csrfOf(html);
     const approved = await form('/oauth/consent', { csrf, action: 'approve', new_device: device }, { Cookie: a.cookie });
     assert.equal(approved.status, 302);
     const back = new URL(approved.headers.get('location'));
@@ -163,7 +182,7 @@ async function start(t) {
   const advance = (ms) => {
     offset += ms;
   };
-  return { base, ledger, github, logs, go, form, register, pkce, authorize, callback, csrfOf, login, exchange, refresh, mcpStatus, connect, advance };
+  return { base, ledger, github, logs, go, form, register, pkce, authorize, callback, csrfOf, consentPage, login, exchange, refresh, mcpStatus, connect, advance };
 }
 
 test('the full flow: registration, GitHub, consent, code with PKCE, tokens on /mcp', async (t) => {
@@ -465,6 +484,17 @@ test('OAuth is off when a setting is missing, and refuses wrong settings', async
   assert.ok(oauthConfig({ env: { ...full, WARIFURI_GITHUB_USER: 'two users' } }).problems);
   assert.equal(oauthConfig({ env: { ...full, WARIFURI_PUBLIC_URL: 'http://localhost:8787' } }).config.publicUrl, 'http://localhost:8787');
 
+  // serve refuses a --trust-proxy that express cannot read, before it listens.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-serve-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const serve = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, 'serve', '--db', path.join(dir, 'l.sqlite'), '--trust-proxy', 'true'], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH },
+    timeout: 10_000,
+  });
+  assert.equal(serve.status, 2);
+  assert.match(serve.stderr, /--trust-proxy/);
+
   // With OAuth off there are no OAuth endpoints, and device keys work as before.
   const ledger = openLedger(':memory:');
   const server = http.createServer(createApp({ ledger }));
@@ -480,4 +510,208 @@ test('OAuth is off when a setting is missing, and refuses wrong settings', async
   const res = await fetch(`${base}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   assert.equal(res.status, 401);
   assert.equal(res.headers.get('www-authenticate'), 'Bearer');
+});
+
+test('revoking a device ends its OAuth tokens and codes; the consent page no longer offers it', async (t) => {
+  const s = await start(t);
+  const { body: client } = await s.register();
+  const id = client.client_id;
+  const first = await s.login(id, { device: 'laptop' });
+  const a = await (await s.exchange(id, first.code, first.verifier)).json();
+  const other = await s.login(id, { device: 'desk' });
+  const d = await (await s.exchange(id, other.code, other.verifier)).json();
+  // A code approved for laptop but not yet exchanged.
+  const open = await s.login(id, { device: 'laptop' });
+
+  // `warifuri key revoke laptop`: laptop has no key, only logins, and is revoked all the same.
+  const out = s.ledger.revokeKey('laptop', { actor: 'cli' });
+  assert.equal(out.oauth_tokens, 2);
+  assert.equal((await s.mcpStatus(a.access_token)).status, 401);
+  const refused = await s.refresh(id, a.refresh_token);
+  assert.equal(refused.status, 400);
+  assert.equal((await refused.json()).error, 'invalid_grant');
+  assert.equal((await s.exchange(id, open.code, open.verifier)).status, 400);
+  // The other device is untouched.
+  assert.equal((await s.mcpStatus(d.access_token)).status, 200);
+  assert.deepEqual(s.ledger.oauth.listClients()[0].devices, ['desk']);
+  const rec = s.ledger.records('laptop').at(-1);
+  assert.equal(rec.action, 'revoke');
+  assert.equal(rec.changes.oauth_tokens, 2);
+
+  // The consent page offers desk only; laptop, typed or chosen, is refused and not reused.
+  const page = await s.consentPage(id);
+  assert.match(page.html, /<option value="desk">/);
+  assert.doesNotMatch(page.html, /<option value="laptop">/);
+  const typed = await s.form('/oauth/consent', { csrf: s.csrfOf(page.html), action: 'approve', new_device: 'laptop' }, { Cookie: page.cookie });
+  assert.equal(typed.status, 400);
+  const typedHtml = await typed.text();
+  assert.match(typedHtml, /laptop は取り消されています/);
+  const chosen = await s.form('/oauth/consent', { csrf: s.csrfOf(typedHtml), action: 'approve', device: 'laptop' }, { Cookie: page.cookie });
+  assert.equal(chosen.status, 400);
+  assert.equal(s.ledger.listDevices().find((x) => x.name === 'laptop').revoked_at, out.revoked_at);
+
+  // A new key makes the device usable again; the old tokens stay revoked.
+  s.ledger.issueKey('laptop', { actor: 'cli' });
+  assert.equal((await s.mcpStatus(a.access_token)).status, 401);
+  assert.equal((await s.refresh(id, a.refresh_token)).status, 400);
+});
+
+test('the GitHub user is matched by id: pinned at the first login, or set with WARIFURI_GITHUB_ID', async (t) => {
+  const s = await start(t);
+  const { body: client } = await s.register();
+  assert.equal(s.ledger.oauth.githubId(), null);
+  // Someone else with another name pins nothing.
+  const m = await s.authorize(client.client_id, s.pkce().challenge);
+  assert.equal((await s.callback(m.cookie, m.githubState, 'code-mallory')).status, 403);
+  assert.equal(s.ledger.oauth.githubId(), null);
+
+  // The first login with the allowed name pins its id, with a record.
+  await s.login(client.client_id);
+  assert.equal(s.ledger.oauth.githubId().id, String(OWNER_ID));
+  const pin = s.ledger.records('github');
+  assert.deepEqual(pin.map((r) => [r.entity, r.action, r.actor]), [['oauth', 'pin', 'github:alex-example']]);
+  assert.equal(pin[0].changes.github_id, String(OWNER_ID));
+
+  // From then on only the id counts: a new account that took the name is refused, and the
+  // owner under a new name is let in.
+  const taken = await s.authorize(client.client_id, s.pkce().challenge);
+  assert.equal((await s.callback(taken.cookie, taken.githubState, 'code-alex-example@3003')).status, 403);
+  const renamed = await s.login(client.client_id, { as: `alex-renamed@${OWNER_ID}` });
+  assert.ok(renamed.code);
+  assert.equal(s.ledger.records('github').length, 1);
+
+  // With WARIFURI_GITHUB_ID only that id counts, whatever the name, and nothing is pinned.
+  const e = await start(t, { env: { WARIFURI_GITHUB_ID: '4004' } });
+  const { body: c2 } = await e.register();
+  const wrong = await e.authorize(c2.client_id, e.pkce().challenge);
+  assert.equal((await e.callback(wrong.cookie, wrong.githubState, 'code-alex-example')).status, 403);
+  assert.ok((await e.login(c2.client_id, { as: 'someone-else@4004' })).code);
+  assert.equal(e.ledger.oauth.githubId(), null);
+  const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
+  assert.equal(oauthConfig({ env: { ...env, WARIFURI_GITHUB_ID: '42' } }).config.githubId, '42');
+  for (const bad of ['alex', '-1', '0', '1.5']) assert.ok(oauthConfig({ env: { ...env, WARIFURI_GITHUB_ID: bad } }).problems, bad);
+});
+
+test('redirect URIs: loopback http, or https on the allowed hosts only; the consent page shows the host', async (t) => {
+  const s = await start(t, { env: { WARIFURI_REDIRECT_HOSTS: ' Chat.Example.org , ' } });
+  for (const uri of [
+    'https://claude.ai/api/mcp/auth_callback',
+    'https://claude.com/api/mcp/auth_callback',
+    'https://chat.example.org/cb',
+    'http://localhost:3000/callback',
+    'http://[::1]:3000/callback',
+  ]) {
+    assert.equal((await s.register({ redirect_uris: [uri] })).res.status, 201, uri);
+  }
+  for (const uri of [
+    'https://evil.example/cb',
+    'https://claude.ai.evil.example/cb',
+    'https://sub.claude.ai/cb',
+    'https://user@claude.ai/cb',
+    'https://claude.ai/cb#frag',
+    'http://claude.ai/cb',
+    'http://example.org/callback',
+    'myapp://callback',
+  ]) {
+    const { res, body } = await s.register({ redirect_uris: [REDIRECT, uri] });
+    assert.equal(res.status, 400, uri);
+    assert.equal(body.error, 'invalid_redirect_uri', uri);
+  }
+  // Nothing refused was stored: the five above are the only clients.
+  assert.equal(s.ledger.oauth.listClients().length, 5);
+
+  const { body: client } = await s.register();
+  const { html } = await s.consentPage(client.client_id);
+  assert.match(html, /<strong>Test &lt;client&gt;<\/strong>\(アプリが自分で名乗った名前\)/);
+  assert.match(html, /戻り先は <strong>127\.0\.0\.1:9999<\/strong>/);
+
+  const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
+  assert.deepEqual(oauthConfig({ env }).config.redirectHosts, ['claude.ai', 'claude.com']);
+  assert.ok(oauthConfig({ env: { ...env, WARIFURI_REDIRECT_HOSTS: 'https://x.example/' } }).problems);
+});
+
+test('client names lose control characters and are cut at 64; the command line prints none', async (t) => {
+  const s = await start(t);
+  const { body } = await s.register({ client_name: `\u001b[31mBad\u0007 ‮app\n${'x'.repeat(100)}` });
+  assert.equal(body.client_name, `[31mBad app${'x'.repeat(53)}`);
+  assert.equal(Array.from(body.client_name).length, 64);
+  assert.equal(s.ledger.oauth.getClient(body.client_id).client_name, body.client_name);
+  const { body: blank } = await s.register({ client_name: '\u0000\u001f' });
+  assert.equal(blank.client_name, undefined);
+
+  // A row stored before this rule: `warifuri oauth clients` still prints it clean, and says
+  // whether the GitHub id is pinned.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-oauth-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const db = path.join(dir, 'ledger.sqlite');
+  const L = openLedger(db);
+  L.oauth.registerClient({ client_id: 'old', redirect_uris: [REDIRECT], client_name: '\u001b]0;pwned\u0007Old app' });
+  L.close();
+  const cli = (args) => spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, ...args], { encoding: 'utf8' });
+  const before = cli(['oauth', 'clients', '--db', db]);
+  assert.equal(before.status, 0, before.stderr);
+  assert.doesNotMatch(before.stdout, /[\u0000-\u0009\u000b-\u001f\u007f]/);
+  assert.match(before.stdout, /^GitHub user id not pinned yet/);
+  assert.match(before.stdout, /old {2}\]0;pwnedOld app {2}registered/);
+  const P = openLedger(db);
+  P.oauth.pinGithubId(OWNER_ID, 'alex-example');
+  P.close();
+  assert.match(cli(['oauth', 'clients', '--db', db]).stdout, new RegExp(`^GitHub user id ${OWNER_ID} \\(pinned `));
+});
+
+test('a grant ends 90 days after its code, however often it is refreshed', async (t) => {
+  const s = await start(t);
+  const { body: client } = await s.register();
+  const id = client.client_id;
+  const { code, verifier } = await s.login(id);
+  let tokens = await (await s.exchange(id, code, verifier)).json();
+  for (let i = 0; i < 3; i += 1) {
+    s.advance(29 * DAY);
+    const res = await s.refresh(id, tokens.refresh_token);
+    assert.equal(res.status, 200, `refresh ${i}`);
+    tokens = await res.json();
+  }
+  // Day 87: the new refresh token would last 30 days, but the grant ends on day 90.
+  assert.equal((await s.mcpStatus(tokens.access_token)).status, 200);
+  s.advance(3 * DAY + 1000);
+  const late = await s.refresh(id, tokens.refresh_token);
+  assert.equal(late.status, 400);
+  assert.equal((await late.json()).error, 'invalid_grant');
+  // A new login starts a new 90 days.
+  const again = await s.login(id);
+  assert.equal((await s.exchange(id, again.code, again.verifier)).status, 200);
+});
+
+test('rate limits: /token counts per client, and --trust-proxy counts callers behind a proxy apart', async (t) => {
+  const s = await start(t);
+  const { body: client } = await s.register();
+  const id = client.client_id;
+  const { code, verifier } = await s.login(id);
+  const tokens = await (await s.exchange(id, code, verifier)).json();
+  // A stranger floods /token, with an unknown client and with one of its own.
+  const { body: theirs } = await s.register();
+  for (const cid of ['nobody', theirs.client_id]) {
+    let last;
+    for (let i = 0; i < 51; i += 1) last = await s.refresh(cid, 'wfr_guess');
+    assert.equal(last.status, 429, cid);
+  }
+  // The owner's refresh still goes through.
+  assert.equal((await s.refresh(id, tokens.refresh_token)).status, 200);
+
+  // /register keeps a budget per caller. Behind a proxy on loopback, with trust proxy, each
+  // forwarded address has its own; without it, every caller is the proxy.
+  const flood = async (srv, from) => {
+    let last;
+    for (let i = 0; i < 21; i += 1) last = await srv.register({}, { 'X-Forwarded-For': from });
+    return last.res.status;
+  };
+  const p = await start(t, { trustProxy: 'loopback' });
+  assert.equal(await flood(p, '203.0.113.9'), 429);
+  assert.equal((await p.register({}, { 'X-Forwarded-For': '203.0.113.10' })).res.status, 201);
+  // Without it the rate limiter warns about the header on the console; kept quiet here.
+  const warned = t.mock.method(console, 'error', () => {});
+  const q = await start(t);
+  assert.equal(await flood(q, '203.0.113.9'), 429);
+  assert.equal((await q.register({}, { 'X-Forwarded-For': '203.0.113.10' })).res.status, 429);
+  warned.mock.restore();
 });

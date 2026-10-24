@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -203,6 +203,15 @@ export const MIGRATIONS = [
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
   CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+  `
+  -- Small values the server keeps for itself, one per key. github_id: the numeric GitHub id
+  -- of the person allowed to log in, pinned at the first login that matched the login name.
+  CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
   `,
 ];
 

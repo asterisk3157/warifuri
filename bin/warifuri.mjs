@@ -4,16 +4,17 @@
 //   warifuri import <snapshot.json> --db <ledger.sqlite> [--actor <name>]
 //   warifuri key add <device> --db <ledger.sqlite>
 //   warifuri key list --db <ledger.sqlite>
-//   warifuri key revoke <device> --db <ledger.sqlite>
+//   warifuri key revoke <device> --db <ledger.sqlite>     (also ends the device's GitHub logins)
 //   warifuri backup --db <ledger.sqlite> --dir <dir> [--keep 7]
 //   warifuri oauth clients --db <ledger.sqlite>
 //   warifuri oauth revoke <client_id> --db <ledger.sqlite>
 //   warifuri serve --db <ledger.sqlite> [--host 127.0.0.1] [--port 8787]
-//                  [--public-url <url>] [--github-user <login>]
+//                  [--public-url <url>] [--github-user <login>] [--trust-proxy <value>]
 //
 // serve turns on the GitHub login when the public URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
-// and the GitHub user are all set (flags win over WARIFURI_PUBLIC_URL and WARIFURI_GITHUB_USER;
-// the GitHub values come from the environment only). Otherwise only device keys work.
+// and the GitHub user are all set (flags win over WARIFURI_PUBLIC_URL, WARIFURI_GITHUB_USER and
+// WARIFURI_TRUST_PROXY; the GitHub values, WARIFURI_GITHUB_ID and WARIFURI_REDIRECT_HOSTS come
+// from the environment only). Otherwise only device keys work.
 //
 // Exit codes: 0 done (even when rows were flagged or skipped), 1 the snapshot or the ledger
 // could not be read, the snapshot's envelope is wrong, the ledger refused or the backup
@@ -23,7 +24,7 @@ import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { createServer } from '../src/server/mcp.mjs';
-import { oauthConfig } from '../src/server/oauth.mjs';
+import { oauthConfig, cleanClientName } from '../src/server/oauth.mjs';
 import { backupLedger } from '../src/ledger/backup.mjs';
 
 const USAGE = [
@@ -35,12 +36,19 @@ const USAGE = [
   '       warifuri oauth clients --db <ledger.sqlite>',
   '       warifuri oauth revoke <client_id> --db <ledger.sqlite>',
   '       warifuri serve --db <ledger.sqlite> [--host 127.0.0.1] [--port 8787]',
-  '                      [--public-url <url>] [--github-user <login>]',
+  '                      [--public-url <url>] [--github-user <login>] [--trust-proxy <value>]',
+  '',
+  'key revoke also ends every GitHub login of that device.',
   '',
   'serve listens on 127.0.0.1 unless --host says otherwise. Listening beyond this machine',
   'is your choice; the GitHub login and the device keys are then the only guard, so put',
   'HTTPS in front. The GitHub login needs the public URL (or WARIFURI_PUBLIC_URL), the',
   'GitHub user (or WARIFURI_GITHUB_USER), GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.',
+  'WARIFURI_GITHUB_ID fixes the GitHub user by number; without it, the number is pinned at',
+  'the first login. Apps are sent back only to localhost, or over https to claude.ai,',
+  'claude.com and the hosts in WARIFURI_REDIRECT_HOSTS (comma-separated).',
+  'Behind a tunnel or reverse proxy on this machine, give --trust-proxy loopback (or',
+  'WARIFURI_TRUST_PROXY), so the rate limits count each caller and not the tunnel.',
 ].join('\n');
 
 function usage(message) {
@@ -129,13 +137,14 @@ function runKey(args) {
       const { name, key } = ledger.issueKey(positionals[0], { actor: 'cli' });
       process.stdout.write(`key for ${name}:\n${key}\nThis key will not be shown again. Keep it in that device's settings.\n`);
     } else if (sub === 'revoke') {
-      ledger.revokeKey(positionals[0], { actor: 'cli' });
-      process.stdout.write(`revoked: ${positionals[0]}\n`);
+      const out = ledger.revokeKey(positionals[0], { actor: 'cli' });
+      const logins = out.oauth_tokens ? ` (and ${out.oauth_tokens} GitHub login token${out.oauth_tokens === 1 ? '' : 's'})` : '';
+      process.stdout.write(`revoked: ${positionals[0]}${logins}\n`);
     } else {
       const rows = ledger.listDevices();
       if (rows.length === 0) process.stdout.write('no devices\n');
       for (const d of rows) {
-        const state = d.has_key ? 'key in use' : d.revoked_at ? `key revoked ${d.revoked_at}` : 'no key';
+        const state = d.has_key ? 'key in use' : d.revoked_at ? `revoked ${d.revoked_at}` : 'no key';
         process.stdout.write(`${d.name}  added ${d.created_at}  (${state})\n`);
       }
     }
@@ -174,11 +183,15 @@ function runOAuth(args) {
       }
       process.stdout.write(`revoked ${out.revoked} token${out.revoked === 1 ? '' : 's'} of ${out.client_id}\n`);
     } else {
+      const pinned = ledger.oauth.githubId();
+      process.stdout.write(pinned ? `GitHub user id ${pinned.id} (pinned ${pinned.updated_at})\n` : 'GitHub user id not pinned yet (WARIFURI_GITHUB_ID, or the first login)\n');
       const rows = ledger.oauth.listClients();
       if (rows.length === 0) process.stdout.write('no OAuth clients\n');
       for (const c of rows) {
         const devices = c.devices.length ? `in use by ${c.devices.join(', ')}` : 'no live tokens';
-        process.stdout.write(`${c.client_id}  ${c.client_name ?? '(no name)'}  registered ${c.created_at}  (${devices})\n`);
+        // The name is the client's own words; nothing in it may move the terminal.
+        const name = c.client_name ? cleanClientName(c.client_name) ?? '(no name)' : '(no name)';
+        process.stdout.write(`${c.client_id}  ${name}  registered ${c.created_at}  (${devices})\n`);
       }
     }
     return 0;
@@ -228,6 +241,7 @@ function runServe(args) {
         port: { type: 'string', default: '8787' },
         'public-url': { type: 'string' },
         'github-user': { type: 'string' },
+        'trust-proxy': { type: 'string' },
       },
     });
   } catch (err) {
@@ -246,7 +260,14 @@ function runServe(args) {
   } catch (err) {
     return fail(err, `cannot open ${values.db}`);
   }
-  const server = createServer({ ledger, oauth: oauth.config });
+  const trustProxy = values['trust-proxy'] ?? (process.env.WARIFURI_TRUST_PROXY?.trim() || undefined);
+  let server;
+  try {
+    server = createServer({ ledger, oauth: oauth.config, trustProxy });
+  } catch (err) {
+    ledger.close();
+    return usage(`--trust-proxy: ${err.message}`);
+  }
   server.on('error', (err) => {
     process.stderr.write(`warifuri: cannot listen: ${err.message}\n`);
     ledger.close();
@@ -257,7 +278,7 @@ function runServe(args) {
     const host = addr.family === 'IPv6' ? `[${addr.address}]` : addr.address;
     process.stdout.write(`warifuri: serving http://${host}:${addr.port}/mcp\n`);
     if (oauth.config) {
-      process.stdout.write(`warifuri: GitHub login on for ${oauth.config.githubUser}, at ${oauth.config.publicUrl}/mcp\n`);
+      process.stdout.write(`warifuri: GitHub login on for ${oauth.config.githubUser}${oauth.config.githubId ? ` (id ${oauth.config.githubId})` : ''}, at ${oauth.config.publicUrl}/mcp\n`);
     } else {
       process.stdout.write(`warifuri: GitHub login off (missing ${oauth.missing.join(', ')}); only device keys work\n`);
     }

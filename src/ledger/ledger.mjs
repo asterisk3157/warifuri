@@ -906,19 +906,21 @@ export function openLedger(path, options = {}) {
     });
   }
 
-  // Revokes a device's key. The device stays (its records and places refer to it); a new key
-  // may be issued later.
+  // Revokes a device: its key, and every OAuth token and open code bound to it, so its
+  // logins end too. A device with only OAuth logins (no key) can be revoked as well. The
+  // device stays (its records and places refer to it); a new key may be issued later, which
+  // makes it usable again, but the revoked tokens stay revoked.
   function revokeKey(name, opts) {
     const w = requireWriter(opts);
     const before = getDeviceRow(name);
-    if (!before || before.key_hash === null || before.revoked_at !== null) {
-      throw new LedgerError([`デバイス ${name} に使える鍵はありません`]);
-    }
+    if (!before) throw new LedgerError([`デバイス ${name} がありません`]);
+    if (before.revoked_at !== null) throw new LedgerError([`デバイス ${name} はもう取り消されています`]);
     const t = nowIso();
     return transaction(() => {
       db.prepare('UPDATE devices SET key_hash = NULL, revoked_at = ? WHERE name = ?').run(t, name);
-      record(w, 'device', name, 'revoke', { key: { before: 'issued', after: 'revoked' } });
-      return { name, revoked_at: t };
+      const tokens = store.revokeDevice(name, t);
+      record(w, 'device', name, 'revoke', { key: { before: before.key_hash === null ? 'none' : 'issued', after: 'revoked' }, oauth_tokens: tokens });
+      return { name, revoked_at: t, oauth_tokens: tokens };
     });
   }
 
@@ -936,8 +938,10 @@ export function openLedger(path, options = {}) {
   // OAuth storage (oauth.mjs). Writes from the command line or the consent page name who
   // wrote them, like every other write.
   const store = oauthStore({ db, one, all, transaction, record, now });
+  // revokeDevice runs only inside revokeKey.
+  const { revokeDevice: _revokeDevice, ...storeApi } = store;
   const oauth = {
-    ...store,
+    ...storeApi,
     approve: (id, device, opts) => store.approve(id, device, requireWriter({ ...opts, device })),
     revokeClient: (clientId, opts) => store.revokeClient(clientId, requireWriter(opts)),
   };

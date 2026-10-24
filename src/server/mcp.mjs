@@ -159,9 +159,13 @@ async function handleMcp(ledger, req, res) {
 
 // The express app. oauth: the config from oauthConfig(), or null for device keys only.
 // github: { webUrl, apiUrl, fetch } stands in for GitHub in tests. log: where errors go.
-export function createApp({ ledger, oauth = null, github, log = (line) => process.stderr.write(`${line}\n`) }) {
+// trustProxy: express's `trust proxy` (such as 'loopback', or a number of hops), for a server
+// behind a tunnel or reverse proxy; then the caller's address, which the rate limits count
+// by, is read from X-Forwarded-For. Off when left out. A value express cannot read throws.
+export function createApp({ ledger, oauth = null, github, trustProxy, log = (line) => process.stderr.write(`${line}\n`) }) {
   const app = express();
   app.disable('x-powered-by');
+  if (trustProxy !== undefined) app.set('trust proxy', /^\d+$/.test(String(trustProxy)) ? Number(trustProxy) : trustProxy);
   app.get('/health', (req, res) => sendText(res, 200, 'ok'));
 
   let auth = deviceKeyAuth(ledger);

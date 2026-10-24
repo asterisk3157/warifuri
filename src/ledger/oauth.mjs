@@ -1,5 +1,6 @@
 // The ledger's side of OAuth: registered clients, authorization requests waiting for the
-// GitHub login and the consent page, single-use codes, and access and refresh tokens.
+// GitHub login and the consent page, single-use codes, access and refresh tokens, and the
+// GitHub id pinned for the person allowed to log in.
 // It knows nothing of HTTP; src/server/oauth.mjs speaks the protocol and calls these.
 //
 // Every value that works as a credential is random (32 bytes, base64url) and is returned
@@ -12,6 +13,9 @@ export const PENDING_MS = 10 * 60 * 1000;
 export const CODE_MS = 10 * 60 * 1000;
 export const ACCESS_MS = 60 * 60 * 1000;
 export const REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
+// A grant (a family of tokens) ends this long after its code was exchanged, however often
+// it is refreshed; then the person logs in again.
+export const FAMILY_MS = 90 * 24 * 60 * 60 * 1000;
 
 const PREFIX = { access: 'wfa_', refresh: 'wfr_', code: 'wfc_' };
 const MACHINE = { actor: 'oauth' };
@@ -191,12 +195,13 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
     return row.code_challenge;
   }
 
-  function insertToken(kind, { clientId, device, family, scopes }, t) {
+  // No token outlives its family's end (familyEnd, in ms).
+  function insertToken(kind, { clientId, device, family, scopes, familyEnd }, t) {
     const token = random(PREFIX[kind]);
     const life = kind === 'access' ? ACCESS_MS : REFRESH_MS;
     db.prepare(
       'INSERT INTO oauth_tokens (hash, kind, client_id, device, family, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(sha256(token), kind, clientId, device, family, JSON.stringify(scopes), iso(t), iso(t + life));
+    ).run(sha256(token), kind, clientId, device, family, JSON.stringify(scopes), iso(t), iso(Math.min(t + life, familyEnd)));
     return token;
   }
 
@@ -205,11 +210,20 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
     return {
       access_token: insertToken('access', grant, t),
       token_type: 'Bearer',
-      expires_in: ACCESS_MS / 1000,
+      expires_in: Math.round((Math.min(t + ACCESS_MS, grant.familyEnd) - t) / 1000),
       refresh_token: insertToken('refresh', grant, t),
       scope: grant.scopes.join(' '),
     };
   }
+
+  // When a family ends: FAMILY_MS after its first token.
+  function familyEnd(family) {
+    const row = one('SELECT MIN(created_at) AS first FROM oauth_tokens WHERE family = ?', family);
+    return Date.parse(row.first) + FAMILY_MS;
+  }
+
+  // Tokens and codes of a revoked device are dead even before revokeDevice reaches them.
+  const deviceRevoked = (name) => Boolean(one('SELECT 1 FROM devices WHERE name = ? AND revoked_at IS NOT NULL', name));
 
   function revokeFamily(family, t) {
     return db.prepare('UPDATE oauth_tokens SET revoked_at = ? WHERE family = ? AND revoked_at IS NULL').run(t, family).changes;
@@ -228,13 +242,14 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
         return { error: 'invalid_grant', message: 'authorization code already used' };
       }
       if (expired(row)) return { error: 'invalid_grant', message: 'authorization code expired' };
+      if (deviceRevoked(row.device)) return { error: 'invalid_grant', message: 'the device was revoked' };
       if (redirectUri !== undefined && redirectUri !== row.redirect_uri) {
         return { error: 'invalid_grant', message: 'redirect_uri does not match the authorization request' };
       }
       const family = randomUUID();
       db.prepare('UPDATE oauth_codes SET used_at = ?, family = ? WHERE code_hash = ?').run(t, family, row.code_hash);
       const scopes = JSON.parse(row.scopes);
-      const tokens = issuePair({ clientId, device: row.device, family, scopes });
+      const tokens = issuePair({ clientId, device: row.device, family, scopes, familyEnd: nowMs() + FAMILY_MS });
       record({ ...MACHINE, device: row.device }, 'oauth', clientId, 'issue', { device: row.device, family, grant: 'authorization_code' });
       return { tokens };
     });
@@ -253,21 +268,23 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
         return { error: 'invalid_grant', message: 'refresh token was revoked' };
       }
       if (expired(row)) return { error: 'invalid_grant', message: 'refresh token expired' };
+      if (deviceRevoked(row.device)) return { error: 'invalid_grant', message: 'the device was revoked' };
       const granted = JSON.parse(row.scopes);
       const asked = scopes ?? granted;
       if (asked.some((s) => !granted.includes(s))) return { error: 'invalid_scope', message: 'scope wider than the grant' };
       db.prepare('UPDATE oauth_tokens SET revoked_at = ? WHERE hash = ?').run(t, row.hash);
-      const tokens = issuePair({ clientId, device: row.device, family: row.family, scopes: asked });
+      const tokens = issuePair({ clientId, device: row.device, family: row.family, scopes: asked, familyEnd: familyEnd(row.family) });
       record({ ...MACHINE, device: row.device }, 'oauth', clientId, 'refresh', { device: row.device, family: row.family });
       return { tokens };
     });
   }
 
-  // A live access token: { client_id, device, scopes, expires_at } or null.
+  // A live access token of a device that is not revoked: { client_id, device, scopes,
+  // expires_at } or null.
   function verifyAccess(token) {
     if (typeof token !== 'string' || !token.startsWith(PREFIX.access)) return null;
     const row = one("SELECT * FROM oauth_tokens WHERE hash = ? AND kind = 'access'", sha256(token));
-    if (!row || row.revoked_at !== null || expired(row)) return null;
+    if (!row || row.revoked_at !== null || expired(row) || deviceRevoked(row.device)) return null;
     return { client_id: row.client_id, device: row.device, scopes: JSON.parse(row.scopes), expires_at: row.expires_at };
   }
 
@@ -299,6 +316,30 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
     });
   }
 
+  // Ends every token and open code of a device, as part of revoking the device (revokeKey,
+  // which opens the transaction and writes the record). Returns how many tokens it revoked.
+  function revokeDevice(device, t) {
+    db.prepare('UPDATE oauth_codes SET expires_at = ? WHERE device = ? AND used_at IS NULL AND expires_at > ?').run(t, device, t);
+    return db.prepare('UPDATE oauth_tokens SET revoked_at = ? WHERE device = ? AND revoked_at IS NULL').run(t, device).changes;
+  }
+
+  // The GitHub id pinned for the allowed person: { id, updated_at } or null.
+  function githubId() {
+    const row = one("SELECT value, updated_at FROM settings WHERE key = 'github_id'");
+    return row ? { id: row.value, updated_at: row.updated_at } : null;
+  }
+
+  // Pins the GitHub id at the first login whose name matched, with a record. An id pinned
+  // already is kept. Returns the id pinned now.
+  function pinGithubId(id, login) {
+    return transaction(() => {
+      const t = iso(nowMs());
+      const done = db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('github_id', ?, ?) ON CONFLICT(key) DO NOTHING").run(String(id), t);
+      if (done.changes) record({ actor: `github:${login}`, device: null }, 'oauth', 'github', 'pin', { github_id: String(id), login });
+      return githubId().id;
+    });
+  }
+
   return {
     registerClient,
     getClient,
@@ -317,5 +358,8 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
     verifyAccess,
     revokeToken,
     revokeClient,
+    revokeDevice,
+    githubId,
+    pinGithubId,
   };
 }

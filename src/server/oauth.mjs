@@ -1,7 +1,9 @@
 // warifuri as its own OAuth 2.1 authorization server for MCP clients. GitHub only answers
-// "who is this person": the browser is sent to GitHub, warifuri reads the login once, compares
-// it with the one allowed login, and throws GitHub's token away. Codes and tokens are
-// warifuri's own (src/ledger/oauth.mjs) and resolve to a device, as device keys do.
+// "who is this person": the browser is sent to GitHub, warifuri reads the user once, compares
+// its numeric id with the one allowed person's, and throws GitHub's token away. The id comes
+// from WARIFURI_GITHUB_ID, or is pinned at the first login whose name matched the allowed
+// login (a name can change hands; the id cannot). Codes and tokens are warifuri's own
+// (src/ledger/oauth.mjs) and resolve to a device, as device keys do.
 //
 // The SDK's mcpAuthRouter serves the metadata, client registration, /authorize, /token and
 // /revoke; this module gives it the provider, and adds the GitHub callback and the consent
@@ -16,12 +18,15 @@ import {
   InvalidScopeError,
   InvalidTargetError,
   InvalidTokenError,
-  InvalidClientMetadataError,
+  OAuthError,
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { LedgerError } from '../ledger/ledger.mjs';
 import { PENDING_MS } from '../ledger/oauth.mjs';
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+// https hosts a client may be sent back to, besides loopback; WARIFURI_REDIRECT_HOSTS adds more.
+const REDIRECT_HOSTS = ['claude.ai', 'claude.com'];
+const CLIENT_NAME_MAX = 64;
 const CALLBACK_PATH = '/oauth/github/callback';
 const CONSENT_PATH = '/oauth/consent';
 const GITHUB_TIMEOUT_MS = 10_000;
@@ -33,9 +38,15 @@ const NEEDED = [
   ['githubUser', 'WARIFURI_GITHUB_USER (--github-user)'],
 ];
 
+// RFC 7591's error for a refused redirect URI; the SDK has no class for it.
+class InvalidRedirectUriError extends OAuthError {
+  static errorCode = 'invalid_redirect_uri';
+}
+
 // Reads the OAuth settings from the environment and the serve flags (flags win). The GitHub
-// secret comes from the environment only. Returns { config } when OAuth is on, { config: null,
-// missing } when something is left out, and { problems } when a value is wrong.
+// secret, the GitHub id and the extra redirect hosts come from the environment only. Returns
+// { config } when OAuth is on, { config: null, missing } when something is left out, and
+// { problems } when a value is wrong.
 export function oauthConfig({ env = process.env, flags = {} } = {}) {
   const pick = (flag, name) => {
     const v = flag ?? env[name];
@@ -50,6 +61,12 @@ export function oauthConfig({ env = process.env, flags = {} } = {}) {
   const missing = NEEDED.filter(([k]) => values[k] === undefined).map(([, label]) => label);
   if (missing.length) return { config: null, missing };
   const problems = [];
+  const githubId = pick(undefined, 'WARIFURI_GITHUB_ID');
+  if (githubId !== undefined && !/^[1-9][0-9]{0,19}$/.test(githubId)) problems.push('the GitHub id must be a number');
+  const extraHosts = (pick(undefined, 'WARIFURI_REDIRECT_HOSTS') ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  for (const h of extraHosts) {
+    if (!/^[a-z0-9.-]+$/.test(h) || h.startsWith('.') || h.endsWith('.')) problems.push(`the redirect host ${h} must be a host name only`);
+  }
   let url;
   try {
     url = new URL(values.publicUrl);
@@ -66,10 +83,20 @@ export function oauthConfig({ env = process.env, flags = {} } = {}) {
   }
   if (!/^[A-Za-z0-9-]{1,39}$/.test(values.githubUser)) problems.push('the GitHub user must be one GitHub login');
   if (problems.length) return { config: null, problems };
-  return { config: { ...values, publicUrl: url.origin } };
+  return { config: { ...values, publicUrl: url.origin, githubId, redirectHosts: [...new Set([...REDIRECT_HOSTS, ...extraHosts])] } };
 }
 
 const str = (v) => (typeof v === 'string' ? v : '');
+// Control and invisible formatting characters (bidi overrides among them) are dropped.
+const printable = (s) => String(s).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '');
+
+// A client's self-declared name, as stored: printable, at most 64 characters, or none.
+export function cleanClientName(name) {
+  if (typeof name !== 'string') return undefined;
+  const clean = Array.from(printable(name).trim()).slice(0, CLIENT_NAME_MAX).join('').trim();
+  return clean === '' ? undefined : clean;
+}
+
 const withoutSlash = (u) => String(u).replace(/#.*$/, '').replace(/\/$/, '');
 
 const escapeHtml = (s) =>
@@ -125,7 +152,8 @@ export function createOAuth({ ledger, config, github = {}, log }) {
   const secure = issuer.protocol === 'https:';
   // __Host- keeps the cookie to this exact host over HTTPS; browsers refuse it over http.
   const cookieName = secure ? '__Host-warifuri_oauth' : 'warifuri_oauth';
-  const allowed = config.githubUser.toLowerCase();
+  const allowedLogin = config.githubUser.toLowerCase();
+  const redirectHosts = new Set(config.redirectHosts ?? REDIRECT_HOSTS);
   const store = ledger.oauth;
 
   function setCookie(res, value) {
@@ -143,16 +171,22 @@ export function createOAuth({ ledger, config, github = {}, log }) {
 
   const clientsStore = {
     getClient: (clientId) => store.getClient(clientId),
-    // Redirect URIs: https, http on a loopback host, or an app's own scheme; never a fragment.
+    // Redirect URIs: http on a loopback host, or https on one of the allowed hosts; no
+    // fragment and no user. Every error redirect from /authorize goes to one of these, so
+    // they cannot send the browser anywhere else.
     registerClient(info) {
       for (const uri of info.redirect_uris) {
         const u = new URL(uri);
-        if (u.hash) throw new InvalidClientMetadataError('redirect_uris must not have a fragment');
-        if (u.protocol === 'http:' && !LOOPBACK.has(u.hostname)) {
-          throw new InvalidClientMetadataError('http redirect_uris are allowed only on localhost');
+        const ok =
+          !u.hash && !u.username && !u.password &&
+          ((u.protocol === 'http:' && LOOPBACK.has(u.hostname)) || (u.protocol === 'https:' && redirectHosts.has(u.hostname)));
+        if (!ok) {
+          throw new InvalidRedirectUriError(`redirect_uris must be http on localhost or https on ${[...redirectHosts].join(', ')}, without a fragment`);
         }
       }
-      return store.registerClient(info);
+      const { client_name: _n, ...rest } = info;
+      const name = cleanClientName(info.client_name);
+      return store.registerClient(name === undefined ? rest : { ...rest, client_name: name });
     },
   };
 
@@ -236,7 +270,8 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     res.redirect(302, to.href);
   }
 
-  // Exchanges GitHub's code and reads the login. GitHub's token lives only inside this call.
+  // Exchanges GitHub's code and reads the user ({ login, id }). GitHub's token lives only
+  // inside this call.
   async function githubLogin(code) {
     const signal = AbortSignal.timeout(GITHUB_TIMEOUT_MS);
     const tokenRes = await fetchFn(`${webUrl}/login/oauth/access_token`, {
@@ -260,23 +295,38 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     if (!userRes.ok) throw new Error(`GitHub's user endpoint answered ${userRes.status}`);
     const user = await userRes.json();
     if (typeof user.login !== 'string' || user.login === '') throw new Error('GitHub gave no login');
-    return user.login;
+    if (!Number.isSafeInteger(user.id) || user.id <= 0) throw new Error('GitHub gave no user id');
+    return { login: user.login, id: String(user.id) };
+  }
+
+  // Whether the GitHub user is the allowed person. With WARIFURI_GITHUB_ID only the id counts.
+  // Without it, the first login whose name matches pins its id, and from then on only the id
+  // counts: someone who later takes over the same name is refused.
+  function isAllowed(user) {
+    if (config.githubId) return user.id === config.githubId;
+    const pinned = store.githubId();
+    if (pinned) return user.id === pinned.id;
+    if (user.login.toLowerCase() !== allowedLogin) return false;
+    return store.pinGithubId(user.id, user.login) === user.id;
   }
 
   function renderConsent(res, status, id, pending, { error = '', typed = '', selected = '' } = {}) {
     const csrf = store.newCsrf(id);
     const client = store.getClient(pending.client_id);
     const name = client?.client_name || pending.client_id;
+    const host = new URL(pending.redirect_uri).host;
     const options = ledger
       .listDevices()
+      .filter((d) => d.revoked_at === null)
       .map((d) => `<option value="${escapeHtml(d.name)}"${d.name === selected ? ' selected' : ''}>${escapeHtml(d.name)}</option>`)
       .join('');
     sendPage(
       res,
       status,
       'warifuri への接続の許可',
-      `<p><strong>${escapeHtml(name)}</strong> が、${escapeHtml(pending.github_login)} として warifuri の台帳を使おうとしています。</p>` +
-        `<p>許可すると、このアプリは台帳の全部を読めます。戻り先は <code>${escapeHtml(pending.redirect_uri)}</code> です。心当たりがなければ断ってください。</p>` +
+      `<p><strong>${escapeHtml(name)}</strong>(アプリが自分で名乗った名前)が、${escapeHtml(pending.github_login)} として warifuri の台帳を使おうとしています。` +
+        `戻り先は <strong>${escapeHtml(host)}</strong> です。</p>` +
+        `<p>許可すると、このアプリは台帳の全部を読めます。名前はアプリが自由に名乗れるので、戻り先の <code>${escapeHtml(pending.redirect_uri)}</code> に心当たりがあるかで確かめてください。心当たりがなければ断ってください。</p>` +
         (error ? `<p class="error">${escapeHtml(error)}</p>` : '') +
         `<form method="post" action="${CONSENT_PATH}">` +
         `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">` +
@@ -288,8 +338,30 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     );
   }
 
+  // The rate-limit key for a request naming clientId: the client when it is registered, or one
+  // shared key for everything else (unknown clients are refused anyway).
+  function clientKey(clientId) {
+    return typeof clientId === 'string' && store.getClient(clientId) ? `client:${clientId}` : 'unknown-client';
+  }
+
   const router = express.Router();
-  router.use(mcpAuthRouter({ provider, issuerUrl: issuer, resourceServerUrl: resourceUrl, resourceName: 'warifuri' }));
+  // The SDK limits each endpoint by the caller's address. Behind a tunnel every caller has the
+  // tunnel's address unless `trust proxy` is set (createApp), so the endpoints a registered
+  // client calls are limited per client instead: a stranger's flood of /token, /authorize or
+  // /revoke requests spends the budget of unknown clients, not the owner's. /register has no
+  // client yet and keeps its own budget per address.
+  const byClient = { rateLimit: { keyGenerator: (req) => clientKey(req.body?.client_id ?? req.query?.client_id) } };
+  router.use(
+    mcpAuthRouter({
+      provider,
+      issuerUrl: issuer,
+      resourceServerUrl: resourceUrl,
+      resourceName: 'warifuri',
+      authorizationOptions: byClient,
+      tokenOptions: byClient,
+      revocationOptions: byClient,
+    }),
+  );
 
   router.get(CALLBACK_PATH, async (req, res) => {
     const id = readCookie(req, cookieName);
@@ -305,9 +377,9 @@ export function createOAuth({ ledger, config, github = {}, log }) {
       backToClient(res, pending, { error: 'access_denied' });
       return;
     }
-    let login;
+    let user;
     try {
-      login = await githubLogin(code);
+      user = await githubLogin(code);
     } catch (err) {
       log(`warifuri: GitHub login failed: ${err.message}`);
       store.deletePending(id);
@@ -315,13 +387,13 @@ export function createOAuth({ ledger, config, github = {}, log }) {
       plainPage(res, 502, 'ログインを続けられません', 'GitHub に本人の確認を頼めませんでした。少し待ってから、つなぎ直してください。');
       return;
     }
-    if (login.toLowerCase() !== allowed) {
+    if (!isAllowed(user)) {
       store.deletePending(id);
       clearCookie(res);
       plainPage(res, 403, 'このサーバーは使えません', 'このサーバーを使えるのは、設定された1人の GitHub ユーザーだけです。');
       return;
     }
-    store.setPendingLogin(id, login);
+    store.setPendingLogin(id, user.login);
     res.redirect(303, CONSENT_PATH);
   });
 
@@ -354,6 +426,10 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const actor = `github:${pending.github_login}`;
     if (!device) {
       renderConsent(res, 400, id, pending, { error: 'デバイスを選ぶか、新しい名前を書いてください。' });
+      return;
+    }
+    if (ledger.listDevices().some((d) => d.name === device && d.revoked_at !== null)) {
+      renderConsent(res, 400, id, pending, { error: `デバイス ${device} は取り消されています。別の名前を書いてください。`, typed });
       return;
     }
     try {

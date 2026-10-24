@@ -80,7 +80,7 @@ test('cli: warifuri key add, list and revoke', () => {
   assert.match(cli(['key', 'list', '--db', db]).stdout, /laptop {2}added .* \(key in use\)/);
   assert.equal(cli(['key', 'add', 'laptop', '--db', db]).status, 1);
   assert.equal(cli(['key', 'revoke', 'laptop', '--db', db]).status, 0);
-  assert.match(cli(['key', 'list', '--db', db]).stdout, /key revoked/);
+  assert.match(cli(['key', 'list', '--db', db]).stdout, /laptop {2}added .* \(revoked /);
   assert.equal(cli(['key', 'add', 'laptop', '--db', db, '--read-withheld']).status, 2);
   assert.equal(cli(['key', 'add', '--db', db]).status, 2);
 });

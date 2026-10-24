@@ -80,7 +80,7 @@ test('a revoked key stops working, and the device can get a new one', (t) => {
   assert.equal(L.listDevices().length, 1);
 });
 
-test('bad names, unknown devices, a device without a key and a missing actor are refused', (t) => {
+test('bad names, unknown or revoked devices and a missing actor are refused', (t) => {
   const L = fresh(t);
   for (const bad of ['', 'a b', 'name/with/slash', 'x'.repeat(65), 'ラップトップ', 42]) {
     assert.throws(() => L.issueKey(bad, ACTOR), LedgerError, String(bad));
@@ -89,8 +89,10 @@ test('bad names, unknown devices, a device without a key and a missing actor are
   assert.doesNotThrow(() => L.issueKey('x'.repeat(64), ACTOR));
   assert.doesNotThrow(() => L.issueKey('pc-2.home_A', ACTOR));
   assert.throws(() => L.revokeKey('nobody', ACTOR), LedgerError);
+  // A device without a key (one made on the consent page) can be revoked, once.
   L.addDevice('nokey', ACTOR);
-  assert.throws(() => L.revokeKey('nokey', ACTOR), LedgerError);
+  assert.equal(L.revokeKey('nokey', ACTOR).oauth_tokens, 0);
+  assert.throws(() => L.revokeKey('nokey', ACTOR), /もう取り消されています/);
   assert.throws(() => L.issueKey('noactor', {}), LedgerError);
   assert.equal(L.listDevices().length, 3);
 });

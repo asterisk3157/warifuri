@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
+import { MIGRATIONS } from '../src/ledger/schema.mjs';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-test-'));
 after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
@@ -464,16 +465,33 @@ test('memory ledger works', (t) => {
   assert.equal(L.get(g.id).title, 'In memory');
 });
 
-test('schema: version 1 is recorded, and a newer file is refused', (t) => {
+test('schema: version 2 is recorded, and a newer file is refused', (t) => {
   const { file, L } = fresh(t);
   const raw = new DatabaseSync(file);
   t.after(() => raw.close());
-  assert.equal(raw.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '1');
+  assert.equal(raw.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '2');
   L.close();
   const reopened = openLedger(file); // same version: fine
   reopened.close();
   raw.prepare("UPDATE meta SET value = '99' WHERE key = 'schema_version'").run();
   assert.throws(() => openLedger(file), /newer than this warifuri/);
+});
+
+test('schema: a version 1 file is brought up to version 2 and keeps its rows', () => {
+  const file = path.join(tmpRoot, `v1-${Date.now()}.sqlite`);
+  const raw = new DatabaseSync(file);
+  raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  raw.exec(MIGRATIONS[0]);
+  raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '1')").run();
+  raw.prepare("INSERT INTO devices (name, created_at) VALUES ('laptop', '2026-10-01T00:00:00.000Z')").run();
+  raw.close();
+  const L = openLedger(file);
+  assert.deepEqual(L.listDevices().map((d) => d.name), ['laptop']);
+  assert.equal(L.oauth.githubId(), null);
+  L.close();
+  const check = new DatabaseSync(file);
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '2');
+  check.close();
 });
 
 test('原則1: a goal with a human-time task is a human-time goal', (t) => {
