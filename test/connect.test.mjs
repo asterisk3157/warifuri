@@ -18,11 +18,12 @@ after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 // The fake harness: it logs its arguments, and keeps the registration where the real one
 // would, so that connect can see it on the next run. claude echoes the header it was given,
 // as a harness might, to check that connect hides it.
-const FAKE = `#!${process.execPath}
-const fs = require('fs');
+// fake.cjs does the work; claude and codex (claude.cmd and codex.cmd on Windows, run through
+// the shell as npm's shims are) only start it with their own name.
+const FAKE = `const fs = require('fs');
 const path = require('path');
-const name = path.basename(process.argv[1]);
-const args = process.argv.slice(2);
+const name = process.argv[2];
+const args = process.argv.slice(3);
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ name, args }) + '\\n');
 const home = process.env.HOME;
 if (name === 'claude' && args[1] === 'add') {
@@ -57,9 +58,14 @@ function world({ harnesses = ['claude', 'codex'], ledger = true } = {}) {
   const bin = path.join(root, 'bin');
   fs.mkdirSync(user);
   fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'fake.cjs'), FAKE);
   for (const h of harnesses) {
-    fs.writeFileSync(path.join(bin, h), FAKE);
-    fs.chmodSync(path.join(bin, h), 0o755);
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(bin, `${h}.cmd`), `@"${process.execPath}" "%~dp0fake.cjs" ${h} %*\r\n`);
+    } else {
+      fs.writeFileSync(path.join(bin, h), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'fake.cjs')}" ${h} "$@"\n`);
+      fs.chmodSync(path.join(bin, h), 0o755);
+    }
   }
   if (ledger) {
     fs.mkdirSync(data);
@@ -67,8 +73,11 @@ function world({ harnesses = ['claude', 'codex'], ledger = true } = {}) {
   }
   const log = path.join(root, 'log.jsonl');
   fs.writeFileSync(log, '');
-  // Only the fake bin and node: a real harness can never be reached.
-  const env = { PATH: [bin, path.dirname(process.execPath)].join(path.delimiter), HOME: user, USERPROFILE: user, WARIFURI_HOME: data, FAKE_LOG: log };
+  // Only the fake bin and node: a real harness can never be reached. Windows also needs its
+  // own folder, for cmd.exe.
+  const sys = process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: '.COM;.EXE;.BAT;.CMD' } : {};
+  const dirs = [bin, path.dirname(process.execPath), ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot, 'System32')] : [])];
+  const env = { ...sys, PATH: dirs.join(path.delimiter), HOME: user, USERPROFILE: user, WARIFURI_HOME: data, FAKE_LOG: log };
   const calls = () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   return { root, user, data, bin, env, log, calls };
 }
