@@ -352,8 +352,8 @@ export function openLedger(path, options = {}) {
 
   // Moves a goal or task to `state`. A task moved to done, discarded, waiting or deferred lets
   // go of its hold, and extra.next may leave a line for whoever picks it up next. On closing,
-  // extra.learned (what the work taught) is kept in the record of the close, until the
-  // knowledge has its own way in.
+  // extra.learned (what the work taught) is kept in the record of the close; the MCP close
+  // also writes it to the profile's knowledge (as a note from an agent).
   function setState(id, state, extra = {}, opts) {
     const w = requireWriter(opts);
     const item = findItem(id);
@@ -727,6 +727,14 @@ export function openLedger(path, options = {}) {
     });
   }
 
+  // A note written to a profile's knowledge or inbox (src/knowledge/profiles.mjs writes the
+  // file): entity 'knowledge', the profile as its id, and what was written as the changes.
+  function recordNote(profile, changes, opts) {
+    const w = requireWriter(opts);
+    if (typeof profile !== 'string' || profile === '') throw new LedgerError(['プロフィールの名前がありません']);
+    transaction(() => record(w, 'knowledge', profile, 'note', changes));
+  }
+
   function records(entityId) {
     return all('SELECT * FROM records WHERE entity_id = ? ORDER BY id', entityId).map((r) => ({
       ...r,
@@ -1059,6 +1067,7 @@ export function openLedger(path, options = {}) {
     flow,
     stale,
     records,
+    recordNote,
     addDevice,
     issueKey,
     revokeKey,

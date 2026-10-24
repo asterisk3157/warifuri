@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
-import { MIGRATIONS } from '../src/ledger/schema.mjs';
+import { MIGRATIONS, SCHEMA_VERSION } from '../src/ledger/schema.mjs';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-test-'));
 after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
@@ -476,11 +476,11 @@ test('memory ledger works', (t) => {
   assert.equal(L.get(g.id).title, 'In memory');
 });
 
-test('schema: version 2 is recorded, and a newer file is refused', (t) => {
+test('schema: the latest version is recorded, and a newer file is refused', (t) => {
   const { file, L } = fresh(t);
   const raw = new DatabaseSync(file);
   t.after(() => raw.close());
-  assert.equal(raw.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '2');
+  assert.equal(raw.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, String(SCHEMA_VERSION));
   L.close();
   const reopened = openLedger(file); // same version: fine
   reopened.close();
@@ -488,7 +488,7 @@ test('schema: version 2 is recorded, and a newer file is refused', (t) => {
   assert.throws(() => openLedger(file), /newer than this warifuri/);
 });
 
-test('schema: a version 1 file is brought up to version 2 and keeps its rows', () => {
+test('schema: a version 1 file is brought up to the latest version and keeps its rows', () => {
   const file = path.join(tmpRoot, `v1-${Date.now()}.sqlite`);
   const raw = new DatabaseSync(file);
   raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -501,7 +501,33 @@ test('schema: a version 1 file is brought up to version 2 and keeps its rows', (
   assert.equal(L.oauth.githubId(), null);
   L.close();
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '2');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, String(SCHEMA_VERSION));
+  check.close();
+});
+
+test('schema: version 3 keeps the records and their ids, stays append-only, and takes knowledge', () => {
+  const file = path.join(tmpRoot, `v2-${Date.now()}.sqlite`);
+  const raw = new DatabaseSync(file);
+  raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  raw.exec(MIGRATIONS[0]);
+  raw.exec(MIGRATIONS[1]);
+  raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+  const insert = raw.prepare('INSERT INTO records (at, actor, device, entity, entity_id, action, changes) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  insert.run('2026-10-01T00:00:00.000Z', 'human', null, 'goal', 'g1', 'create', '{}');
+  insert.run('2026-10-02T00:00:00.000Z', 'human', null, 'task', 't1', 'create', '{}');
+  assert.throws(() => insert.run('2026-10-03T00:00:00.000Z', 'human', null, 'knowledge', 'hobby', 'note', '{}'), /CHECK/);
+  raw.close();
+
+  const L = openLedger(file);
+  assert.deepEqual(L.records('t1').map((r) => [r.id, r.action]), [[2, 'create']]);
+  L.recordNote('hobby', { kind: 'human', text: 'x' }, { actor: 'human' });
+  assert.deepEqual(L.records('hobby').map((r) => [r.id, r.entity, r.action]), [[3, 'knowledge', 'note']]);
+  L.close();
+  const check = new DatabaseSync(file);
+  assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);
+  assert.throws(() => check.exec("UPDATE records SET action = 'x' WHERE id = 1"), /append-only/);
+  assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'records_entity'").get());
+  assert.equal(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'records_v2'").get(), undefined);
   check.close();
 });
 
