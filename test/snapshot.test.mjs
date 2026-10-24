@@ -436,3 +436,20 @@ test('holds survive an import when their task comes back open', (t) => {
   assert.deepEqual(JSON.parse(importRecords().at(-1).changes).dropped_holds, [T2]);
   assert.equal(L.listDevices().length, 1); // devices stay
 });
+
+test('a closed row keeps its closed_at; a missing or unreadable one becomes the import time', (t) => {
+  const { L } = fresh(t);
+  const s = snapshot();
+  s.goals[1].closed_at = '2026-08-01T12:00:00+09:00';
+  s.tasks.push(
+    { id: 't_20261002090000_old001', title: 'Old one', mode: 'ai_worker', state: 'done', result: 'Done', closed_at: 'last summer' },
+  );
+  s.tasks[2].closed_at = '2026-08-02T00:00:00Z';
+  const res = L.replaceFromSnapshot(s, ACTOR);
+  assert.equal(L.get(G2).closed_at, '2026-08-01T12:00:00+09:00');
+  assert.equal(L.get('t_20261002090000_old001').closed_at, '2026-10-24T00:00:00.000Z');
+  assert.equal(L.get(T3).closed_at, null);
+  const notes = res.flagged.flatMap((f) => f.notes ?? f.problems ?? []).join('\n');
+  assert.match(notes, /last summer/);
+  assert.match(notes, /waiting の行の closed_at/);
+});

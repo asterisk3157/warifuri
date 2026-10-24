@@ -146,6 +146,17 @@ test('rule 4: done needs result, discarded needs reason, deferred needs defer_un
   assert.equal(L.setState(other.id, 'discarded', { reason: 'Covered elsewhere' }, AGENT).reason, 'Covered elsewhere');
 });
 
+test('closing may keep what was learned, in the record of the close only', (t) => {
+  const { L } = fresh(t);
+  const task = L.createTask(aiTask(), ACTOR);
+  refuses(() => L.setState(task.id, 'deferred', { defer_until: '2026-11-10', learned: 'x' }, AGENT), '閉じるとき');
+  refuses(() => L.setState(task.id, 'done', { result: 'ok', learned: '' }, AGENT), '空でない');
+  assert.equal(L.records(task.id).length, 1);
+  const done = L.setState(task.id, 'done', { result: 'ok', learned: 'The index needs a rebuild first' }, AGENT);
+  assert.equal('learned' in done, false);
+  assert.deepEqual(L.records(task.id).at(-1).changes.learned, { before: null, after: 'The index needs a rebuild first' });
+});
+
 test('rule 5: reopening clears the fields of the closed state', (t) => {
   const { L } = fresh(t);
   const task = L.createTask(aiTask(), ACTOR);

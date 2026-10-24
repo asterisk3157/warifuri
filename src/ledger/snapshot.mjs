@@ -69,12 +69,16 @@ function stateOf(raw, at, notes) {
   const keep = STATE_FIELDS[raw.state] ?? [];
   const out = { state: raw.state };
   for (const f of ALL_STATE_FIELDS) out[f] = keep.includes(f) ? (given[f] ?? null) : null;
-  out.closed_at = CLOSED_STATES.includes(raw.state) ? at : null;
+  // A closed row keeps when it was closed, if the snapshot says so; otherwise the import time.
+  const closed = CLOSED_STATES.includes(raw.state);
+  if (!isBlank(raw.closed_at) && !closed) notes.push(`${raw.state} の行の closed_at。入れずにおきました`);
+  else if (!isBlank(raw.closed_at) && !isValidDue(raw.closed_at)) notes.push(`closed_at ${raw.closed_at} は日時として読めません。取り込んだ時刻にしました`);
+  out.closed_at = closed ? (!isBlank(raw.closed_at) && isValidDue(raw.closed_at) ? raw.closed_at : at) : null;
   return out;
 }
 
 // Turns a snapshot (whose envelope passed checkEnvelope) into rows ready to insert.
-// at: the timestamp for created_at/updated_at (and closed_at of closed rows).
+// at: the timestamp for created_at/updated_at (and closed_at of closed rows that do not give one).
 // reservedIds: ids the ledger keeps through the import (habits), which the snapshot may not use.
 export function prepareSnapshot(doc, { at, reservedIds = new Set() }) {
   const skipped = [];

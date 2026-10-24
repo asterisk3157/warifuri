@@ -33,6 +33,7 @@ warifuri import snapshot.json --db ledger.sqlite --actor import
 - id は台帳と同じ形(英小文字1字、数字14桁、英小文字か数字6字を `_` でつなぐ)です。places・goals・tasks を通して重ならないようにします。
 - 状態(`state`)は `ready`、`running`、`waiting`、`deferred`、`done`、`discarded` のどれかです。`mode` も台帳と同じ値を使います。
 - 状態に付く項目(`waiting_on`、`waiting_for`、`defer_until`、`result`、`reason`)は、その状態のときだけ書きます。
+- 完了か破棄の行には、閉じた時刻(`closed_at`、時差つきの ISO 日時)を書けます。書かなければ、取り込んだ時刻になります。
 - ゴールと置き場の `profile` は、属するプロフィールの名前です。タスクには `profile` を書きません。タスクのプロフィールは、ゴールがあればゴールの、なければ置き場のものになります。
 - 置き場の `paths` は、デバイスごとのディレクトリの並びです。1つのデバイスに道は1つです。
 - タスクには、説明(`body`、2,000字まで)、重さ(`load`、`heavy`・`normal`・`light` のどれか)、次の一手(`next`)、任せるの印(`delegated`、true か false)を書けます。どれも省いてかまいません。
