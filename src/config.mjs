@@ -18,13 +18,25 @@ import { parseEnv } from 'node:util';
 export const SETTINGS_FILE = 'warifuri.env';
 export const SECRETS_FILE = 'secrets.env';
 
-const LEDGER = ['import', 'key', 'backup', 'oauth', 'serve'];
+const LEDGER = ['import', 'key', 'backup', 'oauth', 'serve', 'connect'];
+const CLIENT = ['connect', 'hook'];
+
+const httpUrl = (v) => {
+  try {
+    const u = new URL(v);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'must start with http:// or https://';
+    return u.search || u.hash || u.username || u.password ? 'must be a plain URL, with no query or login' : null;
+  } catch {
+    return 'is not a URL';
+  }
+};
 
 // name: the variable. flag: the command-line override, if any. about: Japanese, for the
 // template and the documentation. def: the default (a function of the data directory, or a
 // string), and defText how the documentation shows it. secret: kept in secrets.env and masked.
 // path: a file path; a relative one in a settings file is read from the data directory.
 // commands: the commands that read it. check: returns what is wrong with a value, or null.
+// section: 'client' for the settings of a machine that uses a server (connect and the hook).
 export const SETTINGS = [
   {
     name: 'WARIFURI_HOME',
@@ -56,7 +68,7 @@ export const SETTINGS = [
     flag: 'port',
     about: '待ち受けるポート',
     def: '8787',
-    commands: ['serve'],
+    commands: ['serve', 'connect'],
     check: (v) => (/^\d+$/.test(v) && Number(v) <= 65535 ? null : 'must be a number from 0 to 65535'),
   },
   {
@@ -97,6 +109,31 @@ export const SETTINGS = [
     name: 'WARIFURI_REDIRECT_HOSTS',
     about: 'ログインのあとに戻してよい https の先。claude.ai と claude.com に足す。カンマ区切り',
     commands: ['serve'],
+  },
+  {
+    name: 'WARIFURI_SERVER_URL',
+    flag: 'url',
+    section: 'client',
+    about: '使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手の確かめのフックが読む',
+    commands: CLIENT,
+    check: httpUrl,
+  },
+  {
+    name: 'WARIFURI_DEVICE_KEY_FILE',
+    section: 'client',
+    about: 'この機械の鍵を1行で置くファイル。本人だけが読めるようにする。connect が書き、着手の確かめのフックが読む',
+    def: (home) => path.join(home, 'device.key'),
+    defText: 'WARIFURI_HOME/device.key',
+    path: true,
+    commands: CLIENT,
+  },
+  {
+    name: 'WARIFURI_GATE',
+    section: 'client',
+    about: '着手の確かめ。off にすると、持っているタスクがなくても編集を止めない',
+    def: 'on',
+    commands: ['hook'],
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
 ];
 
@@ -261,8 +298,13 @@ export function settingsTemplate() {
     `# 秘密(${SETTINGS.filter((s) => s.secret).map((s) => s.name).join('、')})は、このファイルではなく ${SECRETS_FILE} に書きます。`,
     '# 項目の説明は docs/configuration.md にあります。',
   ];
+  let section;
   for (const s of SETTINGS) {
     if (s.name === 'WARIFURI_HOME' || s.secret) continue;
+    if (s.section === 'client' && section !== 'client') {
+      out.push('', '# ---- 使う機械の設定。warifuri connect と着手の確かめのフックが読む ----');
+    }
+    section = s.section;
     out.push('', `# ${s.about}${s.defText ? `。既定は ${s.defText}` : ''}`);
     out.push(`# ${s.name}=${typeof s.def === 'string' ? s.def : ''}`);
   }
