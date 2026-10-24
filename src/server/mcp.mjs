@@ -112,6 +112,18 @@ function buildServer(ledger, device) {
   );
 
   server.registerTool(
+    'places',
+    {
+      description:
+        'List the places with their profile and their directory on each device. Use it to pick a place for a new ' +
+        'task, including places with no task yet. profile: only that profile.',
+      inputSchema: { profile: z.string().optional() },
+      annotations: readOnly,
+    },
+    async ({ profile }) => result({ places: ledger.listPlaces({ profile }) }),
+  );
+
+  server.registerTool(
     'search',
     {
       description: 'Find goals and tasks whose title contains the text, closed ones too. Use it before creating one, to avoid duplicates.',
@@ -308,6 +320,13 @@ function registerWriteTools(server, ledger, device, { write, writer }) {
     'Bring a done or discarded goal or task back to ready; its result or reason is cleared.',
     { id: z.string().min(1) },
     async ({ id }) => result(ledger.reopen(id, writer)),
+  );
+
+  tool(
+    'resume',
+    'Bring a deferred or waiting goal or task back to ready; its defer date or what it waited for is cleared.',
+    { id: z.string().min(1) },
+    async ({ id }) => result(ledger.resume(id, writer)),
   );
 
   tool(
