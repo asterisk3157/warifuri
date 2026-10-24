@@ -74,7 +74,14 @@ One commit, one purpose. Changes that would be reverted separately go in separat
 
 ## Pull requests
 
-The description follows the commit body's tone, and may use Markdown since GitHub renders it: a short paragraph on why, then **bold** for the few things a reviewer must look at, and line breaks between topics. Keep headings to two or three (なぜ, 変えたこと, 見てほしいところ) and drop the ones with nothing to say.
+Write the description in plain, ordinary Japanese (です・ます), the way pull requests are usually written. Use these headings, and drop any that have nothing to say:
+
+- `## 概要`: what the change does, in one to three sentences. No preamble such as 「〜の第一歩です」.
+- `## 変更内容`: the changes as a short list. List items may end in a noun (〜を追加).
+- `## レビューのポイント`: only what a reviewer must check; put the key sentence of each point in **bold**.
+- `## テスト`: what was run and the result.
+
+Say things directly. No casual headings (なぜ, 見てほしいところ), no 「！」, and no sentence that only introduces the next one.
 
 ## Writing
 
