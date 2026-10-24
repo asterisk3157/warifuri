@@ -133,6 +133,7 @@ function checkDeviceName(name) {
 export function openLedger(path, options = {}) {
   const now = options.now ?? (() => new Date());
   const db = new DatabaseSync(path);
+  let open = true;
   try {
     db.exec('PRAGMA foreign_keys = ON');
     if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
@@ -1071,8 +1072,11 @@ export function openLedger(path, options = {}) {
     listDevices,
     deviceForKey,
     oauth,
+    // A flag of its own: DatabaseSync#isOpen is newer than the Node versions warifuri runs on.
     close: () => {
-      if (db.isOpen) db.close();
+      if (!open) return;
+      open = false;
+      db.close();
     },
   };
 }
