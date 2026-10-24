@@ -1,0 +1,22 @@
+{
+  "name": "warifuri",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A secretary for people who work alongside AI agents: a ledger of goals and tasks.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "warifuri": "bin/warifuri.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --no-warnings=ExperimentalWarning \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "express": "5.3.0",
+    "zod": "4.6.5"
+  }
+}

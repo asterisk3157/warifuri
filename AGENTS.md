@@ -6,8 +6,8 @@ For AI agents (Claude Code, Codex and others) working in this repository.
 
 warifuri is a secretary for people who work with AI agents: a ledger of goals and tasks, opened through an MCP endpoint, with plug-ins around it. Read these before changing anything:
 
-1. `docs/思想.md` — the philosophy (principles 1–21). It is the spine of the design.
-2. `docs/構成.md` — the architecture derived from it. When the two disagree, `思想.md` wins; fix `構成.md`.
+1. `docs/principles.md` — the principles (1–22). It is the spine of the design.
+2. `docs/architecture.md` — the architecture derived from it. When the two disagree, `principles.md` wins; fix `architecture.md`.
 
 ## Rules
 
@@ -20,4 +20,4 @@ warifuri is a secretary for people who work with AI agents: a ledger of goals an
 
 ## Writing
 
-Short sentences. Say what something does, not how impressive it is. In Japanese, use plain です・ます in the READMEs and だ・である in `docs/`, as the existing files do.
+Keep the README to what warifuri is, its status and links; explanations go in `docs/`, written as prose like a technical article. Say what something does, without examples that stand in for an argument or claims about people in general. Write Japanese in です・ます.
