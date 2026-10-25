@@ -290,3 +290,15 @@ test('the hook runs warifuri.cmd on Windows when warifuri is on PATH, so the exe
   // Not on PATH: node and this package's bin, on every platform.
   assert.match(gateCommand({ env: { PATH: '' }, platform: 'win32', home: dir, homeIsDefault: true }), /warifuri\.mjs" hook gate$/);
 });
+
+test('a warifuri.env saved as UTF-16 is written back as UTF-8, with its lines kept', () => {
+  const w = world({ harnesses: ['claude'] });
+  const text = 'WARIFURI_GATE=on\r\n';
+  fs.writeFileSync(path.join(w.data, 'warifuri.env'), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]));
+  const r = run(w, ['--device', 'laptop', '--no-skills']);
+  assert.equal(r.status, 0, r.all);
+  const now = fs.readFileSync(path.join(w.data, 'warifuri.env'), 'utf8');
+  assert.ok(!now.includes('\0'), now);
+  assert.match(now, /^WARIFURI_GATE=on\r?$/m);
+  assert.match(now, /^WARIFURI_SERVER_URL=http:\/\/127\.0\.0\.1:8787$/m);
+});
