@@ -42,7 +42,7 @@ import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
-import { createChat } from './secretary/chat.mjs';
+import { createChat, writeTrigger } from './secretary/chat.mjs';
 import { JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -385,7 +385,7 @@ function runServe(args) {
     ledger.close();
     process.exitCode = 1;
   });
-  const sched = startSecretary(cfg);
+  const sched = startSecretary(cfg, chat);
   server.listen(Number(values.WARIFURI_PORT), values.WARIFURI_HOST, () => {
     const addr = server.address();
     const host = addr.family === 'IPv6' ? `[${addr.address}]` : addr.address;
@@ -403,7 +403,7 @@ function runServe(args) {
       process.stdout.write(`warifuri:   ${base}/web/login#token=${server.web.issueLogin()}\n`);
     }
     // Messages sent before a restart and not answered yet get their reply now.
-    chat.kick();
+    chat.kickAll();
   });
   let stopping = false;
   const stop = () => {
@@ -423,8 +423,11 @@ function runServe(args) {
 }
 
 // The secretary's clock in serve, when WARIFURI_SECRETARY is on: { stop } or null. Only one
-// line per run start and end is printed; claude's output goes to its log file.
-function startSecretary(cfg) {
+// line per run start and end is printed; claude's output goes to its log file. The morning is
+// not a run of its own: it is a call into the conversation (chat.trigger), answered by the
+// secretary of the conversation. Each check also looks for calls written by
+// `warifuri secretary run morning` from another process.
+function startSecretary(cfg, chat) {
   if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
   const ready = secretary.readyToSchedule(cfg);
   if (ready.problem) {
@@ -436,7 +439,8 @@ function startSecretary(cfg) {
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
-    run: (job) => secretary.runJob(job, cfg, { signal: abort.signal }),
+    run: (job) => (job === 'morning' ? chat.trigger(job) : secretary.runJob(job, cfg, { signal: abort.signal })),
+    onTick: () => chat.kick(),
   });
   scheduler.start();
   log(`secretary on: ${secretary.describeSchedule(ready.schedule)}; logs in ${secretary.paths(cfg.home).logs}`);
@@ -464,6 +468,20 @@ async function runSecretary(args) {
   const cfg = settingsFor('secretary', values);
   if (cfg === 2) return 2;
   warn(cfg);
+  if (sub === 'run' && positionals[0] === 'morning') {
+    // The morning goes into the conversation: warifuri serve answers it at its next check.
+    let ledger;
+    try {
+      ledger = openConfiguredLedger(cfg);
+      writeTrigger(ledger, 'morning', { actor: 'cli', device: null });
+    } catch (err) {
+      return fail(err, 'cannot write to the ledger');
+    } finally {
+      ledger?.close();
+    }
+    process.stdout.write('secretary: sent 朝の時間です into the conversation; warifuri serve answers it within a minute\n');
+    return 0;
+  }
   if (sub === 'run') {
     const job = positionals[0];
     process.stdout.write(`secretary: ${job} started\n`);

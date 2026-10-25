@@ -240,9 +240,9 @@ test('run starts claude with only warifuri tools, the connectors off, the key on
   const w = world();
   assert.equal(cli(['secretary', 'enable'], { home: w.home, env: w.env }).status, 0);
   const key = readSecretaryKey(w.home);
-  const r = cli(['secretary', 'run', 'morning'], { home: w.home, env: { ...w.env, WARIFURI_GITHUB_CLIENT_SECRET: 'gh-secret' } });
+  const r = cli(['secretary', 'run', 'nightly'], { home: w.home, env: { ...w.env, WARIFURI_GITHUB_CLIENT_SECRET: 'gh-secret' } });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /morning finished \(exit 0\); output in .*morning\.log/);
+  assert.match(r.stdout, /nightly finished \(exit 0\); output in .*nightly\.log/);
   const [call] = w.calls();
   assert.deepEqual(call.args, [
     '-p',
@@ -255,18 +255,18 @@ test('run starts claude with only warifuri tools, the connectors off, the key on
   assert.match(call.args[7], /(^|,)Write(,|$)/);
   assert.equal(call.connectors, 'false');
   assert.deepEqual(call.warifuriEnv, []);
-  assert.match(call.input, /朝の報告\(`morning`\)/);
+  assert.match(call.input, /毎晩の見張りと組み直し\(`nightly`\)/);
   assert.match(call.input, /期日は作りません/);
   // The key is in no argument, no output and no log.
-  const logFile = path.join(paths(w.home).logs, 'morning.log');
+  const logFile = path.join(paths(w.home).logs, 'nightly.log');
   for (const text of [JSON.stringify(call.args), call.input, r.stdout, r.stderr, read(logFile)]) assert.ok(!text.includes(key));
   assert.match(read(logFile), /fake claude: done/);
   if (process.platform !== 'win32') assert.equal(fs.statSync(logFile).mode & 0o777, 0o600);
   assert.ok(!fs.existsSync(paths(w.home).lock));
 
-  // A second run keeps the one before as morning.prev.log.
-  assert.equal(cli(['secretary', 'run', 'morning'], { home: w.home, env: w.env }).status, 0);
-  assert.ok(fs.existsSync(path.join(paths(w.home).logs, 'morning.prev.log')));
+  // A second run keeps the one before as nightly.prev.log.
+  assert.equal(cli(['secretary', 'run', 'nightly'], { home: w.home, env: w.env }).status, 0);
+  assert.ok(fs.existsSync(path.join(paths(w.home).logs, 'nightly.prev.log')));
   assert.equal(cli(['secretary', 'run', 'lunch'], { home: w.home, env: w.env }).status, 2);
 });
 

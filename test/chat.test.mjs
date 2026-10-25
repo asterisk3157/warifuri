@@ -114,7 +114,8 @@ test('chat: the first turn starts a session with --session-id, the next resumes 
   assert.deepEqual(first.args.slice(0, 4), ['-p', '--mcp-config', paths(w.home).mcp, '--strict-mcp-config']);
   assert.equal(first.args[first.args.indexOf('--allowedTools') + 1], 'mcp__warifuri');
   assert.match(first.args[first.args.indexOf('--disallowedTools') + 1], /(^|,)Bash(,|$)/);
-  assert.equal(first.args[first.args.indexOf('--output-format') + 1], 'json');
+  assert.equal(first.args[first.args.indexOf('--output-format') + 1], 'stream-json');
+  assert.ok(first.args.includes('--verbose') && first.args.includes('--include-partial-messages'));
   assert.equal(first.options.cwd, paths(w.home).chat);
   assert.equal(first.options.env.ENABLE_CLAUDEAI_MCP_SERVERS, 'false');
   assert.deepEqual(Object.keys(first.options.env).filter((k) => k.startsWith('WARIFURI_')), []);
