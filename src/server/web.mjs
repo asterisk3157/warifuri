@@ -1,4 +1,4 @@
-// The Web screens: カレンダー, タスク, サーバー and 設定, for the person to read the ledger in a
+// The Web screens: カレンダー, タスク, サーバー, 秘書 and 設定, for the person to read the ledger in a
 // browser. The pages are static files in src/web/ (no build step), fed by read-only JSON under
 // /web/api/. The one write is the person's profile (name, bio, colour), kept in the settings
 // table and recorded.
@@ -34,7 +34,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ASSETS_DIR = path.join(HERE, '..', 'web');
 const PACKAGE = path.join(HERE, '..', '..', 'package.json');
 
-export const PAGES = ['calendar', 'tasks', 'server', 'settings'];
+export const PAGES = ['calendar', 'tasks', 'server', 'secretary', 'settings'];
 export const LOGIN_MS = 15 * 60 * 1000;
 export const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 // The file in the data directory that keeps the Web screens' sessions across restarts.
@@ -43,6 +43,8 @@ const MAX_LOGINS = 10;
 const MAX_SESSIONS = 100;
 const RECENT_DONE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RANGE_MS = 42 * 24 * 60 * 60 * 1000;
+// How many of the secretary's reports the 秘書 screen shows.
+const SECRETARY_REPORTS = 30;
 
 // The profile's colours to choose from, and its limits.
 export const PROFILE_COLORS = ['#8cc4ea', '#8fd3b2', '#a9a3ec', '#e7a9d8', '#f1c47e', '#c9ced6'];
@@ -508,6 +510,12 @@ export function createWeb({
       now: nowIso(), version, started_at: new Date(startedAt).toISOString(), uptime_s: Math.max(0, Math.floor((now() - startedAt) / 1000)),
       mcp_url: mcpUrl(req), label: serverLabel, last_backup_at: lastBackup(home), devices, profiles: profileColors(home, names),
     });
+  });
+
+  // The secretary's latest reports, newest first.
+  api.get('/secretary', (req, res) => {
+    const { reports } = ledger.listReports({ limit: SECRETARY_REPORTS });
+    res.json({ now: nowIso(), reports: reports.map((r) => ({ id: r.id, kind: r.kind, title: r.title, body: r.body, created_at: r.created_at })) });
   });
 
   api.get('/settings', (req, res) => {

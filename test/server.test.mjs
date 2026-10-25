@@ -89,8 +89,8 @@ test('tools/list shows the read tools, marked read-only, and the write tools', a
   const { connect, keys } = await start(t);
   const client = await connect(keys.laptop);
   const { tools } = await client.listTools();
-  const reads = ['autonomy', 'board', 'context', 'flow', 'free_time', 'get', 'places', 'schedule', 'search', 'stale'];
-  const writes = ['autonomy_outcome', 'autonomy_set', 'book', 'close', 'create_goal', 'create_task', 'defer', 'habit', 'link', 'note', 'place', 'release', 'reopen', 'resume', 'settings', 'start', 'unbook', 'unlink', 'update', 'wait'];
+  const reads = ['autonomy', 'board', 'context', 'flow', 'free_time', 'get', 'places', 'reports', 'schedule', 'search', 'stale'];
+  const writes = ['autonomy_outcome', 'autonomy_set', 'book', 'close', 'create_goal', 'create_task', 'defer', 'habit', 'link', 'note', 'place', 'release', 'reopen', 'report', 'resume', 'settings', 'start', 'unbook', 'unlink', 'update', 'wait'];
   assert.deepEqual(tools.map((x) => x.name).sort(), [...reads, ...writes].sort());
   for (const tool of tools) {
     assert.ok(tool.description.length > 0);

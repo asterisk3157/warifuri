@@ -253,6 +253,18 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-placeholder p { margin: 0; font-size: 15px; color: var(--sub); line-height: 1.6; }
 .wf-silhouette { display: flex; gap: 16px; padding: 14px; border-radius: 10px; background: #f5f5f7; }
 
+/* 秘書 */
+.wf-reports { overflow: hidden; }
+.wf-report { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; border-top: 1px solid var(--hair); min-width: 0; }
+.wf-report:first-child { border-top: none; }
+.wf-report-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wf-report-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wf-report-time { font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wf-report-body { margin: 0; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wf-kind { flex: none; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 2px 10px; white-space: nowrap; background: var(--tint); color: var(--accent); }
+.wf-kind-morning { background: #fdf1dc; color: #8a5a12; }
+.wf-kind-inbox { background: #f2f2f4; color: var(--sub); }
+
 /* 設定 */
 .wf-set-title { padding: 10px 10px 8px; font-size: 24px; font-weight: 600; }
 .wf-me { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 10px; border: none; border-radius: 10px; cursor: pointer; background: transparent; text-align: left; }

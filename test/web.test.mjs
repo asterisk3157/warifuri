@@ -18,7 +18,8 @@ import { layoutFlow } from '../src/web/flow.js';
 const ACTOR = { actor: 'human' };
 
 // A ledger with a goal and ordered tasks, a goal-less task, places, devices (one revoked),
-// held tasks, a booking, an OAuth app with live tokens, and a backup in home/backups.
+// held tasks, a booking, a report from the secretary, an OAuth app with live tokens, and a
+// backup in home/backups.
 async function start(t, options = {}) {
   let tick = 0;
   const ledger = openLedger(':memory:', { now: () => new Date(Date.now() + (tick += 1)) });
@@ -45,6 +46,7 @@ async function start(t, options = {}) {
   ledger.start(a.id, { device: 'laptop', placeId: p1.id }, { actor: 'agent', device: 'laptop' });
   ledger.start(loose.id, { device: 'laptop', placeId: p2.id }, { actor: 'agent', device: 'laptop' });
   ledger.book({ kind: 'task', task_id: a.id, starts_at: '2026-10-25T09:00:00+09:00', ends_at: '2026-10-25T10:00:00+09:00' }, ACTOR);
+  ledger.writeReport({ kind: 'nightly', title: '<b>Night</b>', body: '- on track\n- <script>x</script>' }, { actor: 'device-key', device: 'desk' });
   // An app that logged in with GitHub and chose the desk.
   const client = ledger.oauth.registerClient({ client_name: 'Test Agent', redirect_uris: ['http://localhost:9/cb'] });
   const pending = ledger.oauth.createPending({ clientId: client.client_id, redirectUri: 'http://localhost:9/cb', codeChallenge: 'c', scopes: [] });
@@ -99,14 +101,14 @@ test('open on this machine: pages and endpoints answer without a login', async (
   const root = await get(base, '/');
   assert.equal(root.status, 302);
   assert.equal(root.headers.get('location'), '/calendar');
-  for (const p of ['/calendar', '/tasks', '/server', '/settings']) {
+  for (const p of ['/calendar', '/tasks', '/server', '/secretary', '/settings']) {
     const res = await get(base, p);
     assert.equal(res.status, 200, p);
     assert.match(res.headers.get('content-type'), /text\/html/);
     assert.match(res.headers.get('content-security-policy'), /script-src 'self'/);
     assert.match(await res.text(), /\/web\/app\.js/);
   }
-  for (const p of ['/web/app.js', '/web/app.css', '/web/ui.js', '/web/flow.js', '/web/pages/tasks.js']) {
+  for (const p of ['/web/app.js', '/web/app.css', '/web/ui.js', '/web/flow.js', '/web/pages/tasks.js', '/web/pages/secretary.js']) {
     assert.equal((await get(base, p)).status, 200, p);
   }
   assert.equal((await get(base, '/web/api/nothing')).status, 404);
@@ -172,6 +174,34 @@ test('endpoint shapes', async (t) => {
 
   const profile = await (await get(base, '/web/api/profile')).json();
   assert.deepEqual(profile, { name: null, bio: '', color: '#8cc4ea', github: null });
+
+  const sec = await (await get(base, '/web/api/secretary')).json();
+  assert.match(sec.now, /^\d{4}-/);
+  assert.equal(sec.reports.length, 1);
+  assert.deepEqual(Object.keys(sec.reports[0]).sort(), ['body', 'created_at', 'id', 'kind', 'title']);
+  assert.equal(sec.reports[0].kind, 'nightly');
+  // Stored and returned as the text it is; the page puts it in as text.
+  assert.equal(sec.reports[0].title, '<b>Night</b>');
+  assert.equal(sec.reports[0].body, '- on track\n- <script>x</script>');
+});
+
+test('秘書: the newest 30 reports first, and none on an empty ledger', async (t) => {
+  const { base, ledger } = await start(t);
+  for (let i = 0; i < 31; i += 1) ledger.writeReport({ kind: i % 2 ? 'morning' : 'inbox', title: `R${i}`, body: 'b' }, { actor: 'device-key', device: 'desk' });
+  const { reports } = await (await get(base, '/web/api/secretary')).json();
+  assert.equal(reports.length, 30);
+  assert.deepEqual(reports.slice(0, 2).map((r) => r.title), ['R30', 'R29']);
+
+  const bare = openLedger(':memory:');
+  const server = createServer({ ledger: bare });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    bare.close();
+  });
+  const empty = await (await get(`http://127.0.0.1:${server.address().port}`, '/web/api/secretary')).json();
+  assert.deepEqual(empty.reports, []);
 });
 
 test('the profile: JSON from this origin only, checked, kept in settings and recorded', async (t) => {
@@ -208,6 +238,8 @@ test('beyond this machine: a one-time login URL gives an HttpOnly, SameSite=Stri
   assert.equal(server.web.mode, 'login');
   assert.equal((await get(base, '/calendar')).status, 401);
   assert.equal((await get(base, '/web/api/tasks')).status, 401);
+  assert.equal((await get(base, '/secretary')).status, 401);
+  assert.equal((await get(base, '/web/api/secretary')).status, 401);
   // Static code is not data; it is served to anyone.
   assert.equal((await get(base, '/web/app.js')).status, 200);
   // Keys and tokens are not taken, as a cookie or a bearer.
@@ -242,7 +274,9 @@ test('beyond this machine: a one-time login URL gives an HttpOnly, SameSite=Stri
   const session = cookie.split(';')[0];
   assert.equal((await get(base, '/calendar', { Cookie: session })).status, 200);
   assert.equal((await get(base, '/web/api/tasks', { Cookie: session })).status, 200);
+  assert.equal((await get(base, '/web/api/secretary', { Cookie: session })).status, 200);
   assert.equal((await get(base, '/web/api/tasks', { Cookie: 'warifuri_web=forged' })).status, 401);
+  assert.equal((await get(base, '/web/api/secretary', { Cookie: 'warifuri_web=forged' })).status, 401);
 });
 
 test('with an https public URL the cookie is __Host- and Secure, and the label is サーバー', async (t) => {
@@ -284,7 +318,7 @@ test('no key, token or hash leaves any endpoint', async (t) => {
   const sid = cookie.split('=')[1];
   assert.ok(secrets.length >= 4, 'two keys and the access and refresh tokens');
   const forbidden = [...secrets, ...secrets.map((s) => createHash('sha256').update(s).digest('hex')), sid];
-  for (const p of ['about', 'tasks', 'server', 'settings', 'profile', 'calendar']) {
+  for (const p of ['about', 'tasks', 'server', 'secretary', 'settings', 'profile', 'calendar']) {
     const text = await (await get(base, `/web/api/${p}`, { Cookie: cookie })).text();
     for (const s of forbidden) assert.equal(text.includes(s), false, `${p} leaks ${s.slice(0, 6)}`);
     assert.doesNotMatch(text, /key_hash|wf[arc]?_[A-Za-z0-9_-]{20}/, p);

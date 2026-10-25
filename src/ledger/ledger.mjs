@@ -1,8 +1,8 @@
 // The ledger: goals, tasks, their order, holds, habits, places, devices and the secretary's
-// autonomy levels, kept in one SQLite file through node:sqlite. Every write is checked against
-// rules.mjs, runs in one transaction and appends one row to `records` (who changed what, from
-// which device, before/after). A refused write changes nothing and throws a LedgerError
-// carrying every problem found.
+// autonomy levels and reports, kept in one SQLite file through node:sqlite. Every write is
+// checked against rules.mjs, runs in one transaction and appends one row to `records` (who
+// changed what, from which device, before/after). A refused write changes nothing and throws
+// a LedgerError carrying every problem found.
 // replaceFromSnapshot() is the one write that takes rows breaking the rules: it stores them
 // with `review` set, and the next write to such a row must pass the rules (which clears it).
 // Bookings (予定) give time to a task, a habit or a fixed appointment; they may overlap, and
@@ -21,6 +21,7 @@ import { oauthStore } from './oauth.mjs';
 import {
   STATES,
   CLOSED_STATES,
+  REPORT_KINDS,
   HUMAN_TIME_MODES,
   ALL_STATE_FIELDS,
   RELEASING_STATES,
@@ -37,6 +38,7 @@ import {
   readHabitRule,
   checkPlace,
   checkBooking,
+  checkReport,
   checkAutonomy,
   checkStateExtra,
   AUTONOMY_KINDS,
@@ -80,7 +82,11 @@ const TASK_EDITABLE = [
 ];
 const HABIT_EDITABLE = ['title', 'rule', 'duration_min', 'goal_id', 'active'];
 const FLAG_FIELDS = ['due_provisional', 'human_led', 'active', 'delegated'];
-const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p', booking: 'b' };
+const REPORT_COLUMNS = ['id', 'kind', 'title', 'body', 'device', 'created_at'];
+// How many reports one read returns: by default, and at most.
+export const REPORTS_DEFAULT = 10;
+export const REPORTS_MAX = 50;
+const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p', booking: 'b', report: 'r' };
 const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const DAY_MS = 24 * 60 * 60 * 1000;
 // A device's last_seen_at is written at most once in this long.
@@ -219,8 +225,8 @@ export function openLedger(path, options = {}) {
     return !!one(
       'SELECT 1 FROM goals WHERE id = ? UNION ALL SELECT 1 FROM tasks WHERE id = ? ' +
         'UNION ALL SELECT 1 FROM habits WHERE id = ? UNION ALL SELECT 1 FROM places WHERE id = ? ' +
-        'UNION ALL SELECT 1 FROM bookings WHERE id = ?',
-      id, id, id, id, id,
+        'UNION ALL SELECT 1 FROM bookings WHERE id = ? UNION ALL SELECT 1 FROM reports WHERE id = ?',
+      id, id, id, id, id, id,
     );
   }
 
@@ -1042,6 +1048,65 @@ export function openLedger(path, options = {}) {
     transaction(() => record(w, 'knowledge', profile, 'note', changes));
   }
 
+  // Stores a report ({ kind, title, body }) from the writer's device. Line ends become \n and
+  // the ends of the title and body are trimmed. Reports are only added; the record keeps it too.
+  function writeReport(fields, opts) {
+    const w = requireWriter(opts);
+    const input = fields ?? {};
+    const problems = unknownFields(input, ['kind', 'title', 'body']);
+    const tidy = (v) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').trim() : v);
+    const row = { kind: input.kind, title: tidy(input.title), body: tidy(input.body), device: w.device };
+    problems.push(...checkReport(row));
+    if (problems.length) throw new LedgerError(problems);
+    row.id = chooseId('report', undefined, problems);
+    row.created_at = nowIso();
+    return transaction(() => {
+      insert('reports', REPORT_COLUMNS, row);
+      record(w, 'report', row.id, 'create', diff(null, row, REPORT_COLUMNS));
+      return { ...one('SELECT * FROM reports WHERE id = ?', row.id) };
+    });
+  }
+
+  // Reports, newest first. kind: only that kind. limit: how many (REPORTS_DEFAULT, at most
+  // REPORTS_MAX). before: a report's id, or an ISO datetime with offset; only older ones are
+  // returned. next_before is the id to pass as before for the next page, or null at the end.
+  function listReports({ kind, limit, before } = {}) {
+    const problems = [];
+    if (kind !== undefined && kind !== null && !REPORT_KINDS.includes(kind)) {
+      problems.push(`報告の種類(kind)は ${REPORT_KINDS.join(', ')} のどれかです`);
+    }
+    const n = limit ?? REPORTS_DEFAULT;
+    if (!Number.isInteger(n) || n < 1 || n > REPORTS_MAX) problems.push(`limit は 1〜${REPORTS_MAX} の整数です`);
+    // Ties in created_at fall back to the order the rows were added (rowid).
+    let after = null;
+    if (before !== undefined && before !== null) {
+      const ref = typeof before === 'string' ? one('SELECT created_at, rowid AS n FROM reports WHERE id = ?', before) : null;
+      if (ref) after = ref;
+      else if (isValidDateTime(before)) after = { created_at: new Date(before).toISOString(), n: 0 };
+      else if (isValidId(before)) problems.push(`${before} という報告はありません`);
+      else problems.push('before には報告の id か、時差つきの ISO 日時を渡します');
+    }
+    if (problems.length) throw new LedgerError(problems);
+    const where = [];
+    const args = [];
+    if (kind) {
+      where.push('kind = ?');
+      args.push(kind);
+    }
+    if (after) {
+      where.push('(created_at < ? OR (created_at = ? AND rowid < ?))');
+      args.push(after.created_at, after.created_at, after.n);
+    }
+    const rows = all(
+      `SELECT ${REPORT_COLUMNS.join(', ')} FROM reports ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      ...args,
+      n + 1,
+    ).map((r) => ({ ...r }));
+    const more = rows.length > n;
+    const reports = rows.slice(0, n);
+    return { reports, next_before: more ? reports[reports.length - 1].id : null };
+  }
+
   // Every order between tasks, as { before_id, after_id }.
   function blocks() {
     return all('SELECT before_id, after_id FROM blocks ORDER BY before_id, after_id').map((r) => ({ ...r }));
@@ -1476,6 +1541,8 @@ export function openLedger(path, options = {}) {
     stale,
     records,
     recordNote,
+    writeReport,
+    listReports,
     blocks,
     getSettings,
     setSettings,
