@@ -1,5 +1,6 @@
-// Tests for bookings (予定): the schema version 4 migration, book / unbook / schedule in the
-// ledger (their rules, overlaps, the range and order of schedule, the profile it derives),
+// Tests for bookings (予定): the schema version 4 and 6 migrations, book / unbook / schedule in
+// the ledger (their rules, overlaps, the range and order of schedule, the profile it derives),
+// the outside event a booking names (source, external_id) and importing it twice,
 // bookings dropped on import, devices' last_seen_at and its throttle, and the MCP tools.
 // The server's local time is pinned to Asia/Tokyo, so "today" and YYYY-MM-DD have one meaning.
 
@@ -77,7 +78,7 @@ test('schema: a version 3 file gains bookings and devices.last_seen_at, keeps it
   assert.throws(() => ins.run('2026-10-03T00:00:00.000Z', 'human', null, 'booking', 'b1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal(SCHEMA_VERSION, 6);
   const L = openLedger(file, { now: handClock().now });
   assert.deepEqual(L.listDevices().map((d) => [d.name, d.last_seen_at]), [['laptop', null]]);
   assert.deepEqual(L.records('hobby').map((r) => [r.id, r.entity]), [[2, 'knowledge']]);
@@ -87,13 +88,48 @@ test('schema: a version 3 file gains bookings and devices.last_seen_at, keeps it
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '5');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '6');
   assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'bookings_starts'").get());
   assert.equal(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'records_v3'").get(), undefined);
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);
-  check.prepare("UPDATE meta SET value = '6' WHERE key = 'schema_version'").run();
+  check.prepare("UPDATE meta SET value = '7' WHERE key = 'schema_version'").run();
   check.close();
   assert.throws(() => openLedger(file), /newer than this warifuri/);
+});
+
+test('schema: a version 5 file gains source and external_id on its bookings, one booking per pair', () => {
+  const file = path.join(tmpRoot, `v5-${Date.now()}.sqlite`);
+  const raw = new DatabaseSync(file);
+  raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  for (const m of MIGRATIONS.slice(0, 5)) raw.exec(m);
+  raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '5')").run();
+  raw
+    .prepare(
+      "INSERT INTO bookings (id, title, kind, starts_at, ends_at, created_at, updated_at) " +
+        "VALUES ('b_20261001000000_aaaaaa', 'Dentist', 'fixed', '2026-10-25T01:00:00.000Z', '2026-10-25T02:00:00.000Z', 'x', 'x')",
+    )
+    .run();
+  raw.close();
+
+  const L = openLedger(file, { now: handClock().now });
+  const [old] = L.schedule({ from: '2026-10-25' }).bookings;
+  assert.equal(old.title, 'Dentist');
+  assert.equal(old.source, null);
+  assert.equal(old.external_id, null);
+  L.close();
+
+  const check = new DatabaseSync(file);
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '6');
+  const ins = check.prepare(
+    "INSERT INTO bookings (id, title, kind, starts_at, ends_at, source, external_id, created_at, updated_at) " +
+      "VALUES (?, 'x', 'fixed', '2026-10-25T01:00:00.000Z', '2026-10-25T02:00:00.000Z', ?, ?, 'x', 'x')",
+  );
+  ins.run('b_20261001000000_bbbbbb', 'google-calendar', 'ev1');
+  assert.throws(() => ins.run('b_20261001000000_cccccc', 'google-calendar', 'ev1'), /UNIQUE/);
+  // Without external_id, the index does not apply.
+  ins.run('b_20261001000000_dddddd', 'google-calendar', null);
+  ins.run('b_20261001000000_eeeeee', 'google-calendar', null);
+  check.close();
 });
 
 test('book: each kind needs what it names, and a refused booking writes nothing', (t) => {
@@ -188,6 +224,76 @@ test('book: titles default to the task or habit, times are stored in UTC, and an
   assert.deepEqual(del.changes.starts_at, { before: '2026-10-25T04:00:00.000Z', after: null });
   assert.equal(L.get(s.read.id).title, 'Read papers');
   assert.equal(L.schedule({ from: '2026-10-25' }).bookings.some((b) => b.id === a.id), false);
+});
+
+test('book: a source and external_id already in the ledger change that booking instead of making a second one', (t) => {
+  const { L, count } = fresh(t);
+  const event = {
+    kind: 'fixed', title: 'Dentist', source: 'google-calendar', external_id: 'ev1',
+    starts_at: '2026-10-25T10:00:00+09:00', ends_at: '2026-10-25T11:00:00+09:00',
+  };
+  const first = L.book(event, AGENT).booking;
+  assert.equal(first.source, 'google-calendar');
+  assert.equal(first.external_id, 'ev1');
+  // The same event again, unchanged: the same booking, and no new record.
+  assert.equal(L.book(event, AGENT).booking.id, first.id);
+  assert.equal(count('bookings'), 1);
+  assert.deepEqual(L.records(first.id).map((r) => r.action), ['create']);
+  // The event moved over there: the booking follows, as a change.
+  const moved = L.book({ ...event, starts_at: '2026-10-25T13:00:00+09:00', ends_at: '2026-10-25T14:00:00+09:00' }, AGENT).booking;
+  assert.equal(moved.id, first.id);
+  assert.equal(moved.starts_at, '2026-10-25T04:00:00.000Z');
+  assert.equal(count('bookings'), 1);
+  const update = L.records(first.id).at(-1);
+  assert.equal(update.action, 'update');
+  assert.deepEqual(Object.keys(update.changes).sort(), ['ends_at', 'starts_at']);
+  // The same id in another source, or no pair at all, is another booking.
+  assert.notEqual(L.book({ ...event, source: 'other-calendar' }, AGENT).booking.id, first.id);
+  assert.notEqual(L.book({ ...event, source: undefined, external_id: undefined }, AGENT).booking.id, first.id);
+  assert.equal(count('bookings'), 3);
+
+  // schedule returns both fields.
+  const day = L.schedule({ from: '2026-10-25' }).bookings;
+  assert.deepEqual(
+    day.map((b) => [b.source, b.external_id]).sort(),
+    [[null, null], ['google-calendar', 'ev1'], ['other-calendar', 'ev1']].sort(),
+  );
+
+  // external_id needs source, also when source would be cleared from a booking that has one.
+  assert.throws(() => L.book({ ...event, source: undefined, external_id: 'ev2' }, AGENT), /external_id\)には、出どころ\(source\)も要ります/);
+  assert.throws(() => L.book({ id: first.id, source: null }, AGENT), /出どころ\(source\)も要ります/);
+  assert.throws(() => L.book({ ...event, external_id: 5 }, AGENT), /external_id\)は文字列です/);
+  assert.equal(count('bookings'), 3);
+  // Clearing both lets the booking go its own way: the event, imported again, is a new booking.
+  assert.equal(L.book({ id: first.id, source: null, external_id: null }, AGENT).booking.external_id, null);
+  assert.notEqual(L.book(event, AGENT).booking.id, first.id);
+  assert.equal(count('bookings'), 4);
+});
+
+test('book: with id, a source and external_id can be attached, unless another booking has the pair', (t) => {
+  const { L } = fresh(t);
+  const s = seed(L);
+  const span = { starts_at: '2026-10-25T10:00:00+09:00', ends_at: '2026-10-25T11:00:00+09:00' };
+  // A task's booking, written out to the calendar, gets the event's id back.
+  const mine = L.book({ kind: 'task', task_id: s.read.id, ...span }, AGENT).booking;
+  const attached = L.book({ id: mine.id, source: 'google-calendar', external_id: 'ev9' }, AGENT).booking;
+  assert.equal(attached.id, mine.id);
+  assert.equal(attached.title, 'Read papers');
+  assert.deepEqual(L.records(mine.id).at(-1).changes, {
+    source: { before: null, after: 'google-calendar' },
+    external_id: { before: null, after: 'ev9' },
+  });
+  // Importing that event later finds the same booking.
+  assert.equal(L.book({ kind: 'task', task_id: s.read.id, source: 'google-calendar', external_id: 'ev9', ...span }, AGENT).booking.id, mine.id);
+  // Giving the same pair again with its own id is fine.
+  assert.equal(L.book({ id: mine.id, source: 'google-calendar', external_id: 'ev9' }, AGENT).booking.id, mine.id);
+
+  const other = L.book({ kind: 'fixed', title: 'Call', ...span }, AGENT).booking;
+  assert.throws(
+    () => L.book({ id: other.id, source: 'google-calendar', external_id: 'ev9' }, AGENT),
+    new RegExp(`出どころ google-calendar の ev9 は、もう予定 ${mine.id} に付いています`),
+  );
+  assert.equal(L.schedule({ from: '2026-10-25' }).bookings.find((b) => b.id === other.id).external_id, null);
 });
 
 test('book: overlaps are allowed and listed, without the booking itself or ones that only touch', (t) => {
@@ -391,6 +497,22 @@ test('MCP: book, schedule and unbook write as the calling device, and refusals c
   assert.equal(removed.data.title, 'Call');
   assert.deepEqual(ledger.records(second.data.booking.id).map((r) => [r.action, r.device]), [['create', 'laptop'], ['delete', 'laptop']]);
   assert.match((await call('unbook', { id: second.data.booking.id })).text, /という予定はありません/);
+
+  // An imported event twice is one booking; external_id alone is refused in Japanese.
+  const event = { kind: 'fixed', title: 'Dentist', source: 'google-calendar', external_id: 'ev1', ...span };
+  const imported = await call('book', event);
+  assert.equal((await call('book', { ...event, title: 'Dentist (moved)' })).data.booking.id, imported.data.booking.id);
+  const listed = (await call('schedule', { from: '2026-10-25' })).data.bookings.find((b) => b.id === imported.data.booking.id);
+  assert.deepEqual([listed.title, listed.source, listed.external_id], ['Dentist (moved)', 'google-calendar', 'ev1']);
+  const lone = await call('book', { kind: 'fixed', title: 'x', external_id: 'ev2', ...span });
+  assert.equal(lone.res.isError, true);
+  assert.match(lone.text, /出どころ\(source\)も要ります/);
+  // With id, the pair is attached to the booking it names, unless another has it.
+  const attached = await call('book', { id: made.data.booking.id, source: 'google-calendar', external_id: 'ev3' });
+  assert.equal(attached.data.booking.external_id, 'ev3');
+  const taken = await call('book', { id: made.data.booking.id, source: 'google-calendar', external_id: 'ev1' });
+  assert.equal(taken.res.isError, true);
+  assert.match(taken.text, /もう予定 .* に付いています/);
 });
 
 test('a device key on /mcp and /api marks the device as seen, once a minute', async (t) => {

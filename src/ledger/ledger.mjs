@@ -61,9 +61,11 @@ const TASK_COLUMNS = [
 ];
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'profile', 'created_at', 'updated_at'];
-const BOOKING_COLUMNS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'created_at', 'updated_at'];
+const BOOKING_COLUMNS = [
+  'id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'source', 'external_id', 'created_at', 'updated_at',
+];
 // Fields book() takes; id names the booking to change.
-const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note'];
+const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'source', 'external_id'];
 
 // Fields a caller may change with update(); state and its fields go through setState().
 const GOAL_EDITABLE = ['title', 'outcome', 'due', 'due_provisional', 'mode', 'human_led', 'profile'];
@@ -742,16 +744,27 @@ export function openLedger(path, options = {}) {
   // kind task needs an existing task_id, habit an existing habit_id, and their title defaults
   // to the task's or habit's; fixed needs a title. Times take an offset and are stored in UTC.
   // Overlaps are allowed: the result lists the bookings sharing time with this one.
+  // source and external_id say which outside event the booking is (imported from it, or
+  // copied to it). Without id, a pair already in the ledger changes that booking instead of
+  // making a second one; with id, the pair may be set only if no other booking has it.
   function book(fields, opts) {
     const w = requireWriter(opts);
     const input = fields ?? {};
     const problems = unknownFields(input, BOOKING_FIELDS);
     const { id, ...given } = input;
-    const before = blank(id) ? null : getBookingRow(id);
+    const paired = (src, ext) =>
+      typeof src === 'string' && typeof ext === 'string' && !blank(ext)
+        ? one('SELECT * FROM bookings WHERE source = ? AND external_id = ?', src, ext)
+        : undefined;
+    let before = blank(id) ? null : getBookingRow(id);
     if (!blank(id) && !before) throw new LedgerError([`${id} という予定はありません`]);
+    if (blank(id)) before = paired(given.source, given.external_id) ?? null;
     const next = before
       ? { ...before }
-      : { id: null, title: null, kind: undefined, task_id: null, habit_id: null, starts_at: undefined, ends_at: undefined, note: null };
+      : {
+          id: null, title: null, kind: undefined, task_id: null, habit_id: null, starts_at: undefined, ends_at: undefined,
+          note: null, source: null, external_id: null,
+        };
     for (const [k, v] of Object.entries(given)) if (v !== undefined && BOOKING_FIELDS.includes(k)) next[k] = v;
     // A link that does not belong to the kind is dropped, unless the caller gave it.
     if (next.kind !== 'task' && given.task_id === undefined) next.task_id = null;
@@ -761,11 +774,15 @@ export function openLedger(path, options = {}) {
     const linked = task ?? habit;
     const relinked = !before || next.kind !== before.kind || next.task_id !== before.task_id || next.habit_id !== before.habit_id;
     if (linked && blank(given.title) && (given.title !== undefined || relinked)) next.title = linked.title;
-    problems.push(...checkBooking(next, { taskExists: !!task, habitExists: !!habit }));
+    const holder = paired(next.source, next.external_id);
+    const pairTakenBy = holder && holder.id !== next.id ? holder.id : null;
+    problems.push(...checkBooking(next, { taskExists: !!task, habitExists: !!habit, pairTakenBy }));
     if (problems.length) throw new LedgerError(problems);
     next.starts_at = new Date(next.starts_at).toISOString();
     next.ends_at = new Date(next.ends_at).toISOString();
     for (const k of ['task_id', 'habit_id', 'note']) next[k] = next[k] ?? null;
+    // An empty pair is no pair, so it never meets the unique index.
+    for (const k of ['source', 'external_id']) next[k] = blank(next[k]) ? null : next[k];
     const t = nowIso();
     const view = (row) => ({ booking: { ...row }, overlaps: overlapping(row.starts_at, row.ends_at, row.id) });
     if (before) {

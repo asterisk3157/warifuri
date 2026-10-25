@@ -194,6 +194,12 @@ export function checkBooking(row, ctx = {}) {
   if (row.kind === 'fixed' && isBlank(row.title)) p.push('固定の予定には題名(title)が要ります');
   if (!isText(row.title)) p.push('題名(title)は文字列です');
   if (!isText(row.note)) p.push('メモ(note)は文字列です');
+  if (!isText(row.source)) p.push('出どころ(source)は文字列です');
+  if (!isText(row.external_id)) p.push('外の予定の id(external_id)は文字列です');
+  else if (!isBlank(row.external_id) && isBlank(row.source)) {
+    p.push('外の予定の id(external_id)には、出どころ(source)も要ります');
+  }
+  if (ctx.pairTakenBy) p.push(`出どころ ${row.source} の ${row.external_id} は、もう予定 ${ctx.pairTakenBy} に付いています`);
   const startOk = isValidDateTime(row.starts_at);
   const endOk = isValidDateTime(row.ends_at);
   const form = 'は時差つきの ISO 日時(例 2026-11-01T09:00:00+09:00)で書きます';

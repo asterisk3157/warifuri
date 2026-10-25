@@ -200,7 +200,8 @@ function buildServer(ledger, device, knowledge) {
         'List the bookings (time given to a task, a habit or a fixed appointment) that share time with [from, to), by ' +
         'start. from and to: YYYY-MM-DD (midnight on the server\'s clock) or an ISO datetime with offset; to is ' +
         'exclusive, so from 2026-11-01 to 2026-11-03 is two days. from defaults to today, to to one day after from. ' +
-        'Each booking comes with its task (title, state), habit, goal and profile.',
+        'Each booking comes with its task (title, state), habit, goal and profile, and its source and external_id ' +
+        '(the outside event it is, or null).',
       inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
       annotations: readOnly,
     },
@@ -464,7 +465,11 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
     'Book time: kind task (task_id) or habit (habit_id) gives time to it, and its title defaults to theirs; kind ' +
       'fixed is an appointment and needs a title. starts_at and ends_at: ISO datetimes with offset (Z or +09:00), ' +
       'stored in UTC; at most 24 hours. With id, changes that booking (only the fields given change). Bookings may ' +
-      'overlap: overlaps lists the ones sharing time with this one, so you can move one if that was not meant.',
+      'overlap: overlaps lists the ones sharing time with this one, so you can move one if that was not meant. ' +
+      'source (such as google-calendar) and external_id (the event id there) name the outside event the booking is: ' +
+      'without id, a pair already in the ledger changes that booking instead of making a second one, so importing ' +
+      'an event again is safe; with id, attaches the pair (for an event you just wrote there), unless another ' +
+      'booking has it. external_id needs source.',
     {
       id: z.string().min(1).optional(),
       kind: z.enum(BOOKING_KINDS).optional(),
@@ -474,6 +479,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
       starts_at: z.string().optional(),
       ends_at: z.string().optional(),
       note: clearable,
+      source: clearable,
+      external_id: clearable,
     },
     async (args) => result(ledger.book(given(args), writer)),
   );
