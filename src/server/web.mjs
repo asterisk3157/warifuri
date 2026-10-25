@@ -397,7 +397,7 @@ export function createWeb({
   });
 
   const nowIso = () => new Date(now()).toISOString();
-  const serverLabel = publicUrl ? 'サーバー' : 'ローカル';
+  const serverLabel = publicUrl ? 'サーバー' : 'ローカルホスト';
   const mcpUrl = (req) => `${origin(req)}/mcp`;
 
   api.get('/about', (req, res) => {

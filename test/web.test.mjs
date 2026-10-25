@@ -125,7 +125,7 @@ test('endpoint shapes', async (t) => {
   const { base, ids } = await start(t);
   const about = await (await get(base, '/web/api/about')).json();
   assert.equal(about.mode, 'open');
-  assert.equal(about.label, 'ローカル');
+  assert.equal(about.label, 'ローカルホスト');
   assert.match(about.mcp_url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
   for (const k of ['name', 'kind', 'chip', 'memory_gb', 'os']) assert.ok(k in about.machine, k);
 

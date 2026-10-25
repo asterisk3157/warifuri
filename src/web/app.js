@@ -64,14 +64,15 @@ function banner() {
   return h('div', { class: 'wf-banner', role: 'status' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), `サーバーにつながりません。${when}`);
 }
 
-// The card at the foot of the sidebar: where warifuri runs, and the server machine's name.
+// The card at the foot of the sidebar: where warifuri runs, and the server machine's name
+// (not the machine of this browser, which may be another one).
 function card() {
   const a = state.about;
-  const label = state.offline ? 'warifuri · つながっていません' : `warifuri · ${a?.label ?? 'ローカル'}`;
+  const label = state.offline ? 'つながっていません' : (a?.label ?? 'ローカルホスト');
   return h('button', { type: 'button', class: ['wf-card', state.offline && 'wf-offline'], title: 'このサーバーについて', onclick: (e) => openAbout({ type: 'server' }, e.currentTarget) },
-    h('span', { class: 'wf-card-row' }, icon('serverSmall', 16, 1.8), h('span', { class: 'wf-card-row wf-card-label' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), label)),
+    h('span', { class: 'wf-card-row wf-card-label' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), label),
     h('span', { class: 'wf-card-sep', 'aria-hidden': 'true' }),
-    h('span', { class: 'wf-card-row' }, icon('laptop', 16, 1.8), h('span', { class: 'wf-card-name', text: a?.machine?.name ?? '…' })));
+    h('span', { class: 'wf-card-row' }, icon('serverSmall', 16, 1.8), h('span', { class: 'wf-card-name', text: a?.machine?.name ?? '…' })));
 }
 
 function navItem(key, label, iconName) {
