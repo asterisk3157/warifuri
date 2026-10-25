@@ -92,8 +92,8 @@ test('a clean snapshot imports with counts and no review', (t) => {
 test('a second import replaces the mirror; habits, autonomy and records stay', (t) => {
   const { L, count, importRecords } = fresh(t);
   L.replaceFromSnapshot(snapshot(), ACTOR);
-  const kept = L.createHabit({ title: 'Read papers', rule: '毎週金 09:00-10:30', duration_min: 90, goal_id: G1 }, ACTOR);
-  const lost = L.createHabit({ title: 'Sort files', rule: '毎月1日 10:00', duration_min: 30, goal_id: G2 }, ACTOR);
+  const kept = L.createHabit({ title: 'Read papers', rule: { days: ['金'], window: '09:00-10:30' }, duration_min: 90, goal_id: G1 }, ACTOR);
+  const lost = L.createHabit({ title: 'Sort files', rule: { days: ['月'], window: '10:00-10:30' }, duration_min: 30, goal_id: G2 }, ACTOR);
   L.setAutonomy('reschedule_block', { approvals_in_row: 2 }, { actor: 'secretary' });
   const recordsBefore = count('records');
 

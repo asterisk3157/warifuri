@@ -187,11 +187,76 @@ export function checkBlock(beforeId, afterId, ctx = {}) {
   return p;
 }
 
+// A habit's repeat rule (原則21): which days, and optionally the window of the day it goes in.
+// { days: 'daily' | 'weekdays' | ['月', '水', '金'], window?: 'HH:MM-HH:MM' }. A window whose
+// end is not after its start runs past midnight (23:00-07:00 belongs to the day it starts).
+// The length (duration_min) is the habit's own column. Stored as JSON text in habits.rule.
+export const HABIT_WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+export const HABIT_DAY_SETS = { daily: HABIT_WEEKDAYS, weekdays: HABIT_WEEKDAYS.slice(0, 5) };
+const WINDOW_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
+const RULE_FORM =
+  '繰り返しの決まり(rule)は {"days": "daily" か "weekdays" か ["月","水","金"] のような曜日の並び, "window": "07:00-07:30"(任意)} の形で書きます';
+
+// Reads a rule given as an object or as its JSON text. Returns { rule, window_min, problems }:
+// rule is the rule in its stored shape (a list of days in 月〜日 order, without repeats), or
+// null; window_min is the window's length in minutes, or null without a window.
+export function readHabitRule(value) {
+  const fail = (problems) => ({ rule: null, window_min: null, problems });
+  let v = value;
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return fail([RULE_FORM]);
+    }
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return fail([RULE_FORM]);
+  const p = Object.keys(v)
+    .filter((k) => k !== 'days' && k !== 'window')
+    .map((k) => `rule に ${k} は書けません(書けるのは days と window です)`);
+  let days = null;
+  if (typeof v.days === 'string' && Object.hasOwn(HABIT_DAY_SETS, v.days)) days = v.days;
+  else if (Array.isArray(v.days) && v.days.length > 0) {
+    const bad = v.days.filter((d) => !HABIT_WEEKDAYS.includes(d));
+    if (bad.length) p.push(`rule の days の曜日は ${HABIT_WEEKDAYS.join('、')} のどれかです(${bad.map(String).join('、')} は読めません)`);
+    else days = HABIT_WEEKDAYS.filter((d) => v.days.includes(d));
+  } else p.push('rule の days は "daily"(毎日)、"weekdays"(月〜金)、または ["月","水","金"] のような曜日の並びです');
+  let windowMin = null;
+  if (v.window !== undefined) {
+    const m = typeof v.window === 'string' ? WINDOW_RE.exec(v.window) : null;
+    if (!m) p.push('rule の window は "07:00-07:30" のように、始まりと終わりの時刻(HH:MM)を - でつなぎます');
+    else {
+      const start = Number(m[1]) * 60 + Number(m[2]);
+      const end = Number(m[3]) * 60 + Number(m[4]);
+      if (start === end) p.push('rule の window の始まりと終わりが同じです');
+      else windowMin = end > start ? end - start : end + 1440 - start;
+    }
+  }
+  if (p.length) return fail(p);
+  return { rule: v.window === undefined ? { days } : { days, window: v.window }, window_min: windowMin, problems: [] };
+}
+
+// The rule as it is stored: its JSON text in the stored shape, or the value unchanged when it
+// cannot be read (checkHabit then says why).
+export function habitRuleText(value) {
+  if (isBlank(value)) return value;
+  const { rule } = readHabitRule(value);
+  return rule ? JSON.stringify(rule) : value;
+}
+
 export function checkHabit(row, ctx = {}) {
   const p = [];
   if (isBlank(row.title)) p.push('習慣には題名が要ります');
+  const durationOk = Number.isInteger(row.duration_min) && row.duration_min > 0 && row.duration_min <= 1440;
   if (isBlank(row.rule)) p.push('習慣には繰り返しの決まり(rule)が要ります(原則21)');
-  if (!(Number.isInteger(row.duration_min) && row.duration_min > 0)) p.push('習慣の長さ(duration_min)は1以上の整数(分)です');
+  else {
+    const r = readHabitRule(row.rule);
+    p.push(...r.problems);
+    if (durationOk && r.window_min !== null && row.duration_min > r.window_min) {
+      p.push(`習慣の長さ(${row.duration_min}分)が、rule の window(${r.window_min}分)に収まりません`);
+    }
+  }
+  if (!durationOk) p.push('習慣の長さ(duration_min)は1から1440までの整数(分)です');
   if (!isBlank(row.goal_id) && !ctx.goalExists) p.push(`ゴール ${row.goal_id} がありません`);
   if (!isFlag(row.active)) p.push('active は 0 か 1 です');
   return p;
