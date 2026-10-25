@@ -108,7 +108,7 @@ function buildServer(ledger, device, knowledge) {
     },
     async ({ id }) => {
       const item = ledger.get(id);
-      if (!item) return toolError(`${id} というゴール・タスク・習慣・置き場はありません`);
+      if (!item) return toolError(`${id} というゴール・タスク・習慣・作業フォルダはありません`);
       return result(item);
     },
   );
@@ -209,7 +209,7 @@ function profileFor(ledger, device, { place, profile }, tool) {
   if (profile !== undefined) return profile;
   if (place === undefined) throw new LedgerError([`${tool} には place か profile を渡します`]);
   const p = resolvePlace(ledger, device, place, tool);
-  if (!p.profile) throw new LedgerError([`置き場 ${p.name}(${p.id})には、プロフィールが付いていません。place で付けます`]);
+  if (!p.profile) throw new LedgerError([`作業フォルダ ${p.name}(${p.id})には、プロフィールが付いていません。place で付けます`]);
   return p.profile;
 }
 
@@ -231,11 +231,11 @@ function resolvePlace(ledger, device, value, tool = 'start') {
     const place = ledger.placeFor(device, value);
     if (place) return place;
     throw new LedgerError([
-      `${value} は、デバイス ${device} のどの置き場にも入っていません。place で置き場を登録するか、いまの置き場にこのデバイスの道を足してから、もう一度 ${tool} します`,
+      `${value} は、デバイス ${device} のどの作業フォルダにも入っていません。place で作業フォルダを登録するか、いまの作業フォルダにこのデバイスのパスを足してから、もう一度 ${tool} します`,
     ]);
   }
-  if (isValidId(value)) throw new LedgerError([`置き場 ${value} がありません`]);
-  throw new LedgerError([`place には置き場の id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
+  if (isValidId(value)) throw new LedgerError([`作業フォルダ ${value} がありません`]);
+  throw new LedgerError([`place には作業フォルダの id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
 function registerWriteTools(server, ledger, device, { write, writer, knowledge }) {
@@ -345,7 +345,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
       'picks it up, such as where you stopped. A running task goes back to ready.',
     { task_id: z.string().min(1), next: z.string() },
     async ({ task_id: taskId, next }) => {
-      if (next.trim() === '') return refusal(['手放すときは、次に持つ人のために next を1行書きます(原則7)']);
+      if (next.trim() === '') return refusal(['手放すときは、次に着手する人のために next を1行書きます(原則7)']);
       if (/[\r\n]/.test(next)) return refusal(['next は1行で書きます。長い説明は update で body に書きます']);
       return result(ledger.release(taskId, { next }, writer));
     },
@@ -382,7 +382,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
       return { profile, file: n.file, mark: n.mark };
     } catch (err) {
       const why = err instanceof LedgerError ? err.problems.join('。') : err.message;
-      return { skipped: `知識に書けなかったので、閉じたときの記録にだけ残しました(${why})` };
+      return { skipped: `ナレッジに書けなかったので、閉じたときの記録にだけ残しました(${why})` };
     }
   }
 
@@ -448,10 +448,10 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
       }
       const paths = path === undefined ? undefined : [{ device: device.name, path }];
       if (id === undefined) {
-        if (path === null) return refusal(['新しい置き場では、path を null にはできません']);
+        if (path === null) return refusal(['新しい作業フォルダでは、path を null にはできません']);
         return result(ledger.createPlace(given({ ...fields, paths }), writer));
       }
-      if (ledger.get(id)?.kind !== 'place') return refusal([`${id} という置き場はありません`]);
+      if (ledger.get(id)?.kind !== 'place') return refusal([`${id} という作業フォルダはありません`]);
       return result(ledger.updatePlace(id, given({ ...fields, paths }), writer));
     },
   );

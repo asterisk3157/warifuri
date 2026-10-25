@@ -2,7 +2,7 @@
 // arrows, and a colour for each task's standing. Pure functions: no I/O, no clock.
 //
 // Standing, first match wins: done; running (held by a device, or in state running);
-// next (ready, and every task before it is closed: 次にやれる); waiting; other.
+// next (ready, and every task before it is closed: 着手可能); waiting; other.
 
 export const FLOW_TITLE_MAX = 40;
 

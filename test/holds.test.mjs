@@ -1,4 +1,4 @@
-// Tests for holds (持つ) in the ledger: start, the one-task-per-place refusal, moving a hold,
+// Tests for holds (着手) in the ledger: start, the one-task-per-place refusal, moving a hold,
 // release with next, automatic release on closing or waiting, held(), and holds in board/get.
 
 import test from 'node:test';
@@ -104,7 +104,7 @@ test('start refuses closed tasks, unknown or revoked devices and unknown places'
   assert.match(refusal(() => L.start(b.id, { device: 'phone' }, ACTOR)).message, /phone がありません/);
   L.revokeKey('desk', ACTOR);
   assert.match(refusal(() => L.start(b.id, { device: 'desk' }, ACTOR)).message, /取り消されています/);
-  assert.match(refusal(() => L.start(b.id, { device: 'laptop', placeId: 'p_20261024000000_nplace' }, ACTOR)).message, /置き場/);
+  assert.match(refusal(() => L.start(b.id, { device: 'laptop', placeId: 'p_20261024000000_nplace' }, ACTOR)).message, /作業フォルダ/);
   assert.match(refusal(() => L.start('t_20261024000000_nosuch', { device: 'laptop' }, ACTOR)).message, /ありません/);
   // A waiting task can be held; its state stays.
   const w = L.createTask({ title: 'W', mode: 'ai_worker', state: 'waiting', waiting_on: 'human', waiting_for: 'a choice' }, ACTOR);
@@ -123,7 +123,7 @@ test('release drops the hold, writes next and puts a running task back to ready'
   const rec = L.records(a.id).at(-1);
   assert.equal(rec.action, 'release');
   assert.deepEqual(rec.changes.hold, { before: { device: 'laptop', place_id: repo.id }, after: null });
-  assert.match(refusal(() => L.release(a.id, {}, ACTOR)).message, /持っていません/);
+  assert.match(refusal(() => L.release(a.id, {}, ACTOR)).message, /作業中ではありません/);
   // The place is free for another task.
   const b = task('B');
   assert.equal(L.start(b.id, { device: 'laptop', placeId: repo.id }, ACTOR).hold.device, 'laptop');

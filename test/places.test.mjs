@@ -106,7 +106,7 @@ test('upsertPlace: creates, then changes name, profile and paths per device', (t
   assert.throws(() => L.upsertPlace({ id, paths: [{ device: 'desk' }] }, ACTOR), /両方/);
   assert.throws(() => L.updatePlace('p_20261024000000_nplace', { name: 'x' }, ACTOR), /ありません/);
   // Another place may not take the same directory on the same device (case folded on Windows).
-  assert.throws(() => L.upsertPlace({ name: 'clash', paths: [{ device: 'desk', path: 'c:\\SRC\\repo\\' }] }, ACTOR), /もう置き場/);
+  assert.throws(() => L.upsertPlace({ name: 'clash', paths: [{ device: 'desk', path: 'c:\\SRC\\repo\\' }] }, ACTOR), /もう作業フォルダ/);
   // A new id that is free creates the place with it.
   assert.equal(L.upsertPlace({ id: 'p_20261024000000_given1', name: 'given' }, ACTOR).id, 'p_20261024000000_given1');
 });

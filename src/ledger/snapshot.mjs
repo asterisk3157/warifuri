@@ -95,7 +95,7 @@ export function prepareSnapshot(doc, { at, reservedIds = new Set() }) {
     if (isBlank(raw.id)) return ['id がありません'];
     if (!isValidId(raw.id)) return [`id ${raw.id} は x_YYYYMMDDHHMMSS_xxxxxx の形ではありません`];
     if (uses.get(raw.id) > 1) return [`id ${raw.id} がスナップショットに${uses.get(raw.id)}回あります。どれを取るか決められないので、どれも入れません`];
-    if (reservedIds.has(raw.id)) return [`id ${raw.id} は台帳の習慣が使っています`];
+    if (reservedIds.has(raw.id)) return [`id ${raw.id} はデータベースの習慣が使っています`];
     return [];
   }
 
@@ -107,7 +107,7 @@ export function prepareSnapshot(doc, { at, reservedIds = new Set() }) {
     const p = idProblems(raw);
     if (p.length === 0) {
       p.push(...textProblems(raw, ['name', 'profile']));
-      if (isBlank(raw.name)) p.push('置き場には名前が要ります');
+      if (isBlank(raw.name)) p.push('作業フォルダには名前が要ります');
     }
     if (p.length) return skip('place', id, p);
     places.push({ id, name: raw.name, profile: orNull(raw.profile), created_at: at, updated_at: at });
@@ -117,9 +117,9 @@ export function prepareSnapshot(doc, { at, reservedIds = new Set() }) {
     list.forEach((item, j) => {
       const pathId = `${id}:${isObject(item) && typeof item.device === 'string' ? item.device : j}`;
       if (!isObject(item) || isBlank(item.device) || isBlank(item.path) || typeof item.device !== 'string' || typeof item.path !== 'string') {
-        return skip('place_path', pathId, ['置き場の道には、デバイス(device)と道(path)の両方が文字列で要ります']);
+        return skip('place_path', pathId, ['作業フォルダのパスには、デバイス(device)とパス(path)の両方が文字列で要ります']);
       }
-      if (devices.has(item.device)) return skip('place_path', pathId, [`デバイス ${item.device} の道が2つあります。1つのデバイスに道は1つです`]);
+      if (devices.has(item.device)) return skip('place_path', pathId, [`デバイス ${item.device} のパスが2つあります。1つのデバイスにパスは1つです`]);
       devices.add(item.device);
       paths.push({ place_id: id, device: item.device, path: item.path });
     });
@@ -175,7 +175,7 @@ export function prepareSnapshot(doc, { at, reservedIds = new Set() }) {
     }
     let placeId = orNull(raw.place_id);
     if (placeId !== null && !placeIds.has(placeId)) {
-      notes.push(`置き場 ${placeId} がスナップショットから入らなかったので、置き場なしで入れました`);
+      notes.push(`作業フォルダ ${placeId} がスナップショットから入らなかったので、作業フォルダなしで入れました`);
       placeId = null;
     }
     let estimate = raw.estimate_min ?? null;

@@ -459,7 +459,7 @@ export function openLedger(path, options = {}) {
     });
   }
 
-  // 持つ. The device starts working on the task in a place (placeId may be null: no
+  // 着手. The device starts working on the task in a place (placeId may be null: no
   // registered place). A device holds one task per place: holding another there is refused,
   // and the error's heldTaskId names the one it holds. A task held elsewhere moves here, with a
   // 'move' record. A ready task becomes running.
@@ -469,17 +469,17 @@ export function openLedger(path, options = {}) {
     if (!task) throw new LedgerError([`${taskId} というタスクはありません`]);
     const place = placeId ?? null;
     const problems = [];
-    if (CLOSED_STATES.includes(task.state)) problems.push(`タスク ${taskId} は閉じています(${task.state})。持つ前に reopen で戻します`);
+    if (CLOSED_STATES.includes(task.state)) problems.push(`タスク ${taskId} は閉じています(${task.state})。着手する前に reopen で戻します`);
     const dev = typeof device === 'string' ? getDeviceRow(device) : null;
     if (!dev) problems.push(`デバイス ${device} がありません。warifuri key add で登録します`);
     else if (dev.revoked_at !== null) problems.push(`デバイス ${device} の鍵は取り消されています`);
-    if (place !== null && !getPlaceRow(place)) problems.push(`置き場 ${place} がありません`);
+    if (place !== null && !getPlaceRow(place)) problems.push(`作業フォルダ ${place} がありません`);
     if (problems.length) throw new LedgerError(problems);
 
     const here = one("SELECT task_id FROM holds WHERE device = ? AND ifnull(place_id, '') = ?", device, place ?? '');
     if (here && here.task_id !== taskId) {
       throw new LedgerError(
-        [`デバイス ${device} のこの置き場では、もうタスク ${here.task_id} を持っています。先にそれを手放します(release か、閉じる・待ち・先送り)`],
+        [`デバイス ${device} のこの作業フォルダでは、もうタスク ${here.task_id} に着手しています。先にそれを手放します(release か、閉じる・待ち・先送り)`],
         { heldTaskId: here.task_id },
       );
     }
@@ -517,7 +517,7 @@ export function openLedger(path, options = {}) {
     const task = getTaskRow(taskId);
     if (!task) throw new LedgerError([`${taskId} というタスクはありません`]);
     const hold = getHoldRow(taskId);
-    if (!hold) throw new LedgerError([`タスク ${taskId} は、どのデバイスも持っていません`]);
+    if (!hold) throw new LedgerError([`タスク ${taskId} は、どのデバイスでも作業中ではありません`]);
     let next = { ...task };
     if (task.state === 'running') next = applyState(task, 'ready', {}, nowIso());
     if (nextStep !== undefined) next.next = nextStep;
@@ -604,7 +604,7 @@ export function openLedger(path, options = {}) {
       const key = comparablePath(dir) ?? dir;
       for (const other of all('SELECT place_id, path FROM place_paths WHERE device = ? AND place_id <> ?', device, placeId ?? '')) {
         if ((comparablePath(other.path) ?? other.path) === key) {
-          p.push(`デバイス ${device} の道 ${dir} は、もう置き場 ${other.place_id} が使っています`);
+          p.push(`デバイス ${device} のパス ${dir} は、もう作業フォルダ ${other.place_id} が使っています`);
         }
       }
     }
@@ -641,7 +641,7 @@ export function openLedger(path, options = {}) {
   function updatePlace(id, fields, opts) {
     const w = requireWriter(opts);
     const before = placeWithPaths(id);
-    if (!before) throw new LedgerError([`${id} という置き場はありません`]);
+    if (!before) throw new LedgerError([`${id} という作業フォルダはありません`]);
     const input = fields ?? {};
     const problems = unknownFields(input, ['name', 'profile', 'paths']);
     const given = input.paths ?? [];
@@ -657,7 +657,7 @@ export function openLedger(path, options = {}) {
       problems.push(...checkPlace({ ...row, paths: set }));
       const named = [...removals, ...set.map((i) => i?.device)];
       for (const d of new Set(removals)) {
-        if (named.filter((x) => x === d).length > 1) problems.push(`デバイス ${d} の道が2つあります。1つのデバイスに道は1つです`);
+        if (named.filter((x) => x === d).length > 1) problems.push(`デバイス ${d} のパスが2つあります。1つのデバイスにパスは1つです`);
       }
       if (problems.length === 0) {
         problems.push(...pathConflicts(id, set));
@@ -886,7 +886,7 @@ export function openLedger(path, options = {}) {
       if (days < heldDays) continue;
       heldList.push({
         ...brief(t), device: t.device, place_id: t.hold_place_id, since: t.since, days,
-        reason: `${t.device} が持ったまま、${days}日動きがありません`,
+        reason: `${t.device} で作業中のまま、${days}日動きがありません`,
       });
     }
     const untouched = (state, limit, reason) =>

@@ -41,7 +41,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_HOME',
     flag: 'home',
-    about: 'データのフォルダ。設定ファイルと台帳を置く。設定ファイルの中では書けない',
+    about: 'データのフォルダ。設定ファイルとデータベースを置く。設定ファイルの中では書けない',
     def: () => path.join(os.homedir(), '.warifuri'),
     defText: '~/.warifuri',
     path: true,
@@ -50,7 +50,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_DB',
     flag: 'db',
-    about: '台帳の SQLite のファイル',
+    about: 'データベースの SQLite のファイル',
     def: (home) => path.join(home, 'ledger.sqlite'),
     defText: 'WARIFURI_HOME/ledger.sqlite',
     path: true,
@@ -114,14 +114,14 @@ export const SETTINGS = [
     name: 'WARIFURI_SERVER_URL',
     flag: 'url',
     section: 'client',
-    about: '使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手の確かめのフックが読む',
+    about: '使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む',
     commands: CLIENT,
     check: httpUrl,
   },
   {
     name: 'WARIFURI_DEVICE_KEY_FILE',
     section: 'client',
-    about: 'この機械の鍵を1行で置くファイル。本人だけが読めるようにする。connect が書き、着手の確かめのフックが読む',
+    about: 'このデバイスの鍵を1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む',
     def: (home) => path.join(home, 'device.key'),
     defText: 'WARIFURI_HOME/device.key',
     path: true,
@@ -130,7 +130,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_GATE',
     section: 'client',
-    about: '着手の確かめ。off にすると、持っているタスクがなくても編集を止めない',
+    about: '着手ゲート。off にすると、作業中のタスクがなくても編集を止めない',
     def: 'on',
     commands: ['hook'],
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
@@ -302,7 +302,7 @@ export function settingsTemplate() {
   for (const s of SETTINGS) {
     if (s.name === 'WARIFURI_HOME' || s.secret) continue;
     if (s.section === 'client' && section !== 'client') {
-      out.push('', '# ---- 使う機械の設定。warifuri connect と着手の確かめのフックが読む ----');
+      out.push('', '# ---- 使う機械の設定。warifuri connect と着手ゲートのフックが読む ----');
     }
     section = s.section;
     out.push('', `# ${s.about}${s.defText ? `。既定は ${s.defText}` : ''}`);
