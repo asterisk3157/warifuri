@@ -317,7 +317,7 @@ test('threads: their own session and MCP config naming the thread; each exchange
   w.chat.send('どれから？', WEB, { thread: sub.id });
   await w.chat.kick(sub.id);
   const subCalls = w.claude.calls.filter((c) => c.mcp === paths(w.home).threadMcp(sub.id));
-  assert.equal(subCalls.length, 2, [...w.lines, ...w.claude.calls.map((c) => c.mcp)].join('\n'));
+  assert.equal(subCalls.length, 2, w.lines.join('\n'));
   assert.ok(subCalls[0].at('--session-id'));
   assert.notEqual(subCalls[0].session, main.session_id, 'a thread has its own session');
   assert.equal(subCalls[1].at('--resume'), subCalls[0].session);

@@ -245,7 +245,10 @@ export function createChat(ledger, cfg, ctx = {}) {
     if (!claude) return { error: 'claude (Claude Code) is not on PATH' };
     const p = paths(cfg.home);
     ownerOnlyDir(p.chat, platform);
-    const logFile = openLog(p.logs, 'chat', platform);
+    // One log per conversation: the main one and each thread may run at once, and Windows does
+    // not let one run turn over a log another run still has open.
+    const logName = mcpFile && mcpFile !== p.mcp ? path.basename(mcpFile, '.json').replace(/^mcp-/, 'thread-') : 'chat';
+    const logFile = openLog(p.logs, logName, platform);
     const format = stream ? ['--output-format', 'stream-json', '--verbose', '--include-partial-messages'] : ['--output-format', 'json'];
     const input = withImages ? ['--input-format', 'stream-json'] : [];
     const reader = createStreamReader({ onEvent });
