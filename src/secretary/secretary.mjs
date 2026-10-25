@@ -9,6 +9,10 @@
 //   <home>/secretary/logs/<job>.log  claude's output of the last run (<job>.prev.log before it)
 //   <home>/secretary/chat/           the working directory of the conversation (chat.mjs), so
 //                                    that claude finds its sessions there again after a restart
+//   <home>/secretary/mcp-<thread>.json  the same config for a thread started from a message,
+//                                    with a header naming the thread (so that ask and
+//                                    reply_options land there). Owner-only
+//   <home>/secretary/uploads/<id>    the files the person sent with a message. Owner-only
 //
 // claude may use only warifuri's tools: --allowedTools names the server, the built-in tools
 // (shell, files, web) are disallowed, and --strict-mcp-config leaves out the person's other
@@ -43,7 +47,10 @@ export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', mornin
 
 export const paths = (home) => {
   const dir = path.join(home, DIR);
-  return { dir, mcp: path.join(dir, 'mcp.json'), lock: path.join(dir, 'run.lock'), logs: path.join(dir, 'logs'), chat: path.join(dir, 'chat') };
+  return {
+    dir, mcp: path.join(dir, 'mcp.json'), lock: path.join(dir, 'run.lock'), logs: path.join(dir, 'logs'), chat: path.join(dir, 'chat'),
+    uploads: path.join(dir, 'uploads'), threadMcp: (id) => path.join(dir, `mcp-${id}.json`),
+  };
 };
 
 export const ownerOnlyDir = (dir, platform) => {
@@ -96,17 +103,23 @@ export function readSecretaryKey(home) {
   }
 }
 
-// Writes mcp.json (owner-only) for this server and key.
-export function writeMcpConfig(home, { url, key, platform = process.platform }) {
+// The header that tells the server which thread a run of the secretary is in.
+export const THREAD_HEADER = 'X-Warifuri-Thread';
+
+// Writes mcp.json (owner-only) for this server and key; with thread, mcp-<thread>.json, whose
+// requests also name that thread.
+export function writeMcpConfig(home, { url, key, platform = process.platform, thread = null }) {
   const p = paths(home);
   ownerOnlyDir(p.dir, platform);
-  const json = { mcpServers: { [SERVER_NAME]: { type: 'http', url, headers: { Authorization: `Bearer ${key}` } } } };
+  const headers = { Authorization: `Bearer ${key}`, ...(thread ? { [THREAD_HEADER]: thread } : {}) };
+  const json = { mcpServers: { [SERVER_NAME]: { type: 'http', url, headers } } };
   const text = `${JSON.stringify(json, null, 2)}\n`;
-  const tmp = `${p.mcp}.tmp-${process.pid}`;
+  const file = thread ? p.threadMcp(thread) : p.mcp;
+  const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, text, { mode: 0o600 });
   if (platform !== 'win32') fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, p.mcp);
-  return p.mcp;
+  fs.renameSync(tmp, file);
+  return file;
 }
 
 function setSetting(cfg, name, value) {
@@ -297,6 +310,8 @@ export function kill(child, platform) {
 // ctx: { env, platform, now, spawn, signal, timeoutMs, instructionsDir } (tests stand in here).
 export async function runJob(job, cfg, ctx = {}) {
   if (!JOBS.includes(job)) return { error: `no job ${job} (${JOBS.join(', ')})` };
+  // The morning is a call into the conversation (chat.mjs), not a run of its own.
+  if (job === 'morning') return { error: 'morning runs in the conversation; warifuri serve sends it there' };
   const env = ctx.env ?? process.env;
   const platform = ctx.platform ?? process.platform;
   const schedule = scheduleFrom(cfg.values);

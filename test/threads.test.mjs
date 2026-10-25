@@ -49,7 +49,7 @@ test('schema: a version 7 file gains threads and messages and keeps its records'
   assert.throws(() => ins.run('2026-10-02T00:00:00.000Z', 'web', null, 'message', 'm1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 8);
+  assert.equal(SCHEMA_VERSION, 9);
   const L = openLedger(file, { now: ticking() });
   assert.deepEqual(L.records('r1').map((r) => [r.id, r.entity]), [[1, 'report']]);
   const thread = L.ensureThread('secretary', WEB);
@@ -62,7 +62,7 @@ test('schema: a version 7 file gains threads and messages and keeps its records'
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '8');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, String(SCHEMA_VERSION));
   assert.equal(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'records_v7'").get(), undefined);
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);
   // One thread of a kind, and a proposal always has a state (and a message none).

@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -407,6 +407,101 @@ export const MIGRATIONS = [
   INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
     SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v7;
   DROP TABLE records_v7;
+  CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
+  CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+  `
+  -- スレッド、質問、添付. A thread is the secretary's conversation ('secretary', one) or a
+  -- thread started from one of its messages ('sub', one per message: parent_id). read_until is
+  -- the last message the person has seen in it (for 未読 N件); pending_options the reply
+  -- buttons the secretary asked for in the turn going on, moved onto its reply when it is stored.
+  -- A message gains kinds: 'ask' (the secretary's questions, with state open, later or
+  -- answered), 'answer' (the person's answer to one), 'trigger' (warifuri's 朝の時間です into
+  -- the conversation) and 'digest' (what was said in a thread, for the main session). data
+  -- holds what each kind needs as JSON (questions and answers, steps, reply buttons, files).
+  -- The two tables are rebuilt, messages first, so that the reference between them follows.
+  DROP INDEX IF EXISTS threads_kind;
+  DROP INDEX IF EXISTS messages_thread;
+  DROP INDEX IF EXISTS messages_state;
+  ALTER TABLE messages RENAME TO messages_v8;
+  ALTER TABLE threads RENAME TO threads_v8;
+  CREATE TABLE threads (
+    id              TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL CHECK (kind IN ('secretary','sub')),
+    title           TEXT NOT NULL,
+    runner          TEXT NOT NULL DEFAULT 'resume' CHECK (runner IN ('resume','resident')),
+    session_id      TEXT,
+    seen_until      TEXT,
+    parent_id       TEXT UNIQUE REFERENCES messages(id),
+    read_until      TEXT,
+    pending_options TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    CHECK ((kind = 'sub') = (parent_id IS NOT NULL))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS threads_kind ON threads(kind) WHERE kind = 'secretary';
+  CREATE TABLE messages (
+    id            TEXT PRIMARY KEY,
+    thread_id     TEXT NOT NULL REFERENCES threads(id),
+    role          TEXT NOT NULL CHECK (role IN ('user','secretary','system')),
+    kind          TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text','proposal','ask','answer','trigger','digest')),
+    body          TEXT NOT NULL,
+    title         TEXT,
+    autonomy_kind TEXT,
+    about         TEXT,
+    state         TEXT CHECK (state IS NULL OR state IN ('open','approved','changed','refused','later','answered')),
+    answer        TEXT,
+    answered_at   TEXT,
+    done_at       TEXT,
+    done_note     TEXT,
+    data          TEXT,
+    actor         TEXT NOT NULL,
+    device        TEXT,
+    created_at    TEXT NOT NULL,
+    CHECK ((kind IN ('proposal','ask')) = (state IS NOT NULL))
+  );
+  INSERT INTO threads (id, kind, title, runner, session_id, seen_until, created_at, updated_at)
+    SELECT id, kind, title, runner, session_id, seen_until, created_at, updated_at FROM threads_v8;
+  INSERT INTO messages (id, thread_id, role, kind, body, title, autonomy_kind, about, state, answer, answered_at, done_at, done_note, actor, device, created_at)
+    SELECT id, thread_id, role, kind, body, title, autonomy_kind, about, state, answer, answered_at, done_at, done_note, actor, device, created_at FROM messages_v8 ORDER BY rowid;
+  DROP TABLE messages_v8;
+  DROP TABLE threads_v8;
+  CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, created_at);
+  CREATE INDEX IF NOT EXISTS messages_state ON messages(state) WHERE state IS NOT NULL;
+
+  -- A file the person sent with a message: kept under the data directory (secretary/uploads,
+  -- owner-only), named by its id; here its name, type, size and hash, and the message it went
+  -- with (NULL until the message is sent).
+  CREATE TABLE IF NOT EXISTS attachments (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    size       INTEGER NOT NULL CHECK (size >= 0),
+    sha256     TEXT NOT NULL,
+    message_id TEXT REFERENCES messages(id),
+    device     TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS attachments_message ON attachments(message_id);
+
+  -- Records may also name 'attachment'. The table is rebuilt as in version 3.
+  ALTER TABLE records RENAME TO records_v8;
+  CREATE TABLE records (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    actor     TEXT NOT NULL CHECK (length(actor) > 0),
+    device    TEXT,
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device','oauth','knowledge','booking','settings','report','thread','message','attachment')),
+    entity_id TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    changes   TEXT NOT NULL
+  );
+  INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
+    SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v8;
+  DROP TABLE records_v8;
   CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
   CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;

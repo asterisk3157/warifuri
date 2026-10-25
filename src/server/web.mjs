@@ -1,8 +1,10 @@
 // The Web screens: カレンダー, タスク, サーバー, 秘書 and 設定, for the person to read the ledger in a
 // browser. The pages are static files in src/web/ (no build step), fed by read-only JSON under
 // /web/api/. The writes are the person's profile (name, bio, colour), kept in the settings
-// table, and the conversation with the secretary on 秘書: a message, and an answer to a
-// proposal. Each is recorded.
+// table, and the conversation with the secretary on 秘書: a message (with files), an answer to
+// a question, a thread started from a message and read. Each is recorded. The secretary's
+// reply being written comes as Server-Sent Events from /web/api/secretary/stream: only its
+// words and the kinds of its steps, never what the tools were given or returned.
 //
 // Who may look:
 // - Open: when the server listens only on this machine (a loopback host), no public URL is
@@ -25,8 +27,9 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
-import { LedgerError, SECRETARY_THREAD } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger.mjs';
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
+import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
 import { profileDir } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
@@ -45,9 +48,11 @@ const MAX_LOGINS = 10;
 const MAX_SESSIONS = 100;
 const RECENT_DONE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RANGE_MS = 42 * 24 * 60 * 60 * 1000;
-// How many of the secretary's reports and messages the 秘書 screen shows.
-const SECRETARY_REPORTS = 30;
-const SECRETARY_MESSAGES = 100;
+// How many messages of the conversation (and of a thread) the 秘書 screen shows.
+const SECRETARY_MESSAGES = 150;
+// A file sent with a message, at most; and how often the event stream says it is alive.
+export const UPLOAD_MAX = 5 * 1024 * 1024;
+const PING_MS = 25_000;
 
 // The profile's colours to choose from, and its limits.
 export const PROFILE_COLORS = ['#8cc4ea', '#8fd3b2', '#a9a3ec', '#e7a9d8', '#f1c47e', '#c9ced6'];
@@ -326,11 +331,22 @@ export function createWeb({
 
   // A write from a browser: JSON from this origin only. A form from elsewhere cannot send
   // application/json, and a script elsewhere is stopped by the Origin check.
-  const sameOrigin = (req, res, next) => {
+  const fromOwnPage = (req) => {
     const site = req.headers['sec-fetch-site'];
     const from = req.headers.origin;
     const own = new Set([origin(req), `${req.protocol}://${req.get('host')}`]);
-    if ((site !== undefined && site !== 'same-origin') || typeof from !== 'string' || !own.has(from)) {
+    return !((site !== undefined && site !== 'same-origin') || typeof from !== 'string' || !own.has(from));
+  };
+  // A file from a browser: from this origin only, as raw bytes.
+  const sameOriginUpload = (req, res, next) => {
+    if (!fromOwnPage(req)) {
+      res.status(403).json({ error: 'cross-origin request refused' });
+      return;
+    }
+    next();
+  };
+  const sameOrigin = (req, res, next) => {
+    if (!fromOwnPage(req)) {
       res.status(403).json({ error: 'cross-origin request refused' });
       return;
     }
@@ -519,47 +535,201 @@ export function createWeb({
     });
   });
 
-  // 秘書: one timeline of the secretary's reports and the conversation's messages and
-  // proposals, oldest first (the newest at the bottom), with whether the secretary can answer.
+  // 秘書: the conversation, oldest first (the newest at the bottom). The person's and the
+  // secretary's messages with what goes with them (the steps of the work, the reply buttons,
+  // the scheduled mark, the names of the files), warifuri's notes, and the secretary's
+  // questions. Reports and proposals stay in the ledger: the secretary talks about them.
+  const messageOut = (m) => {
+    if (m.kind === 'ask') {
+      return {
+        type: 'ask', id: m.id, state: m.state, created_at: m.created_at,
+        questions: (m.data?.questions ?? []).map((q) => ({ header: q.header, question: q.question, multiSelect: q.multiSelect, options: q.options.map((o) => ({ label: o.label, description: o.description })) })),
+        answers: (m.data?.answers ?? []).map((a) => (a ? { picked: a.picked, other: a.other, at: a.at } : null)),
+      };
+    }
+    const d = m.data ?? {};
+    return {
+      type: 'message', id: m.id, role: m.role, kind: m.kind, body: m.body, created_at: m.created_at,
+      steps: (d.steps ?? []).map((x) => ({ kind: x.kind, label: x.label })),
+      options: d.options ?? [],
+      scheduled: d.scheduled ?? null,
+      files: (d.attachments ?? []).map((a) => ({ name: a.name, type: a.type, size: a.size })),
+      files_only: d.files_only === true,
+      answer: m.kind === 'answer' ? { ask: d.ask ?? null, index: d.index ?? null, header: d.header ?? null, later: d.later === true, changed: d.changed === true } : null,
+    };
+  };
+  // What the window shows of a thread: not warifuri's calls, the digests or the old proposals.
+  const shown = (m) => !['trigger', 'digest', 'proposal'].includes(m.kind);
   const secretaryOut = () => {
-    const { reports } = ledger.listReports({ limit: SECRETARY_REPORTS });
     const thread = ledger.getThread(SECRETARY_THREAD.kind);
     const messages = thread ? ledger.listMessages(thread.id, { limit: SECRETARY_MESSAGES }) : [];
-    const items = [
-      ...reports.map((r) => ({ type: 'report', id: r.id, kind: r.kind, title: r.title, body: r.body, created_at: r.created_at })),
-      ...messages.map((m) =>
-        m.kind === 'proposal'
-          ? {
-            type: 'proposal', id: m.id, autonomy_kind: m.autonomy_kind, label: AUTONOMY_KINDS.find((k) => k.kind === m.autonomy_kind)?.label ?? null, title: m.title, body: m.body, about: m.about, state: m.state,
-            answer: m.answer, answered_at: m.answered_at, done_at: m.done_at, done_note: m.done_note, created_at: m.created_at,
-          }
-          : { type: 'message', id: m.id, role: m.role, body: m.body, created_at: m.created_at }),
-    ].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
     const status = chat ? chat.status() : { on: false, replying: false, waiting: 0 };
-    return { now: nowIso(), secretary: { on: status.on, replying: status.replying }, items };
+    return {
+      now: nowIso(), secretary: { on: status.on, replying: status.replying }, thread: thread?.id ?? null,
+      items: messages.filter(shown).map(messageOut), threads: ledger.threadCounts(),
+    };
   };
+  const threadOut = (t) => {
+    const parent = ledger.getMessage(t.parent_id);
+    return {
+      now: nowIso(), secretary: { on: Boolean(chat?.on), replying: Boolean(chat?.replying(t.id)) },
+      thread: { id: t.id, title: t.title, parent_id: t.parent_id }, parent: parent ? messageOut(parent) : null,
+      items: ledger.listMessages(t.id, { limit: SECRETARY_MESSAGES }).filter(shown).map(messageOut),
+    };
+  };
+  const subThread = (id) => {
+    const t = typeof id === 'string' ? ledger.getThread(id) : null;
+    return t?.kind === 'sub' ? t : null;
+  };
+  const refused = (res, err) => {
+    if (err instanceof LedgerError) return res.status(400).json({ error: 'refused', problems: err.problems });
+    throw err;
+  };
+  const exact = (body, keys) => body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).every((k) => keys.includes(k));
+
   api.get('/secretary', (req, res) => res.json(secretaryOut()));
 
-  // A message to the secretary: { text }. The reply comes later; the screen reads it again.
+  // A message to the secretary: { text, attachments?, thread? }. The reply comes later: the
+  // event stream shows it being written, and the screen reads it again.
   api.post('/secretary/messages', sameOrigin, messageJson, (req, res) => {
     const body = req.body;
-    const unknown = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body).filter((k) => k !== 'text') : ['body'];
-    if (unknown.length || typeof body.text !== 'string') {
-      res.status(400).json({ error: 'refused', problems: [`送る形は { "text": "…" } です(${MESSAGE_MAX} 文字まで)`] });
+    const files = body?.attachments;
+    if (!exact(body, ['text', 'attachments', 'thread']) || typeof body.text !== 'string'
+      || (files !== undefined && (!Array.isArray(files) || files.length > ATTACHMENTS_MAX || files.some((f) => typeof f !== 'string')))
+      || (body.thread !== undefined && typeof body.thread !== 'string')) {
+      res.status(400).json({ error: 'refused', problems: [`送る形は { "text": "…", "attachments": ["a_…"], "thread": "c_…" } です(${MESSAGE_MAX} 文字まで、ファイルは${ATTACHMENTS_MAX}個まで)`] });
       return;
     }
     if (!chat?.on) {
       res.status(409).json({ error: 'secretary off', problems: ['秘書が止まっているので、送れません'] });
       return;
     }
-    try {
-      const m = chat.send(body.text, { actor: 'web', device: null });
-      res.status(202).json({ id: m.id, ...secretaryOut() });
-    } catch (err) {
-      if (err instanceof LedgerError) return res.status(400).json({ error: 'refused', problems: err.problems });
-      throw err;
+    if (body.thread !== undefined && !subThread(body.thread)) {
+      res.status(404).json({ error: 'not found' });
+      return;
     }
-    return undefined;
+    try {
+      const m = chat.send(body.text, { actor: 'web', device: null }, { thread: body.thread, attachments: files });
+      res.status(202).json({ id: m.id, ...(body.thread ? threadOut(subThread(body.thread)) : secretaryOut()) });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+
+  // The person's answer to a question of the secretary: { index, picked: [labels], other } or
+  // { later: true }. Answering a question again changes the answer. It works with the
+  // secretary off too; the secretary takes it on its next turn.
+  api.post('/secretary/asks/:id', sameOrigin, smallJson, (req, res) => {
+    const body = req.body;
+    const ok = exact(body, ['index', 'picked', 'other', 'later'])
+      && (body.later === undefined || body.later === true)
+      && (body.index === undefined || Number.isInteger(body.index))
+      && (body.picked === undefined || (Array.isArray(body.picked) && body.picked.every((x) => typeof x === 'string')))
+      && (body.other === undefined || typeof body.other === 'string');
+    if (!ok) {
+      res.status(400).json({ error: 'refused', problems: [`送る形は { "index": 0, "picked": ["…"], "other": "…" } か { "later": true } です(その他は ${ANSWER_MAX} 文字まで)`] });
+      return;
+    }
+    const target = ledger.getMessage(req.params.id);
+    if (!target || target.kind !== 'ask') {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    try {
+      const writer = { actor: 'web', device: null };
+      const out = chat ? chat.answer(target.id, body, writer) : ledger.answerAsk(target.id, body, writer);
+      const t = ledger.getThread(target.thread_id);
+      res.json({ id: out.message.id, ...(t.kind === 'sub' ? threadOut(t) : secretaryOut()) });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+
+  // A thread from a message: { parent }. The one there is, or a new one.
+  api.post('/secretary/threads', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, ['parent']) || typeof req.body.parent !== 'string') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "parent": "m_…" } です'] });
+      return;
+    }
+    try {
+      const t = ledger.openThread(req.body.parent, { actor: 'web', device: null });
+      res.json(threadOut(t));
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+
+  api.get('/secretary/threads/:id', (req, res) => {
+    const t = subThread(req.params.id);
+    if (!t) return res.status(404).json({ error: 'not found' });
+    return res.json(threadOut(t));
+  });
+
+  // The person has read the thread (it was open on the screen).
+  api.post('/secretary/threads/:id/read', sameOrigin, smallJson, (req, res) => {
+    const t = subThread(req.params.id);
+    if (!t) return res.status(404).json({ error: 'not found' });
+    ledger.markThreadRead(t.id, { actor: 'web', device: null });
+    return res.json({ threads: ledger.threadCounts() });
+  });
+
+  // A file for a message: the bytes as the body, its type as Content-Type and its name in
+  // X-File-Name (URI-encoded), from this origin only, at most UPLOAD_MAX. It is kept owner-only
+  // under the data directory and goes with the next message that names it.
+  const rawBody = express.raw({ type: () => true, limit: UPLOAD_MAX });
+  api.post('/secretary/uploads', sameOriginUpload, rawBody, (req, res) => {
+    if (!home) {
+      res.status(409).json({ error: 'no data directory', problems: ['このサーバーには、ファイルを置くデータのフォルダがありません'] });
+      return;
+    }
+    let name = '';
+    try {
+      name = decodeURIComponent(String(req.headers['x-file-name'] ?? '')).normalize('NFC');
+    } catch {
+      name = '';
+    }
+    const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (bytes.length === 0) {
+      res.status(400).json({ error: 'refused', problems: ['空のファイルは送れません'] });
+      return;
+    }
+    let a;
+    try {
+      a = ledger.addAttachment({ name, type, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }, { actor: 'web', device: null });
+    } catch (err) {
+      refused(res, err);
+      return;
+    }
+    const dir = secretaryPaths(home).uploads;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') fs.chmodSync(dir, 0o700);
+    const tmp = path.join(dir, `${a.id}.part`);
+    fs.writeFileSync(tmp, bytes, { mode: 0o600 });
+    if (process.platform !== 'win32') fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, path.join(dir, a.id));
+    res.status(201).json({ id: a.id, name: a.name, type: a.type, size: a.size });
+  });
+
+  // The secretary's replies as they are written, as Server-Sent Events: 'hello' with the
+  // replies being written now, then 'live' ({ thread, phase, text, steps, scheduled }) and
+  // 'done' ({ thread, message }). A comment every PING_MS keeps the connection open.
+  api.get('/secretary/stream', (req, res) => {
+    res.status(200).set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+    res.flushHeaders();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const liveOut = (e) => ({ thread: e.thread, phase: e.phase, text: e.text, steps: (e.steps ?? []).map((x) => ({ kind: x.kind, label: x.label })), scheduled: e.scheduled ?? null });
+    send('hello', { on: Boolean(chat?.on), live: chat ? chat.live().map(liveOut) : [] });
+    const off = chat?.subscribe((e) => {
+      if (e.type === 'live') send('live', liveOut(e));
+      else if (e.type === 'done') send('done', { thread: e.thread, message: e.message ?? null });
+    });
+    const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
+    ping.unref?.();
+    req.on('close', () => {
+      off?.();
+      clearInterval(ping);
+    });
   });
 
   // The person's answer to an open proposal: { answer: approved | changed | refused, text }.

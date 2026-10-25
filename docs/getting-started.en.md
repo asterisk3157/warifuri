@@ -133,7 +133,7 @@ The skill is written in Japanese. Ask Claude Code or Codex things like "what sho
 
 ## Running the secretary
 
-On the server machine, the secretary can do its work at set times: every day at 23:00 it checks whether each goal can meet its due date and rebooks task time, at 07:00 it writes a morning report, and on Sunday at 23:00 it tidies the inboxes. Its brain is Claude Code on that machine (`claude -p`). No cron job or Task Scheduler entry is needed; `warifuri serve` keeps the clock and wakes it.
+On the server machine, the secretary can do its work at set times: every day at 23:00 it checks whether each goal can meet its due date and rebooks task time, at 07:00 it greets you in the conversation and asks what needs your decision, and on Sunday at 23:00 it tidies the inboxes. Its brain is Claude Code on that machine (`claude -p`). No cron job or Task Scheduler entry is needed; `warifuri serve` keeps the clock and wakes it.
 
 1. Install Claude Code on the server machine, start `claude` once and log in yourself. warifuri never reads that login.
 2. Turn the secretary on.
@@ -150,7 +150,7 @@ To try a job right away, keep `warifuri serve` running and run the command below
 warifuri secretary run morning
 ```
 
-You can talk to the secretary on the 秘書 (secretary) page of the Web screen (`/secretary`). Write in the box at the bottom and send; the secretary checks the ledger and replies, and its reports and proposals appear on the same page. Answer a proposal with 了承 (approve), 直して了承 (approve with a change) or 断る (refuse); the secretary carries out approved ones the next time it runs.
+You can talk to the secretary on the 秘書 (secretary) page of the Web screen (`/secretary`). Write in the box at the bottom and send; the secretary checks the ledger, and its reply appears as it is written. Pictures and files go along through the clip button or by pasting. When the secretary has something for you to choose, a question card shows one question at a time: pick an option and press 答える (answer), or あとで (later). Any message can open a thread on the right with スレッドで話す (talk in a thread); what is said there reaches the secretary of the main conversation in short. The 07:00 morning arrives in this conversation, marked 定期実行 (scheduled).
 
 To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times and the night hours are [settings](configuration.md). The secretary can use warifuri's tools only; the claude.ai connectors (mail, calendar) are off for it by default. Give it a calendar only on purpose; how, and how it works, is in the secretary plug-in section of the [architecture](architecture.md) (Japanese).
 

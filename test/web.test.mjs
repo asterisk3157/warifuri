@@ -175,32 +175,37 @@ test('endpoint shapes', async (t) => {
   const profile = await (await get(base, '/web/api/profile')).json();
   assert.deepEqual(profile, { name: null, bio: '', color: '#8cc4ea', github: null });
 
+  // The window is the conversation only: the report stays in the ledger.
   const sec = await (await get(base, '/web/api/secretary')).json();
   assert.match(sec.now, /^\d{4}-/);
-  assert.equal(sec.items.length, 1);
-  assert.deepEqual(Object.keys(sec.items[0]).sort(), ['body', 'created_at', 'id', 'kind', 'title', 'type']);
-  assert.deepEqual([sec.items[0].type, sec.items[0].kind], ['report', 'nightly']);
-  // Stored and returned as the text it is; the page puts it in as text.
-  assert.equal(sec.items[0].title, '<b>Night</b>');
-  assert.equal(sec.items[0].body, '- on track\n- <script>x</script>');
+  assert.deepEqual([sec.items, sec.threads, sec.thread], [[], {}, null]);
 });
 
-test('秘書: one timeline of reports, messages and proposals, oldest first; off when there is no chat', async (t) => {
+test('秘書: the conversation only, oldest first, with questions; reports, proposals and warifuri\'s calls stay out', async (t) => {
   const { base, ledger } = await start(t);
-  for (let i = 0; i < 31; i += 1) ledger.writeReport({ kind: i % 2 ? 'morning' : 'inbox', title: `R${i}`, body: 'b' }, { actor: 'device-key', device: 'desk' });
+  const S = { actor: 'device-key', device: 'secretary' };
+  ledger.writeReport({ kind: 'morning', title: 'R', body: 'b' }, S);
   const thread = ledger.ensureThread('secretary', { actor: 'web' });
-  ledger.addMessage(thread.id, { role: 'user', body: '<b>hi</b>' }, { actor: 'web' });
-  const p = ledger.propose({ kind: 'close_forgotten', title: '閉じる', body: '記録から', about: undefined }, { actor: 'device-key', device: 'secretary' });
+  ledger.addMessage(thread.id, { role: 'system', kind: 'trigger', body: '朝の時間です', data: { job: 'morning' } }, S);
+  const m = ledger.addMessage(thread.id, { role: 'secretary', body: '<b>おはようございます</b>', data: { steps: [{ kind: 'read', label: '予定を読みました' }], options: ['置いて'], scheduled: 'morning', secret: 'x' } }, S);
+  ledger.addMessage(thread.id, { role: 'system', kind: 'digest', body: 'スレッドで…' }, S);
+  ledger.propose({ kind: 'close_forgotten', title: '閉じる', body: '記録から' }, S);
+  const a = ledger.ask({ questions: [{ header: 'タスク整理', question: 'どうしますか？', options: [{ label: '残す', description: 'd' }, { label: '閉じる' }], kind: 'close_forgotten' }] }, S);
+  ledger.openThread(m.id, { actor: 'web' });
   const out = await (await get(base, '/web/api/secretary')).json();
   assert.deepEqual(out.secretary, { on: false, replying: false });
-  const reports = out.items.filter((x) => x.type === 'report');
-  assert.equal(reports.length, 30);
-  assert.deepEqual(reports.slice(-2).map((r) => r.title), ['R29', 'R30']);
-  assert.deepEqual(out.items.slice(-2).map((x) => [x.type, x.role ?? x.state]), [['message', 'user'], ['proposal', 'open']]);
-  assert.equal(out.items.at(-2).body, '<b>hi</b>');
-  assert.deepEqual(Object.keys(out.items.at(-1)).sort(), ['about', 'answer', 'answered_at', 'autonomy_kind', 'body', 'created_at', 'done_at', 'done_note', 'id', 'label', 'state', 'title', 'type']);
-  assert.equal(out.items.at(-1).id, p.id);
-  assert.equal(out.items.at(-1).label, '閉じ忘れたタスクを閉じる');
+  assert.deepEqual(out.items.map((x) => [x.type, x.role ?? x.state]), [['message', 'secretary'], ['ask', 'open']]);
+  const [msg, ask] = out.items;
+  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'role', 'scheduled', 'steps', 'type']);
+  assert.equal(msg.body, '<b>おはようございます</b>', 'returned as the text it is; the page builds the DOM');
+  assert.deepEqual([msg.steps, msg.options, msg.scheduled], [[{ kind: 'read', label: '予定を読みました' }], ['置いて'], 'morning']);
+  assert.deepEqual(ask, {
+    type: 'ask', id: a.id, state: 'open', created_at: a.created_at, answers: [null],
+    questions: [{ header: 'タスク整理', question: 'どうしますか？', multiSelect: false, options: [{ label: '残す', description: 'd' }, { label: '閉じる', description: '' }] }],
+  });
+  assert.equal(out.thread, thread.id);
+  assert.equal(out.threads[m.id].count, 0);
+  assert.ok(!JSON.stringify(out).includes('close_forgotten'), 'the autonomy kind of a question is the secretary\'s business');
 
   const bare = openLedger(':memory:');
   const server = createServer({ ledger: bare });
@@ -283,7 +288,7 @@ test('秘書: answering a proposal marks it, records autonomy_outcome and tells 
   const res = await answer(p.id, { answer: 'changed', text: '明後日にして' });
   assert.equal(res.status, 200);
   const out = await res.json();
-  const item = out.items.find((x) => x.id === p.id);
+  const item = ledger.getMessage(p.id);
   assert.deepEqual([item.state, item.answer], ['changed', '明後日にして']);
   assert.match(out.items.at(-1).body, /直して了承されました。\n本人の言葉: 明後日にして/);
   assert.equal(out.items.at(-1).role, 'system');

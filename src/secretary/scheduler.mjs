@@ -9,7 +9,10 @@
 //   only when that time is within graceMs; older times are dropped with one log line.
 //
 // now, the timers and run(job, slot) are given by the caller, so tests stand in for the clock
-// and for claude. run resolves to { code, signal, timedOut, busy, error }; it never logs output.
+// and for claude. run resolves to { code, signal, timedOut, busy, error }, or for a call into
+// the conversation (the morning) to { sent } or { skipped: reason }; it never logs output.
+// onTick runs at every check (serve looks there for calls into the conversation written by
+// another process).
 
 import { JOBS, latestSlot, countSlots, localIso } from './schedule.mjs';
 
@@ -17,7 +20,7 @@ export const TICK_MS = 30_000;
 export const GRACE_MS = 60 * 60 * 1000;
 
 // jobs: { nightly: when, morning: when, inbox: when } from parseWhen.
-export function createScheduler({ jobs, run, now = () => new Date(), log = () => {}, tickMs = TICK_MS, graceMs = GRACE_MS, timers = globalThis }) {
+export function createScheduler({ jobs, run, onTick = () => {}, now = () => new Date(), log = () => {}, tickMs = TICK_MS, graceMs = GRACE_MS, timers = globalThis }) {
   let last = now();
   let busy = false;
   let timer = null;
@@ -35,7 +38,9 @@ export function createScheduler({ jobs, run, now = () => new Date(), log = () =>
           out = { error: err.message };
         }
         const secs = Math.round((now() - started) / 1000);
-        if (out.busy) log(`secretary: ${job} skipped: another secretary run is still going`);
+        if (out.sent) log(`secretary: ${job} sent into the conversation`);
+        else if (out.skipped) log(`secretary: ${job} not sent: ${out.skipped}`);
+        else if (out.busy) log(`secretary: ${job} skipped: another secretary run is still going`);
         else if (out.error) log(`secretary: ${job} did not start: ${out.error}`);
         else if (out.timedOut) log(`secretary: ${job} stopped after ${secs}s: it ran past the time limit`);
         else log(`secretary: ${job} finished in ${secs}s (exit ${out.code ?? out.signal})`);
@@ -47,6 +52,11 @@ export function createScheduler({ jobs, run, now = () => new Date(), log = () =>
 
   // One check. Returns the promise of the runs it started, or null.
   function tick() {
+    try {
+      onTick();
+    } catch (err) {
+      log(`secretary: check failed: ${err.message}`);
+    }
     const t = now();
     const due = [];
     for (const job of JOBS) {

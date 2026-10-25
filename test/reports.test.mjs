@@ -57,7 +57,7 @@ test('schema: a version 6 file gains reports and keeps its records; reports are 
   assert.throws(() => ins.run('2026-10-02T00:00:00.000Z', 'human', null, 'report', 'r1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 8);
+  assert.equal(SCHEMA_VERSION, 9);
   const L = openLedger(file, { now: handClock().now });
   assert.deepEqual(L.records('profile').map((r) => [r.id, r.entity]), [[1, 'settings']]);
   const r = L.writeReport({ kind: 'nightly', title: 'Tonight', body: 'All on track.' }, SECRETARY);

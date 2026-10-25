@@ -41,15 +41,109 @@ export const REPORT_TITLE_MAX = 200;
 export const REPORT_BODY_MAX = 20000;
 // 会話: a thread's runner, who wrote a message, and the states of a proposal. The person's
 // message is kept short enough to read back; the secretary's reply may be as long as a report.
-export const THREAD_KINDS = ['secretary'];
+export const THREAD_KINDS = ['secretary', 'sub'];
 export const THREAD_RUNNERS = ['resume', 'resident'];
 export const MESSAGE_ROLES = ['user', 'secretary', 'system'];
 export const MESSAGE_MAX = 4000;
 export const PROPOSAL_STATES = ['open', 'approved', 'changed', 'refused'];
+// 質問(ask): the shape of Claude Code's AskUserQuestion. 1–4 questions, each with a header
+// (the small label over it, such as タスク整理), the question, 2–4 options (label and
+// description; the recommended one first) and multiSelect. The person may always write
+// something else (その他) instead. A question may name the autonomy kind it falls under, the
+// goal or task it is about, and the proposal it asks about.
+export const ASK_STATES = ['open', 'later', 'answered'];
+export const ASK_QUESTIONS_MAX = 4;
+export const ASK_HEADER_MAX = 12;
+export const ASK_QUESTION_MAX = 300;
+export const ASK_OPTIONS_MIN = 2;
+export const ASK_OPTIONS_MAX = 4;
+export const ASK_LABEL_MAX = 40;
+export const ASK_DESCRIPTION_MAX = 200;
+// 返事の候補: 1–2 short replies under a reply that ends in a question.
+export const REPLY_OPTIONS_MAX = 2;
+export const REPLY_OPTION_MAX = 30;
+// The label of the reply button that opens a thread from the message instead of sending it.
+export const THREAD_OPTION = 'スレッドで話す';
 // The answers the person gives to a proposal, as autonomy outcomes (revoked comes later, after
 // the fact, through autonomy_outcome).
 export const PROPOSAL_ANSWERS = ['approved', 'changed', 'refused'];
 export const ANSWER_MAX = 1000;
+
+// Checks the questions of an ask: { questions } (tidied) or { problems }. Only the fields named
+// here are taken; one line each, no control characters.
+export function checkAsk(input) {
+  const p = [];
+  const line = (v, name, max, i) => {
+    const where = i === undefined ? name : `${i + 1}問目の${name}`;
+    if (typeof v !== 'string' || v.trim() === '') return void p.push(`${where}が要ります`);
+    const t = v.trim();
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(t)) p.push(`${where}は1行で、制御文字を入れずに書きます`);
+    else if (charLength(t) > max) p.push(`${where}は${max}文字までです`);
+    return t;
+  };
+  if (!Array.isArray(input) || input.length < 1 || input.length > ASK_QUESTIONS_MAX) {
+    return { problems: [`questions は1〜${ASK_QUESTIONS_MAX}問の配列です`] };
+  }
+  const questions = input.map((q, i) => {
+    if (q === null || typeof q !== 'object' || Array.isArray(q)) {
+      p.push(`${i + 1}問目はオブジェクトで渡します`);
+      return null;
+    }
+    const unknown = Object.keys(q).filter((k) => !['header', 'question', 'options', 'multiSelect', 'kind', 'about', 'proposal'].includes(k));
+    if (unknown.length) p.push(`${i + 1}問目の ${unknown.join('、')} は渡せません`);
+    const out = {
+      header: line(q.header, 'ラベル(header)', ASK_HEADER_MAX, i),
+      question: line(q.question, '問い(question)', ASK_QUESTION_MAX, i),
+      multiSelect: q.multiSelect === true,
+      options: [],
+    };
+    if (q.multiSelect !== undefined && typeof q.multiSelect !== 'boolean') p.push(`${i + 1}問目の multiSelect は true か false です`);
+    if (!Array.isArray(q.options) || q.options.length < ASK_OPTIONS_MIN || q.options.length > ASK_OPTIONS_MAX) {
+      p.push(`${i + 1}問目の選択肢(options)は${ASK_OPTIONS_MIN}〜${ASK_OPTIONS_MAX}個です`);
+    } else {
+      const seen = new Set();
+      for (const o of q.options) {
+        if (o === null || typeof o !== 'object' || Array.isArray(o)) {
+          p.push(`${i + 1}問目の選択肢は { label, description } で渡します`);
+          continue;
+        }
+        const label = line(o.label, '選択肢の名前(label)', ASK_LABEL_MAX, i);
+        const description = o.description === undefined || o.description === '' ? '' : line(o.description, '選択肢の説明(description)', ASK_DESCRIPTION_MAX, i);
+        if (label && seen.has(label)) p.push(`${i + 1}問目に同じ名前の選択肢「${label}」が2つあります`);
+        if (label) seen.add(label);
+        if (label === 'その他') p.push(`${i + 1}問目の「その他」は warifuri が出すので、選択肢には入れません`);
+        out.options.push({ label, description: description ?? '' });
+      }
+    }
+    if (q.kind !== undefined && q.kind !== null) {
+      if (!AUTONOMY_KINDS.some((k) => k.kind === q.kind)) p.push(`${i + 1}問目の kind は ${AUTONOMY_KINDS.map((k) => k.kind).join(', ')} のどれかです(原則13)`);
+      else out.kind = q.kind;
+    }
+    for (const k of ['about', 'proposal']) {
+      if (q[k] === undefined || q[k] === null) continue;
+      if (!isValidId(q[k])) p.push(`${i + 1}問目の ${k} は id で渡します`);
+      else out[k] = q[k];
+    }
+    return out;
+  });
+  return p.length ? { problems: p } : { questions };
+}
+
+// Checks reply buttons: { options } or { problems }.
+export function checkReplyOptions(input) {
+  if (!Array.isArray(input) || input.length < 1 || input.length > REPLY_OPTIONS_MAX) return { problems: [`options は1〜${REPLY_OPTIONS_MAX}個の配列です`] };
+  const p = [];
+  const options = input.map((o) => (typeof o === 'string' ? o.trim() : ''));
+  options.forEach((o, i) => {
+    if (o === '') p.push(`${i + 1}個目の返事の候補が空です`);
+    // eslint-disable-next-line no-control-regex
+    else if (/[\u0000-\u001f\u007f]/.test(o)) p.push(`${i + 1}個目の返事の候補は1行で書きます`);
+    else if (charLength(o) > REPLY_OPTION_MAX) p.push(`返事の候補は${REPLY_OPTION_MAX}文字までです`);
+  });
+  if (new Set(options).size !== options.length) p.push('同じ返事の候補が2つあります');
+  return p.length ? { problems: p } : { options };
+}
 
 // Fields that belong to a state. Leaving the state clears them.
 export const STATE_FIELDS = {

@@ -253,43 +253,171 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-placeholder p { margin: 0; font-size: 15px; color: var(--sub); line-height: 1.6; }
 .wf-silhouette { display: flex; gap: 16px; padding: 14px; border-radius: 10px; background: #f5f5f7; }
 
-/* 秘書: one timeline, the newest at the bottom, and the box to write in. */
-.wf-page-chat { flex: 1; min-height: 0; box-sizing: border-box; padding: 24px 28px 20px; display: flex; flex-direction: column; gap: 16px; }
-.wf-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.wf-chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
-.wf-chat-scroll > * { flex-shrink: 0; }
-.wf-tl-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--hair); border-radius: 10px; min-width: 0; }
-.wf-tl-card.wf-open { border-color: var(--pastel); }
-.wf-msg-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: min(640px, 80%); }
-.wf-msg-row.wf-mine { align-self: flex-end; align-items: flex-end; }
-.wf-msg { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.wf-msg-user { background: var(--tint); }
-.wf-msg-secretary { background: #f5f5f7; }
-.wf-msg-system { margin: 0; align-self: center; max-width: 80%; font-size: 13px; line-height: 1.6; color: var(--sub); text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
-.wf-waiting { margin: 0; align-self: flex-start; font-size: 13px; color: var(--sub); }
-.wf-proposal-kind { font-size: 13px; color: var(--sub); }
-.wf-proposal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.wf-proposal-actions .wf-btn-primary, .wf-proposal-actions .wf-btn-line { font-size: 13px; padding: 6px 14px; }
-.wf-proposal-actions button:disabled { opacity: .6; cursor: default; }
-.wf-proposal-answer { margin: 0; font-size: 13px; color: var(--sub); overflow-wrap: anywhere; }
-.wf-proposal-answer b { font-weight: 600; color: var(--ink); }
-.wf-done { margin-left: 10px; }
-.wf-fix-row { display: flex; }
-.wf-fix, .wf-composer textarea { font: inherit; font-size: 15px; color: var(--ink); border: 1px solid var(--off); border-radius: 6px; padding: 8px 12px; box-sizing: border-box; background: #ffffff; }
-.wf-fix { width: 100%; }
-.wf-composer-wrap { border-top: 1px solid var(--hair); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-.wf-composer { display: flex; align-items: flex-end; gap: 10px; }
-.wf-composer textarea { flex: 1; min-width: 0; resize: none; line-height: 1.6; max-height: 160px; }
-.wf-composer textarea:disabled { background: #f5f5f7; }
+/* 秘書: one conversation window. Mine on the right, the secretary's on the left, each in a
+   bordered bubble; who and the steps over it, the time under it. New things rise in once;
+   questions come in; the thread slides in from the right. Nothing moves where the system asks
+   for less motion (the rule at the top). */
+@keyframes wf-msg-rise { from { opacity: 0; transform: translateY(8px) } }
+@keyframes wf-msg-come { from { opacity: 0; transform: translateY(6px) scale(.985) } }
+@keyframes wf-msg-slide { from { opacity: 0; transform: translateX(12px) } }
+@keyframes wf-msg-wait { 0%, 70%, 100% { opacity: .25 } 35% { opacity: 1 } }
+@keyframes wf-msg-blink { 50% { opacity: 0 } }
+@keyframes wf-msg-glow { 50% { opacity: .3 } }
+.wf-rise { animation: wf-msg-rise .22s cubic-bezier(.2,.7,.2,1) both; }
+.wf-come { animation: wf-msg-come .22s cubic-bezier(.2,.7,.2,1) both; }
+.wf-slide { animation: wf-msg-slide .22s cubic-bezier(.2,.7,.2,1) both; }
+.wf-sec button { transition: background-color .11s ease, color .11s ease, border-color .11s ease, box-shadow .11s ease, opacity .11s ease, transform .11s ease; }
+.wf-press:active:not(:disabled) { transform: scale(.94); }
+
+.wf-sec { flex: 1; min-height: 0; display: flex; background: #ffffff; }
+.wf-sec-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.wf-sec-main > .wf-banner { margin: 12px 28px 0; }
+.wf-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 28px 12px; }
+.wf-list { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; font-size: 15px; line-height: 1.75; }
+.wf-list > *, .wf-thread-scroll > * { flex-shrink: 0; }
+.wf-empty-talk { margin: 40px 0 0; text-align: center; color: var(--sub); }
+.wf-day { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-day > span { flex: 1; height: 1px; background: var(--hair); }
+
+.wf-m { max-width: 39em; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.wf-m.wf-mine { align-self: flex-end; max-width: 78%; align-items: flex-end; }
+.wf-bubble { max-width: 100%; box-sizing: border-box; border: 1px solid var(--hair); border-radius: 14px; padding: 10px 16px; background: #ffffff; overflow-wrap: anywhere; line-break: strict; }
+.wf-bubble-me { background: #f5f8fb; padding: 8px 16px; }
+.wf-plain { margin: 0; white-space: pre-wrap; }
+.wf-about { display: block; text-align: right; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-sentfiles { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 12px; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-who { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-badge-sched { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--tint); border: 1px solid #cfe3f4; border-radius: 999px; padding: 0 8px; line-height: 20px; }
+.wf-time { font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; line-height: 1.5; }
+.wf-foot { display: flex; align-items: center; gap: 12px; min-height: 20px; }
+.wf-note { margin: 0; align-self: center; max-width: 80%; font-size: 13px; line-height: 1.6; color: var(--sub); text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The steps of the work: a dot in the colour of its kind; the newest glows while it is written. */
+.wf-steps { display: flex; flex-direction: column; gap: 3px; margin: 0 0 2px; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-step { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wf-step > i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.wf-step > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-step-say > span { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.wf-steps-live .wf-step:not(.wf-step-old) > span { color: var(--ink); font-weight: 600; }
+.wf-steps-live .wf-step:not(.wf-step-old) > i { animation: wf-msg-glow 1.8s ease-in-out infinite; }
+
+/* The words of a reply (md.js): paragraphs a little apart, lists that hang, bold, code, links. */
+.wf-md > * { margin: 0; }
+.wf-md > * + * { margin-top: .7em; }
+.wf-md b { font-weight: 600; }
+.wf-md h3, .wf-md h4, .wf-md h5, .wf-md h6 { font-size: 15px; font-weight: 600; line-height: 1.6; }
+.wf-md h3 { font-size: 17px; }
+.wf-md ol, .wf-md ul { padding-left: 1.7em; }
+.wf-md li + li { margin-top: .3em; }
+.wf-md li::marker { color: var(--sub); font-variant-numeric: tabular-nums; }
+.wf-md code { padding: .1em .35em; border-radius: 4px; background: rgba(0,0,0,.065); font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: .88em; }
+.wf-md pre { padding: 10px 12px; border-radius: 6px; background: rgba(0,0,0,.065); font-size: .85em; line-height: 1.6; white-space: pre; overflow-x: auto; overflow-wrap: normal; }
+.wf-md pre code { padding: 0; background: none; font-size: inherit; }
+.wf-md a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+/* Waiting: three dots before the first words; a caret while the words come. */
+.wf-wait { display: inline-flex; gap: 5px; align-items: center; height: 20px; }
+.wf-wait > i { width: 7px; height: 7px; border-radius: 50%; background: var(--sub); animation: wf-msg-wait 1.2s ease-in-out infinite; }
+.wf-wait > i:nth-child(2) { animation-delay: .15s; }
+.wf-wait > i:nth-child(3) { animation-delay: .3s; }
+.wf-caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -.15em; background: var(--accent); border-radius: 1px; animation: wf-msg-blink 1s steps(1) infinite; }
+
+/* Reply buttons under a reply: the recommended one blue, the other light blue. */
+.wf-replies { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.wf-chip { font: inherit; font-size: 13px; font-weight: 600; height: 30px; padding: 0 12px; border-radius: 8px; cursor: pointer; }
+.wf-chip-main { border: 1px solid var(--accent); background: var(--accent); color: #ffffff; }
+.wf-chip-main:hover { background: #275d8a; border-color: #275d8a; }
+.wf-chip-sub { border: 1px solid #cfe3f4; background: var(--tint); color: var(--accent); }
+.wf-chip-sub:hover { background: #d4e8f8; }
+.wf-chip:disabled { opacity: .6; cursor: default; }
+
+/* Under a message: its thread (未読 in blue), and on hover, a thread from it. */
+.wf-thread-link, .wf-hover-act { font: inherit; font-size: 13px; font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; color: var(--ink); line-height: 20px; }
+.wf-thread-link.wf-unread { color: var(--accent); }
+.wf-hover-act { color: var(--sub); opacity: 0; }
+.wf-hover-act:hover { color: var(--accent); }
+.wf-m:hover .wf-hover-act, .wf-m:focus-within .wf-hover-act { opacity: 1; }
+@media (hover: none) { .wf-hover-act { opacity: 1; } }
+
+/* A question of the secretary's (ask), one at a time. */
+.wf-ask { border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.wf-ask-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-ask-label { font-weight: 600; color: var(--accent); background: var(--tint); border-radius: 6px; padding: 1px 8px; }
+.wf-ask-q { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.wf-opts { display: flex; flex-direction: column; gap: 6px; }
+.wf-opt { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--hair); background: #ffffff; font: inherit; cursor: pointer; text-align: left; color: var(--ink); }
+.wf-opt:hover { background: #f3f8fd; }
+.wf-opt.wf-on { border-color: var(--accent); background: #f3f8fd; }
+.wf-mark { width: 16px; height: 16px; margin-top: 4px; border-radius: 50%; flex: none; display: grid; place-items: center; border: 1.5px solid var(--line); box-sizing: border-box; }
+.wf-mark > span { width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+.wf-mark-box, .wf-mark-box > span { border-radius: 4px; }
+.wf-on .wf-mark { border-color: var(--accent); }
+.wf-on .wf-mark > span { background: var(--accent); }
+.wf-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wf-opt-label { font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.6; }
+.wf-rec { margin-left: 8px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.wf-opt-desc { font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-other { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--hair); border-radius: 10px; }
+.wf-other:focus-within { border-color: var(--accent); }
+.wf-other > span { font-size: 15px; color: var(--sub); flex: none; }
+.wf-other input { flex: 1; min-width: 0; border: 0; outline: 0; font: inherit; font-size: 15px; background: none; color: var(--ink); }
+.wf-ask-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.wf-ask-back { font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 10px; border: 0; background: none; color: var(--accent); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; margin-right: auto; }
+.wf-ask-back:hover { background: rgba(58,130,190,.06); }
+.wf-btn-later { font: inherit; font-size: 15px; padding: 8px 16px; border-radius: 10px; border: 0; background: #f2f2f4; color: var(--ink); cursor: pointer; }
+.wf-btn-later:hover { background: #e8e8ed; }
+.wf-btn-answer { font: inherit; font-size: 15px; font-weight: 600; padding: 8px 18px; border-radius: 10px; border: 0; background: var(--accent); color: #ffffff; cursor: pointer; }
+.wf-btn-answer:hover { background: #275d8a; }
+.wf-ask button:disabled { opacity: .6; cursor: default; }
+.wf-ask-small { padding: 12px; gap: 10px; }
+.wf-ask-small .wf-ask-q { font-size: 15px; }
+.wf-ask-small .wf-opt { gap: 10px; padding: 8px 10px; }
+.wf-ask-small .wf-mark { margin-top: 3px; }
+.wf-ask-small .wf-rec { margin-left: 6px; }
+.wf-ask-small .wf-other { gap: 10px; padding: 6px 10px; }
+.wf-ask-small .wf-btn-later, .wf-ask-small .wf-btn-answer, .wf-ask-small .wf-ask-back { font-size: 13px; font-weight: 600; height: 30px; padding: 0 12px; border-radius: 8px; }
+.wf-ask-small .wf-btn-answer { padding: 0 14px; }
+
+/* The box to write in: the files over the line, the clip before it, the round send after it. */
+.wf-sec-bar { flex: none; padding: 0 28px 24px; display: flex; flex-direction: column; gap: 8px; }
+.wf-sec-bar > .wf-errors, .wf-sec-bar > .wf-chat-off { width: 100%; max-width: 760px; margin: 0 auto; box-sizing: border-box; }
+.wf-composer2 { width: 100%; max-width: 760px; margin: 0 auto; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; border: 1px solid var(--line); border-radius: 14px; padding: 4px 6px; background: #ffffff; transition: border-color .11s ease, box-shadow .11s ease; }
+.wf-composer2:focus-within, .wf-composer2.wf-drop { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,111,165,.12); }
+.wf-composer2.wf-busy .wf-send, .wf-composer2.wf-busy .wf-clip { pointer-events: none; opacity: .5; }
+.wf-sec-field { flex: 1; min-width: 0; display: flex; align-items: center; position: relative; }
+.wf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.wf-composer2 textarea { flex: 1; min-width: 0; display: block; height: 36px; max-height: 124px; padding: 7px 0; box-sizing: border-box; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 15px; line-height: 22px; resize: none; overflow-y: auto; scrollbar-width: none; }
+.wf-composer2 textarea:focus-visible { outline: none; }
+.wf-composer2 textarea:disabled { color: var(--sub); }
+.wf-clip, .wf-send { width: 36px; height: 36px; border: 0; border-radius: 50%; cursor: pointer; display: grid; place-items: center; flex: none; }
+.wf-clip { background: none; color: var(--sub); }
+.wf-clip:hover:not(:disabled) { background: rgba(0,0,0,.04); color: var(--ink); }
+.wf-send { background: var(--ink); color: #ffffff; }
+.wf-clip:disabled, .wf-send:disabled { opacity: .5; cursor: default; }
+.wf-tray { order: -1; flex: 0 0 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 4px 2px; }
+.wf-afile { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: min(100%, 300px); height: 36px; padding: 0 4px 0 6px; border: 1px solid var(--hair); border-radius: 6px; background: #f5f8fb; font-size: 13px; line-height: 1.3; box-sizing: border-box; }
+.wf-pic { flex: none; width: 24px; height: 24px; border-radius: 4px; overflow: hidden; display: grid; place-items: center; background: var(--tint); color: var(--accent); }
+.wf-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.wf-nm { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-st { flex: none; color: var(--sub); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wf-afile button { width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--sub); cursor: pointer; display: grid; place-items: center; flex: none; }
+.wf-afile button:hover { background: rgba(0,0,0,.04); color: var(--ink); }
+.wf-traynote { flex: 0 0 100%; font-size: 13px; line-height: 1.5; color: var(--red); }
 .wf-chat-off { margin: 0; font-size: 13px; color: var(--sub); }
-.wf-report-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.wf-report-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.wf-report-time { font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.wf-report-body { margin: 0; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.wf-kind { flex: none; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 2px 10px; white-space: nowrap; background: var(--tint); color: var(--accent); }
-.wf-kind-morning { background: #fdf1dc; color: #8a5a12; }
-.wf-kind-inbox { background: #f2f2f4; color: var(--sub); }
-.wf-kind-proposal { background: #fcefdc; color: #8a5f1c; }
+
+/* The thread, on the right. */
+.wf-thread { flex: 0 0 400px; min-width: 0; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; border-left: 1px solid var(--hair); background: #fbfcfe; }
+.wf-thread-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--hair); font-size: 15px; font-weight: 600; }
+.wf-thread-close { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: var(--sub); cursor: pointer; display: grid; place-items: center; }
+.wf-thread-close:hover { background: rgba(0,0,0,.04); color: var(--ink); }
+.wf-thread-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; font-size: 15px; line-height: 1.75; }
+.wf-thread-scroll .wf-m { max-width: 100%; }
+.wf-thread-scroll .wf-m.wf-mine { max-width: 85%; }
+.wf-thread-parent { display: flex; flex-direction: column; gap: 2px; padding: 0 0 12px; border-bottom: 1px solid var(--hair); }
+.wf-thread-parent small { font-size: 13px; color: var(--sub); }
+.wf-thread-parent p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--sub); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.wf-thread-bar { flex: none; padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.wf-thread-bar .wf-composer2 { max-width: none; }
 
 /* 設定 */
 .wf-set-title { padding: 10px 10px 8px; font-size: 24px; font-weight: 600; }
@@ -355,7 +483,10 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
   #wf-main { height: auto; }
   .wf-tasks-body, .wf-cal-body { flex-direction: column; }
   .wf-week { height: 70vh; }
-  .wf-chat { flex: none; height: 75vh; }
+  .wf-sec { flex: none; height: 85vh; position: relative; }
+  .wf-scroll { padding: 16px 16px 12px; }
+  .wf-sec-bar { padding: 0 16px 16px; }
+  .wf-thread { position: absolute; inset: 0; z-index: 2; flex: none; width: 100%; border-left: 0; }
   .wf-aside { max-width: none; height: auto; }
   .wf-goals { flex: none; min-width: 0; }
 }
