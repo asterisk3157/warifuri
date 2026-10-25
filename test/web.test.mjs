@@ -66,6 +66,9 @@ async function start(t, options = {}) {
 }
 
 const get = (base, p, headers = {}) => fetch(`${base}${p}`, { headers, redirect: 'manual' });
+// The login page posts the token it read after the #.
+const login = (base, token, headers = {}) =>
+  fetch(`${base}/web/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify({ token }) });
 
 // fetch sets Host itself; node:http sends the Host we give. Resolves to the status.
 const rawStatus = (base, p, headers) =>
@@ -212,21 +215,29 @@ test('beyond this machine: a one-time login URL gives an HttpOnly, SameSite=Stri
     assert.equal((await get(base, '/web/api/tasks', { Cookie: `warifuri_web=${s}` })).status, 401);
     assert.equal((await get(base, '/web/api/tasks', { Authorization: `Bearer ${s}` })).status, 401);
   }
-  assert.equal((await get(base, '/web/login?token=wrong')).status, 403);
+  // The page itself takes no token; it reads the one after the # and posts it.
+  const page = await get(base, '/web/login');
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
+  assert.match(await page.text(), /src="\/web\/login\.js"/);
+  assert.equal((await get(base, '/web/login.js')).status, 200);
+  assert.equal((await login(base, 'wrong')).status, 403);
 
   const token = server.web.issueLogin();
-  const login = await get(base, `/web/login?token=${token}`);
-  assert.equal(login.status, 200);
-  assert.equal(login.headers.get('referrer-policy'), 'no-referrer');
-  const cookie = login.headers.get('set-cookie');
+  assert.equal((await get(base, `/web/login?token=${token}`)).headers.get('set-cookie'), null);
+  assert.equal((await login(base, token, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await login(base, token, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  const ok = await login(base, token, { 'Sec-Fetch-Site': 'same-origin' });
+  assert.equal(ok.status, 200);
+  const cookie = ok.headers.get('set-cookie');
   assert.match(cookie, /^warifuri_web=[A-Za-z0-9_-]{43};/);
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Strict/);
   assert.match(cookie, /Path=\//);
   assert.doesNotMatch(cookie, /Secure/);
-  assert.match(await login.text(), /url=\/calendar/);
+  assert.deepEqual(await ok.json(), { next: '/calendar' });
   // Single use.
-  assert.equal((await get(base, `/web/login?token=${token}`)).status, 403);
+  assert.equal((await login(base, token)).status, 403);
 
   const session = cookie.split(';')[0];
   assert.equal((await get(base, '/calendar', { Cookie: session })).status, 200);
@@ -237,7 +248,7 @@ test('beyond this machine: a one-time login URL gives an HttpOnly, SameSite=Stri
 test('with an https public URL the cookie is __Host- and Secure, and the label is サーバー', async (t) => {
   const { base, server } = await start(t, { publicUrl: 'https://wf.example.org' });
   assert.equal(server.web.mode, 'login');
-  const res = await get(base, `/web/login?token=${server.web.issueLogin()}`);
+  const res = await login(base, server.web.issueLogin());
   const cookie = res.headers.get('set-cookie');
   assert.match(cookie, /^__Host-warifuri_web=/);
   assert.match(cookie, /Secure/);
@@ -261,15 +272,15 @@ test('login tokens expire after 15 minutes', async (t) => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const token = web.issueLogin();
   clock += 15 * 60 * 1000 + 1;
-  assert.equal((await get(base, `/web/login?token=${token}`)).status, 403);
+  assert.equal((await login(base, token)).status, 403);
   const fresh = web.issueLogin();
   clock += 60 * 1000;
-  assert.equal((await get(base, `/web/login?token=${fresh}`)).status, 200);
+  assert.equal((await login(base, fresh)).status, 200);
 });
 
 test('no key, token or hash leaves any endpoint', async (t) => {
   const { base, server, secrets } = await start(t, { host: '0.0.0.0' });
-  const cookie = (await get(base, `/web/login?token=${server.web.issueLogin()}`)).headers.get('set-cookie').split(';')[0];
+  const cookie = (await login(base, server.web.issueLogin())).headers.get('set-cookie').split(';')[0];
   const sid = cookie.split('=')[1];
   assert.ok(secrets.length >= 4, 'two keys and the access and refresh tokens');
   const forbidden = [...secrets, ...secrets.map((s) => createHash('sha256').update(s).digest('hex')), sid];
