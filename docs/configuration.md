@@ -36,7 +36,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 ## 使う機械の設定
 
-`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と着手ゲートのフック(`warifuri hook gate`)が読みます。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。デバイスの鍵は設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と着手ゲートのフック(`warifuri hook gate`)が読みます。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
 ## 項目
 
@@ -55,7 +55,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_TRUST_PROXY` | 同じ機械のトンネルや逆プロキシを信じる範囲(loopback や段数)。回数の制限を呼び出し元ごとに数えるために使う | なし | `--trust-proxy` |  | serve |
 | `WARIFURI_REDIRECT_HOSTS` | ログインのあとに戻してよい https の先。claude.ai と claude.com に足す。カンマ区切り | なし |  |  | serve |
 | `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む | なし | `--url` |  | connect、hook |
-| `WARIFURI_DEVICE_KEY_FILE` | このデバイスの鍵を1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
+| `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
 | `WARIFURI_GATE` | 着手ゲート。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
 <!-- settings:end -->
 

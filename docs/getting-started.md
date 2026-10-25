@@ -44,7 +44,7 @@ warifuri: GitHub login off (missing …); only device keys work
 warifuri: web screens at http://127.0.0.1:8787/calendar (open from this machine, no login)
 ```
 
-1行目が出れば動いています。2行目は、GitHub のログインを設定していないので、デバイスの鍵だけでつなぐという知らせです。1台の PC だけで使うときはいつもこう出るので、そのままでかまいません。GitHub のログインは、別の機械から使うときにだけ設定します(下の「別の機械から使う」の節)。3行目は Web 画面の URL です。
+1行目が出れば動いています。2行目は、GitHub のログインを設定していないので、シークレットだけでつなぐという知らせです。1台の PC だけで使うときはいつもこう出るので、そのままでかまいません。GitHub のログインは、別の機械から使うときにだけ設定します(下の「別の機械から使う」の節)。3行目は Web 画面の URL です。
 
 データベース(`~/.warifuri/ledger.sqlite`)は、最初の起動のときにできます。サーバーはこの PC の中(`127.0.0.1`)からしか受けません。
 
@@ -66,7 +66,7 @@ warifuri connect
 
 `connect` は、この PC で次のことをします。
 
-- このデバイス(機械)の鍵を発行して、`~/.warifuri/device.key` に本人だけが読める形で置きます。macOS と Linux では、ファイルの権限を本人だけにします(600)。Windows では、ユーザーのフォルダの権限(ACL)で守られ、ほかのユーザーからは読めません。ただし、その PC の管理者は読めます。デバイスの名前は、既定では PC のホスト名です。`--device <名前>` で変えられます。
+- このデバイス(機械)のシークレット(warifuri サーバーに入るための、`wf_` で始まる文字列)を発行して、`~/.warifuri/device.key` に本人だけが読める形で置きます。macOS と Linux では、ファイルの権限を本人だけにします(600)。Windows では、ユーザーのフォルダの権限(ACL)で守られ、ほかのユーザーからは読めません。ただし、その PC の管理者は読めます。デバイスの名前は、既定では PC のホスト名です。`--device <名前>` で変えられます。
 - PATH にある `claude` と `codex` に、MCP サーバーを `warifuri` の名前で登録します。
 - 着手ゲートのフックを、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に足します。
 - 軽い秘書のスキルを写します(下の節)。
@@ -87,7 +87,7 @@ claude mcp list
 
 #### Codex
 
-Codex は、鍵を環境変数 `WARIFURI_DEVICE_KEY` から読みます。Codex を起動するターミナルで、鍵のファイルの中身をこの変数に入れてから `codex` を起動します。
+Codex は、シークレットを環境変数 `WARIFURI_DEVICE_KEY` から読みます。Codex を起動するターミナルで、シークレットのファイルの中身をこの変数に入れてから `codex` を起動します。
 
 macOS と Linux:
 
@@ -188,7 +188,7 @@ warifuri backup --dir <写す先のフォルダ>
    codex mcp remove warifuri
    ```
 
-4. Codex のために入れた鍵の環境変数を消します。Windows では、ユーザーの環境変数から外します。macOS と Linux では、シェルの設定ファイルに書いた `export WARIFURI_DEVICE_KEY=…` の行を消します。
+4. Codex のために入れたシークレットの環境変数を消します。Windows では、ユーザーの環境変数から外します。macOS と Linux では、シェルの設定ファイルに書いた `export WARIFURI_DEVICE_KEY=…` の行を消します。
 
    ```powershell
    [Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', $null, 'User')
@@ -200,4 +200,4 @@ warifuri backup --dir <写す先のフォルダ>
    npm uninstall -g warifuri
    ```
 
-6. 最後に、データのフォルダ `~/.warifuri/` を消します。データベースと設定と鍵が入っているので、要らなくなったときだけ消してください。
+6. 最後に、データのフォルダ `~/.warifuri/` を消します。データベースと設定とシークレットが入っているので、要らなくなったときだけ消してください。

@@ -485,7 +485,7 @@ export function openLedger(path, options = {}) {
     if (CLOSED_STATES.includes(task.state)) problems.push(`タスク ${taskId} は閉じています(${task.state})。着手する前に reopen で戻します`);
     const dev = typeof device === 'string' ? getDeviceRow(device) : null;
     if (!dev) problems.push(`デバイス ${device} がありません。warifuri key add で登録します`);
-    else if (dev.revoked_at !== null) problems.push(`デバイス ${device} の鍵は取り消されています`);
+    else if (dev.revoked_at !== null) problems.push(`デバイス ${device} のシークレットは取り消されています`);
     if (place !== null && !getPlaceRow(place)) problems.push(`作業フォルダ ${place} がありません`);
     if (problems.length) throw new LedgerError(problems);
 
@@ -1142,7 +1142,7 @@ export function openLedger(path, options = {}) {
     checkDeviceName(name);
     const before = getDeviceRow(name);
     if (before && before.key_hash !== null && before.revoked_at === null) {
-      throw new LedgerError([`デバイス ${name} には使える鍵がもうあります。新しくするときは、先に取り消します(key revoke)`]);
+      throw new LedgerError([`デバイス ${name} には使えるシークレットがもうあります。新しくするときは、先に取り消します(key revoke)`]);
     }
     const key = `wf_${randomBytes(32).toString('base64url')}`;
     const t = nowIso();

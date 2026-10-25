@@ -121,7 +121,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_DEVICE_KEY_FILE',
     section: 'client',
-    about: 'このデバイスの鍵を1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む',
+    about: 'このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む',
     def: (home) => path.join(home, 'device.key'),
     defText: 'WARIFURI_HOME/device.key',
     path: true,

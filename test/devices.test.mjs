@@ -65,7 +65,7 @@ test('records say a key was issued and revoked, without key material', (t) => {
 test('a revoked key stops working, and the device can get a new one', (t) => {
   const L = fresh(t);
   const first = L.issueKey('laptop', ACTOR);
-  assert.throws(() => L.issueKey('laptop', ACTOR), /使える鍵がもうあります/);
+  assert.throws(() => L.issueKey('laptop', ACTOR), /使えるシークレットがもうあります/);
   L.revokeKey('laptop', ACTOR);
   assert.equal(L.deviceForKey(first.key), null);
   const [listed] = L.listDevices();
