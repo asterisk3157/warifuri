@@ -628,6 +628,9 @@ export function openLedger(path, options = {}) {
   // A habit is stopped, not deleted, so its history stays.
   const stopHabit = (id, opts) => writeHabit(id, { active: 0 }, opts, 'stop');
 
+  // The habits that are not stopped, by id.
+  const listHabits = () => all('SELECT * FROM habits WHERE active = 1 ORDER BY id').map(habitView);
+
   const pathsOf = (placeId) =>
     all('SELECT device, path FROM place_paths WHERE place_id = ? ORDER BY device', placeId).map(({ device, path }) => ({ device, path }));
 
@@ -1454,6 +1457,7 @@ export function openLedger(path, options = {}) {
     createHabit,
     updateHabit,
     stopHabit,
+    listHabits,
     createPlace,
     updatePlace,
     upsertPlace,
