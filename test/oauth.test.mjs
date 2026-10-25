@@ -733,20 +733,21 @@ test('the Web screens: the login page offers GitHub, and only the person gets a 
   assert.equal(page.status, 401);
   assert.match(await page.text(), /href="\/web\/login\/github" class="wf-button">GitHub でログイン/);
 
-  // To GitHub with a state kept in a cookie, back under the registered callback.
+  // To GitHub with a state kept in a cookie, back to the one callback registered with GitHub.
   const begin = async () => {
     const res = await s.go('/web/login/github');
     assert.equal(res.status, 302);
     const to = new URL(res.headers.get('location'));
-    assert.equal(to.searchParams.get('redirect_uri'), `${s.base}/oauth/github/callback/web`);
+    assert.equal(to.searchParams.get('redirect_uri'), `${s.base}/oauth/github/callback`);
+    assert.match(to.searchParams.get('state'), /^web\./);
     return { cookie: res.headers.getSetCookie()[0].split(';')[0], state: to.searchParams.get('state') };
   };
   const back = (cookie, state, code) =>
-    s.go(`/oauth/github/callback/web?${new URLSearchParams({ state, code })}`, { headers: cookie ? { Cookie: cookie } : {} });
+    s.go(`/oauth/github/callback?${new URLSearchParams({ state, code })}`, { headers: cookie ? { Cookie: cookie } : {} });
 
   const a = await begin();
   assert.equal((await back('', a.state, 'code-alex-example')).status, 400);
-  assert.equal((await back(a.cookie, 'other', 'code-alex-example')).status, 400);
+  assert.equal((await back(a.cookie, 'web.other', 'code-alex-example')).status, 400);
   // Someone else's GitHub account is refused.
   const b = await begin();
   const stranger = await back(b.cookie, b.state, 'code-someone');
@@ -763,5 +764,5 @@ test('the Web screens: the login page offers GitHub, and only the person gets a 
   assert.equal((await s.go('/calendar', { headers: { Cookie: session.split(';')[0] } })).status, 200);
   // GitHub was asked with the same callback the browser came back to.
   const exchange = s.github.seen.filter((r) => r.path === '/login/oauth/access_token').at(-1);
-  assert.equal(new URLSearchParams(exchange.body).get('redirect_uri'), `${s.base}/oauth/github/callback/web`);
+  assert.equal(new URLSearchParams(exchange.body).get('redirect_uri'), `${s.base}/oauth/github/callback`);
 });
