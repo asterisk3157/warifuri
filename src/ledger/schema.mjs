@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -304,6 +304,14 @@ export const MIGRATIONS = [
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
   CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+  `
+  -- Where a booking came from or was copied to: source names the outside calendar (such as
+  -- google-calendar), external_id the event there. A pair names one booking, so importing the
+  -- same event again finds it; external_id is never set without source (rules.mjs).
+  ALTER TABLE bookings ADD COLUMN source TEXT;
+  ALTER TABLE bookings ADD COLUMN external_id TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS bookings_external ON bookings(source, external_id) WHERE external_id IS NOT NULL;
   `,
 ];
 
