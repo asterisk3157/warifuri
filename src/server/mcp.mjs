@@ -21,7 +21,7 @@ import { z } from 'zod';
 import {
   STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
 } from '../ledger/rules.mjs';
-import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
@@ -258,6 +258,26 @@ function buildServer(ledger, device, knowledge) {
       annotations: readOnly,
     },
     guarded(async ({ kind, limit, before }) => result(ledger.listReports({ kind, limit, before }))),
+  );
+
+  server.registerTool(
+    'proposals',
+    {
+      description:
+        "Read the secretary's proposals (made with propose) in the order to act on them: { proposals: [{ id, autonomy_kind, " +
+        'title, body, about, state, answer, answered_at, done_at, done_note, created_at }] }. which: to_do (the default: ' +
+        "approved or changed by the person and not carried out yet; answer holds the person's words for changed), open " +
+        `(not answered yet), or recent (any state, newest first). limit: how many (default ${MESSAGES_DEFAULT}, at most ${MESSAGES_MAX}).`,
+      inputSchema: { which: z.enum(['to_do', 'open', 'recent']).optional(), limit: z.number().optional() },
+      annotations: readOnly,
+    },
+    guarded(async ({ which, limit }) =>
+      result({
+        proposals: ledger.listProposals({ which, limit }).map((m) => ({
+          id: m.id, autonomy_kind: m.autonomy_kind, title: m.title, body: m.body, about: m.about, state: m.state, answer: m.answer,
+          answered_at: m.answered_at, done_at: m.done_at, done_note: m.done_note, created_at: m.created_at,
+        })),
+      })),
   );
 
   registerWriteTools(server, ledger, device, { write, writer, knowledge });
@@ -555,6 +575,25 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
   );
 
   const autonomyKind = z.enum(AUTONOMY_KINDS.map((k) => k.kind));
+
+  tool(
+    'propose',
+    "Put a proposal to the person in the secretary's conversation, for an action whose kind is at ask (原則13). kind: " +
+      'the autonomy kind it falls under; title: one line; body: what happened, why now, and the one thing you recommend, ' +
+      'in plain text (the person answers 了承, 直して了承 with a few words, or 断る on the Web screen). about: the goal ' +
+      "or task it concerns. warifuri records the person's answer with autonomy_outcome itself; read answered ones with " +
+      'proposals and mark each with proposal_done once carried out. Returns the stored proposal.',
+    { kind: autonomyKind, title: z.string(), body: z.string(), about: z.string().min(1).optional() },
+    async (args) => result(ledger.propose(given(args), writer)),
+  );
+
+  tool(
+    'proposal_done',
+    'Mark an approved (or changed) proposal as carried out, with note: one line of what was done. Call it after doing ' +
+      'what the person approved, so it is not done twice.',
+    { id: z.string().min(1), note: z.string().optional() },
+    async ({ id, note }) => result(ledger.markProposalDone(id, { note }, writer)),
+  );
 
   tool(
     'autonomy_outcome',

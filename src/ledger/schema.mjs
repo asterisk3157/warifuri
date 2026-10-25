@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -341,6 +341,72 @@ export const MIGRATIONS = [
   INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
     SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v6;
   DROP TABLE records_v6;
+  CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
+  CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+  `
+  -- 会話: a thread holds messages between the person and the secretary (one thread of kind
+  -- 'secretary' for now). The Web screen, and later other ways in, show the same rows.
+  -- runner says how a turn is answered: 'resume' runs claude -p --resume <session_id> for each
+  -- turn; 'resident' (a long-running session, not built yet) would keep the same messages and
+  -- session_id. seen_until: the last message given to the session, so the next turn knows
+  -- what came after it.
+  CREATE TABLE IF NOT EXISTS threads (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('secretary')),
+    title      TEXT NOT NULL,
+    runner     TEXT NOT NULL DEFAULT 'resume' CHECK (runner IN ('resume','resident')),
+    session_id TEXT,
+    seen_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS threads_kind ON threads(kind);
+
+  -- A message: from the person (user), the secretary, or warifuri itself (system). A proposal
+  -- is a secretary's message with kind 'proposal': the autonomy kind it falls under, a title,
+  -- the goal or task it is about, and its state (open, then approved, changed or refused, with
+  -- the person's words in answer). done_at is set when the secretary has carried it out.
+  CREATE TABLE IF NOT EXISTS messages (
+    id            TEXT PRIMARY KEY,
+    thread_id     TEXT NOT NULL REFERENCES threads(id),
+    role          TEXT NOT NULL CHECK (role IN ('user','secretary','system')),
+    kind          TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text','proposal')),
+    body          TEXT NOT NULL,
+    title         TEXT,
+    autonomy_kind TEXT,
+    about         TEXT,
+    state         TEXT CHECK (state IS NULL OR state IN ('open','approved','changed','refused')),
+    answer        TEXT,
+    answered_at   TEXT,
+    done_at       TEXT,
+    done_note     TEXT,
+    actor         TEXT NOT NULL,
+    device        TEXT,
+    created_at    TEXT NOT NULL,
+    CHECK ((kind = 'proposal') = (state IS NOT NULL))
+  );
+  CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, created_at);
+  CREATE INDEX IF NOT EXISTS messages_state ON messages(state) WHERE state IS NOT NULL;
+
+  -- Records may also name 'thread' and 'message'. The table is rebuilt as in version 3.
+  ALTER TABLE records RENAME TO records_v7;
+  CREATE TABLE records (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    actor     TEXT NOT NULL CHECK (length(actor) > 0),
+    device    TEXT,
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device','oauth','knowledge','booking','settings','report','thread','message')),
+    entity_id TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    changes   TEXT NOT NULL
+  );
+  INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
+    SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v7;
+  DROP TABLE records_v7;
   CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
   CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
