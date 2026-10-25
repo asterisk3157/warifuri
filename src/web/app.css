@@ -308,6 +308,8 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-notice { background: var(--bg); }
 .wf-notice main { max-width: 520px; margin: 15vh auto; padding: 28px; background: #ffffff; border-radius: 10px; border: 1px solid var(--hair); font-family: var(--font); line-height: 1.7; }
 .wf-notice p { color: var(--sub); }
+.wf-notice a.wf-button { display: block; margin-top: 20px; padding: 10px 16px; border-radius: 6px; background: var(--accent); color: #ffffff; font-weight: 600; text-align: center; text-decoration: none; }
+.wf-notice a.wf-button:hover { background: #275d8a; color: #ffffff; }
 
 @media (max-width: 760px) {
   .wf-root { flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }

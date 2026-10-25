@@ -325,3 +325,31 @@ test('schema 5: settings changes are records; the server keys stay out of getSet
   assert.equal(ledger.oauth.githubId().id, '42');
   ledger.close();
 });
+
+test('a session outlives a restart of the server: it is kept, as a hash, in the data directory', async (t) => {
+  const { createWeb, SESSIONS_FILE } = await import('../src/server/web.mjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-web-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const ledger = openLedger(':memory:');
+  t.after(() => ledger.close());
+  const express = (await import('express')).default;
+  const serve = async () => {
+    const web = createWeb({ ledger, home, host: '0.0.0.0' });
+    const app = express();
+    app.use(web.router);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((r) => server.once('listening', r));
+    return { web, server, base: `http://127.0.0.1:${server.address().port}` };
+  };
+  const first = await serve();
+  const cookie = (await login(first.base, first.web.issueLogin())).headers.get('set-cookie').split(';')[0];
+  await new Promise((r) => first.server.close(r));
+  const kept = fs.readFileSync(path.join(home, SESSIONS_FILE), 'utf8');
+  assert.equal(kept.includes(cookie.split('=')[1]), false, 'only the hash is kept');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(home, SESSIONS_FILE)).mode & 0o777, 0o600);
+
+  const second = await serve();
+  t.after(() => new Promise((r) => second.server.close(r)));
+  assert.equal((await get(second.base, '/calendar', { Cookie: cookie })).status, 200);
+  assert.equal((await get(second.base, '/calendar', { Cookie: 'warifuri_web=forged' })).status, 401);
+});

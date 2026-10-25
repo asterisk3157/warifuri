@@ -726,3 +726,42 @@ test('rate limits: /token counts per client, and --trust-proxy counts callers be
   assert.equal((await q.register({}, { 'X-Forwarded-For': '203.0.113.10' })).res.status, 429);
   warned.mock.restore();
 });
+
+test('the Web screens: the login page offers GitHub, and only the person gets a session', async (t) => {
+  const s = await start(t);
+  const page = await s.go('/calendar');
+  assert.equal(page.status, 401);
+  assert.match(await page.text(), /href="\/web\/login\/github" class="wf-button">GitHub でログイン/);
+
+  // To GitHub with a state kept in a cookie, back under the registered callback.
+  const begin = async () => {
+    const res = await s.go('/web/login/github');
+    assert.equal(res.status, 302);
+    const to = new URL(res.headers.get('location'));
+    assert.equal(to.searchParams.get('redirect_uri'), `${s.base}/oauth/github/callback/web`);
+    return { cookie: res.headers.getSetCookie()[0].split(';')[0], state: to.searchParams.get('state') };
+  };
+  const back = (cookie, state, code) =>
+    s.go(`/oauth/github/callback/web?${new URLSearchParams({ state, code })}`, { headers: cookie ? { Cookie: cookie } : {} });
+
+  const a = await begin();
+  assert.equal((await back('', a.state, 'code-alex-example')).status, 400);
+  assert.equal((await back(a.cookie, 'other', 'code-alex-example')).status, 400);
+  // Someone else's GitHub account is refused.
+  const b = await begin();
+  const stranger = await back(b.cookie, b.state, 'code-someone');
+  assert.equal(stranger.status, 403);
+  assert.equal(stranger.headers.getSetCookie().some((c) => c.startsWith('warifuri_web=')), false);
+
+  const c = await begin();
+  const ok = await back(c.cookie, c.state, 'code-alex-example');
+  assert.equal(ok.status, 200);
+  assert.match(await ok.text(), /url=\/calendar/);
+  const session = ok.headers.getSetCookie().find((v) => v.startsWith('warifuri_web='));
+  assert.match(session, /HttpOnly/);
+  assert.match(session, /SameSite=Strict/);
+  assert.equal((await s.go('/calendar', { headers: { Cookie: session.split(';')[0] } })).status, 200);
+  // GitHub was asked with the same callback the browser came back to.
+  const exchange = s.github.seen.filter((r) => r.path === '/login/oauth/access_token').at(-1);
+  assert.equal(new URLSearchParams(exchange.body).get('redirect_uri'), `${s.base}/oauth/github/callback/web`);
+});

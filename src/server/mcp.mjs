@@ -598,8 +598,9 @@ export function createApp({
   app.get('/health', (req, res) => sendText(res, 200, 'ok'));
 
   let auth = deviceKeyAuth(ledger);
+  let web;
   if (oauth) {
-    const { router, bearer } = createOAuth({ ledger, config: oauth, github, log });
+    const { router, bearer } = createOAuth({ ledger, config: oauth, github, log, webLogin: (res) => web.finishLogin(res) });
     app.use(router);
     auth = bearer;
   }
@@ -617,7 +618,7 @@ export function createApp({
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
   app.use('/api', apiRouter(ledger, apiLimit));
-  const web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, limit: webLimit });
+  web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), limit: webLimit });
   app.use(web.router);
   app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };
 
