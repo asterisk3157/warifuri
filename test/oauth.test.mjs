@@ -250,9 +250,17 @@ test('the full flow: registration, GitHub, consent, code with PKCE, tokens on /m
   assert.match(badHtml, /class="error"/);
   const csrf2 = s.csrfOf(badHtml);
   assert.equal((await s.form('/oauth/consent', { csrf, action: 'approve', new_device: 'laptop' }, { Cookie: a.cookie })).status, 403);
+  // A device picked and a new name typed: neither wins; the page comes back with both kept.
+  const both = await s.form('/oauth/consent', { csrf: csrf2, action: 'approve', device: 'desk', new_device: 'laptop' }, { Cookie: a.cookie });
+  assert.equal(both.status, 400);
+  const bothHtml = await both.text();
+  assert.match(bothHtml, /どちらか一方/);
+  assert.match(bothHtml, /value="laptop"/);
+  assert.deepEqual(s.ledger.listDevices(), []);
+  const csrf3 = s.csrfOf(bothHtml);
 
   // Approve: the device is created, the browser goes back with a code and the client's state.
-  const ok = await s.form('/oauth/consent', { csrf: csrf2, action: 'approve', new_device: 'laptop' }, { Cookie: a.cookie });
+  const ok = await s.form('/oauth/consent', { csrf: csrf3, action: 'approve', new_device: 'laptop' }, { Cookie: a.cookie });
   assert.equal(ok.status, 302);
   const back = new URL(ok.headers.get('location'));
   assert.equal(`${back.origin}${back.pathname}`, REDIRECT);
@@ -626,8 +634,8 @@ test('redirect URIs: loopback http, or https on the allowed hosts only; the cons
 
   const { body: client } = await s.register();
   const { html } = await s.consentPage(client.client_id);
-  assert.match(html, /<strong>Test &lt;client&gt;<\/strong>\(アプリが自分で名乗った名前\)/);
-  assert.match(html, /戻り先は <strong>127\.0\.0\.1:9999<\/strong>/);
+  assert.match(html, /<strong>Test &lt;client&gt;<\/strong>/);
+  assert.match(html, /戻り先 <\/span><strong>127\.0\.0\.1:9999<\/strong>/);
 
   const env = { WARIFURI_PUBLIC_URL: 'https://ledger.example', WARIFURI_GITHUB_CLIENT_ID: 'id', WARIFURI_GITHUB_CLIENT_SECRET: 's', WARIFURI_GITHUB_USER: 'alex' };
   assert.deepEqual(oauthConfig({ env }).config.redirectHosts, ['claude.ai', 'claude.com']);
