@@ -85,6 +85,21 @@ test('one revoke after the raise brings the kind back to ask', (t) => {
   assert.equal(L.recordAutonomyOutcome('add_knowledge', 'approved', {}, SECRETARY).level_changed, 'raised');
 });
 
+test('writing bookings to the calendar is a stage 2 kind that rises after three approvals', (t) => {
+  const L = fresh(t);
+  const entry = AUTONOMY_KINDS.find((k) => k.kind === 'write_calendar');
+  assert.equal(entry.stage, 2);
+  assert.equal(entry.label, '予定をカレンダーに書き出す');
+  assert.equal(view(L, 'write_calendar').level, 'ask');
+  L.recordAutonomyOutcome('write_calendar', 'approved', {}, SECRETARY);
+  L.recordAutonomyOutcome('write_calendar', 'approved', {}, SECRETARY);
+  const third = L.recordAutonomyOutcome('write_calendar', 'approved', {}, SECRETARY);
+  assert.equal(third.level, 'act_then_tell');
+  assert.match(third.announce, /「予定をカレンダーに書き出す」は3回続けて/);
+  const back = L.recordAutonomyOutcome('write_calendar', 'revoked', {}, SECRETARY);
+  assert.equal(back.level, 'ask');
+});
+
 test('approvals in a goal the person leads are not counted', (t) => {
   const L = fresh(t);
   const led = L.createGoal({ title: 'Talk', mode: 'ai_worker', human_led: true }, ACTOR);

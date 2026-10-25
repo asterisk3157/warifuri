@@ -16,6 +16,10 @@ export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
 export const AUTONOMY_KINDS = [
   { kind: 'reschedule_block', label: 'ずれた予定の組み直し', stage: 2 },
   { kind: 'tidy_inbox', label: '受信箱の整理', stage: 2 },
+  // Writing warifuri's own task and habit bookings to the person's main calendar, and moving
+  // the events warifuri wrote there (told apart by source and external_id). The person's own
+  // events, which have no pair in warifuri, are never edited or deleted: that is stage 4.
+  { kind: 'write_calendar', label: '予定をカレンダーに書き出す', stage: 2 },
   { kind: 'close_forgotten', label: '閉じ忘れたタスクを閉じる', stage: 3 },
   { kind: 'move_task', label: 'タスクをほかのゴールへ移す', stage: 3 },
   { kind: 'bundle_loose_tasks', label: 'ゴールにつながっていないタスクを束ねる', stage: 3 },
