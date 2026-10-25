@@ -35,6 +35,10 @@ export const AUTONOMY_OUTCOMES = ['approved', 'changed', 'refused', 'revoked'];
 export const AUTONOMY_STREAK = 3;
 export const BOOKING_KINDS = ['task', 'habit', 'fixed'];
 export const BOOKING_MAX_MS = 24 * 60 * 60 * 1000;
+// 報告: the secretary's nightly check, morning summary and inbox tidy-up.
+export const REPORT_KINDS = ['nightly', 'morning', 'inbox'];
+export const REPORT_TITLE_MAX = 200;
+export const REPORT_BODY_MAX = 20000;
 
 // Fields that belong to a state. Leaving the state clears them.
 export const STATE_FIELDS = {
@@ -298,6 +302,20 @@ export function checkBooking(row, ctx = {}) {
     if (ms <= 0) p.push('終わり(ends_at)は始まり(starts_at)より後にします');
     else if (ms > BOOKING_MAX_MS) p.push('1つの予定の長さは24時間までです。長いものは日ごとに分けます');
   }
+  return p;
+}
+
+// A report as it is about to be stored: body has its line ends as \n already.
+export function checkReport(row) {
+  const p = [];
+  if (!REPORT_KINDS.includes(row.kind)) p.push(`報告の種類(kind)は ${REPORT_KINDS.join(', ')} のどれかです`);
+  if (typeof row.title !== 'string' || row.title.trim() === '') p.push('報告には題名(title)が要ります');
+  else if (/[\r\n]/.test(row.title)) p.push('題名(title)は1行で書きます');
+  else if (charLength(row.title) > REPORT_TITLE_MAX) p.push(`題名(title)は ${REPORT_TITLE_MAX} 文字までです`);
+  if (typeof row.body !== 'string' || row.body.trim() === '') p.push('報告には本文(body)が要ります');
+  else if (charLength(row.body) > REPORT_BODY_MAX) p.push(`本文(body)は ${REPORT_BODY_MAX} 文字までです。長いものは分けます`);
+  // eslint-disable-next-line no-control-regex
+  else if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(row.body)) p.push('本文(body)には、改行とタブのほかの制御文字を入れられません');
   return p;
 }
 

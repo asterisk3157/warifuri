@@ -18,8 +18,10 @@ import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, isValidId } from '../ledger/rules.mjs';
-import { LedgerError } from '../ledger/ledger.mjs';
+import {
+  STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
+} from '../ledger/rules.mjs';
+import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
@@ -241,6 +243,20 @@ function buildServer(ledger, device, knowledge) {
       annotations: readOnly,
     },
     async () => result(ledger.listAutonomy()),
+  );
+
+  // Loose types here, so the ledger says in Japanese what is wrong.
+  server.registerTool(
+    'reports',
+    {
+      description:
+        `Read the secretary's reports, newest first: { reports: [{ id, kind, title, body, device, created_at }], next_before }. ` +
+        `kind: only ${REPORT_KINDS.join(', ')}. limit: how many (default ${REPORTS_DEFAULT}, at most ${REPORTS_MAX}). before: a ` +
+        "report's id or an ISO datetime with offset, for only older ones; pass next_before to read the next page (null: no more).",
+      inputSchema: { kind: z.string().optional(), limit: z.number().optional(), before: z.string().optional() },
+      annotations: readOnly,
+    },
+    guarded(async ({ kind, limit, before }) => result(ledger.listReports({ kind, limit, before }))),
   );
 
   registerWriteTools(server, ledger, device, { write, writer, knowledge });
@@ -526,6 +542,15 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
     { id: z.string().min(1) },
     async ({ id }) => result(ledger.unbook(id, writer)),
     { ...write, destructiveHint: true },
+  );
+
+  tool(
+    'report',
+    `Write a report for the person to read in the Web screens: kind nightly (the nightly check), morning (the morning ` +
+      `summary) or inbox (the inbox tidy-up), a one-line title, and the body as plain text or light Markdown (at most ` +
+      `${REPORT_BODY_MAX} characters). Reports are only added, never changed. Returns the stored report.`,
+    { kind: z.string(), title: z.string(), body: z.string() },
+    async (args) => result(ledger.writeReport(args, writer)),
   );
 
   const autonomyKind = z.enum(AUTONOMY_KINDS.map((k) => k.kind));

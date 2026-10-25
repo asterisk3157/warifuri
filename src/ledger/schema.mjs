@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -312,6 +312,40 @@ export const MIGRATIONS = [
   ALTER TABLE bookings ADD COLUMN source TEXT;
   ALTER TABLE bookings ADD COLUMN external_id TEXT;
   CREATE UNIQUE INDEX IF NOT EXISTS bookings_external ON bookings(source, external_id) WHERE external_id IS NOT NULL;
+  `,
+  `
+  -- 報告: what the secretary wrote for the person to read (the nightly check, the morning
+  -- summary, the inbox tidy-up). Reports are only added, never changed; device is the writer's.
+  CREATE TABLE IF NOT EXISTS reports (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('nightly','morning','inbox')),
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    device     TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS reports_created ON reports(created_at);
+
+  -- Records may also name 'report'. The table is rebuilt as in version 3.
+  ALTER TABLE records RENAME TO records_v6;
+  CREATE TABLE records (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    actor     TEXT NOT NULL CHECK (length(actor) > 0),
+    device    TEXT,
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device','oauth','knowledge','booking','settings','report')),
+    entity_id TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    changes   TEXT NOT NULL
+  );
+  INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
+    SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v6;
+  DROP TABLE records_v6;
+  CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
+  CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
   `,
 ];
 
