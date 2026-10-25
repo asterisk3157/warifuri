@@ -20,6 +20,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import {
   STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
+  ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION,
 } from '../ledger/rules.mjs';
 import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
@@ -66,8 +67,10 @@ const given = (args) => Object.fromEntries(Object.entries(args).filter(([, v]) =
 const clearable = z.string().nullable().optional();
 
 // One McpServer for one request from `device` ({ name, actor }). knowledge: { home,
-// secretary } for the profiles' files (see createApp), or null.
-function buildServer(ledger, device, knowledge) {
+// secretary } for the profiles' files (see createApp), or null. thread: the thread the
+// request said it runs in (the secretary's thread header), or null for the secretary's
+// conversation.
+function buildServer(ledger, device, knowledge, thread = null) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -280,7 +283,7 @@ function buildServer(ledger, device, knowledge) {
       })),
   );
 
-  registerWriteTools(server, ledger, device, { write, writer, knowledge });
+  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread });
   return server;
 }
 
@@ -328,7 +331,7 @@ function resolvePlace(ledger, device, value, tool = 'start') {
   throw new LedgerError([`place には作業フォルダの id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
-function registerWriteTools(server, ledger, device, { write, writer, knowledge }) {
+function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread }) {
   const tool = (name, description, inputSchema, fn, annotations = write) =>
     server.registerTool(name, { description, inputSchema, annotations }, guarded(fn));
 
@@ -578,13 +581,65 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
 
   tool(
     'propose',
-    "Put a proposal to the person in the secretary's conversation, for an action whose kind is at ask (原則13). kind: " +
-      'the autonomy kind it falls under; title: one line; body: what happened, why now, and the one thing you recommend, ' +
-      'in plain text (the person answers 了承, 直して了承 with a few words, or 断る on the Web screen). about: the goal ' +
-      "or task it concerns. warifuri records the person's answer with autonomy_outcome itself; read answered ones with " +
-      'proposals and mark each with proposal_done once carried out. Returns the stored proposal.',
+    'Leave a proposal in the ledger, for an action whose kind is at ask (原則13), from a run the person is not in (the ' +
+      'nightly run). kind: the autonomy kind it falls under; title: one line; body: what happened, why now, and the one ' +
+      'thing you recommend, in plain text. about: the goal or task it concerns. The secretary of the conversation asks ' +
+      'the person about open proposals with ask (naming the proposal), and warifuri records the answer on it and with ' +
+      'autonomy_outcome itself; read answered ones with proposals and mark each with proposal_done once carried out. ' +
+      'Returns the stored proposal.',
     { kind: autonomyKind, title: z.string(), body: z.string(), about: z.string().min(1).optional() },
     async (args) => result(ledger.propose(given(args), writer)),
+  );
+
+  // The questions as AskUserQuestion takes them; loose here, so the ledger says in Japanese
+  // what is wrong.
+  const question = z
+    .object({
+      header: z.string().optional(),
+      question: z.string().optional(),
+      options: z.array(z.object({ label: z.string().optional(), description: z.string().optional() }).passthrough()).optional(),
+      multiSelect: z.boolean().optional(),
+      kind: autonomyKind.optional(),
+      about: z.string().optional(),
+      proposal: z.string().optional(),
+    })
+    .passthrough();
+  // The conversation a question or a button goes to: the one named, else the one this run of
+  // the secretary is in, else the secretary's conversation.
+  const threadArg = (given) => given ?? thread ?? undefined;
+
+  tool(
+    'ask',
+    "Ask the person questions in the secretary's window, the same way as Claude Code's AskUserQuestion: 1 to " +
+      `${ASK_QUESTIONS_MAX} questions, each with header (a short label shown over it, at most ${ASK_HEADER_MAX} characters, ` +
+      'such as タスク整理 or 期日), question (one sentence ending in ?), options (' +
+      `${ASK_OPTIONS_MIN} to ${ASK_OPTIONS_MAX}, each { label, description }; put the one you recommend first: the window ` +
+      'marks it おすすめ) and multiSelect. The window always adds その他 for the person\'s own words, so never add one. ' +
+      'The questions are shown one at a time; the answers come to you in your next turn, as the person gives them (or ' +
+      'あとで). Optional per question: kind, the autonomy kind the action falls under (原則13): warifuri then records the ' +
+      'answer itself (the first option alone is approved, its own words changed, any other option refused), so do not ' +
+      'call autonomy_outcome for it; about, the goal or task; proposal, the id of an open proposal (from the nightly ' +
+      'run) the question asks about: the answer is recorded on it too. When the person changes an earlier answer, ' +
+      'you are told: undo what the old answer had you do, then do the new one. thread: the conversation to ask in ' +
+      '(left out: the one you are talking in). Returns the stored question.',
+    { questions: z.array(question), thread: z.string().min(1).optional() },
+    async ({ questions, thread: t }) => result(ledger.ask(given({ questions, thread: threadArg(t) }), writer)),
+  );
+
+  tool(
+    'reply_options',
+    `Put 1 to ${REPLY_OPTIONS_MAX} reply buttons under the reply you are writing now, when it ends in a question such as ` +
+      `「〜しますか？」: each a short reply in the person's words (at most ${REPLY_OPTION_MAX} characters), the one you ` +
+      'recommend first (it is shown as the main button). Pressing one sends its words as the person\'s message; the ' +
+      'person may also just type. To offer a thread, give exactly ' +
+      `「${THREAD_OPTION}」 and 「ここで続ける」: pressing ${THREAD_OPTION} opens a thread from your reply instead of ` +
+      'sending. Call it once per reply, before you finish; a later call replaces the buttons.',
+    { options: z.array(z.string()), thread: z.string().min(1).optional() },
+    async ({ options, thread: t }) => {
+      const id = threadArg(t) ?? ledger.ensureThread('secretary', writer).id;
+      const out = ledger.setReplyOptions(id, options, writer);
+      return result({ thread: out.id, options: JSON.parse(out.pending_options) });
+    },
   );
 
   tool(
@@ -722,8 +777,16 @@ function deviceKeyAuth(ledger) {
 const actorFor = (auth) => (auth.clientId === 'device-key' ? 'device-key' : `oauth:${auth.clientId}`);
 
 // req.auth is set by the bearer check before this runs; its device is the caller.
+// The thread a run of the secretary says it is in (secretary.mjs's THREAD_HEADER), when there is
+// such a thread; it only chooses where ask and reply_options land, never who may write.
+function threadOf(ledger, req) {
+  const id = req.headers['x-warifuri-thread'];
+  if (typeof id !== 'string' || !isValidId(id)) return null;
+  return ledger.getThread(id) ? id : null;
+}
+
 async function handleMcp(ledger, knowledge, req, res) {
-  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge);
+  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req));
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});

@@ -22,7 +22,6 @@ import {
   STATES,
   CLOSED_STATES,
   REPORT_KINDS,
-  THREAD_KINDS,
   THREAD_RUNNERS,
   PROPOSAL_ANSWERS,
   ANSWER_MAX,
@@ -46,6 +45,8 @@ import {
   checkReport,
   checkMessage,
   checkProposal,
+  checkAsk,
+  checkReplyOptions,
   checkAutonomy,
   checkStateExtra,
   AUTONOMY_KINDS,
@@ -93,17 +94,24 @@ const REPORT_COLUMNS = ['id', 'kind', 'title', 'body', 'device', 'created_at'];
 // How many reports one read returns: by default, and at most.
 export const REPORTS_DEFAULT = 10;
 export const REPORTS_MAX = 50;
-const THREAD_COLUMNS = ['id', 'kind', 'title', 'runner', 'session_id', 'seen_until', 'created_at', 'updated_at'];
+const THREAD_COLUMNS = [
+  'id', 'kind', 'title', 'runner', 'session_id', 'seen_until', 'parent_id', 'read_until', 'pending_options', 'created_at', 'updated_at',
+];
 const MESSAGE_COLUMNS = [
   'id', 'thread_id', 'role', 'kind', 'body', 'title', 'autonomy_kind', 'about', 'state', 'answer', 'answered_at',
-  'done_at', 'done_note', 'actor', 'device', 'created_at',
+  'done_at', 'done_note', 'data', 'actor', 'device', 'created_at',
 ];
+const ATTACHMENT_COLUMNS = ['id', 'name', 'type', 'size', 'sha256', 'message_id', 'device', 'created_at'];
+// How large a message's data may be, as JSON.
+const DATA_MAX = 64 * 1024;
+// How many files go with one message.
+export const ATTACHMENTS_MAX = 4;
 // The secretary's thread and its title.
 export const SECRETARY_THREAD = { kind: 'secretary', title: '秘書' };
 // How many messages one read returns: by default, and at most.
 export const MESSAGES_DEFAULT = 50;
 export const MESSAGES_MAX = 200;
-const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p', booking: 'b', report: 'r', thread: 'c', message: 'm' };
+const ID_PREFIX = { goal: 'g', task: 't', habit: 'h', place: 'p', booking: 'b', report: 'r', thread: 'c', message: 'm', attachment: 'a' };
 const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const DAY_MS = 24 * 60 * 60 * 1000;
 // A device's last_seen_at is written at most once in this long.
@@ -222,14 +230,16 @@ export function openLedger(path, options = {}) {
   function insert(table, columns, row) {
     const cols = columns.filter((c) => row[c] !== undefined);
     db.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(
-      ...cols.map((c) => row[c]),
+      ...cols.map((c) => (row[c] !== null && typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c])),
     );
   }
 
+  // An object (a message's data) is stored as JSON.
+  const cell = (v) => (v !== null && typeof v === 'object' ? JSON.stringify(v) : (v ?? null));
   function updateRow(table, columns, row) {
     const cols = columns.filter((c) => c !== 'id');
     db.prepare(`UPDATE ${table} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(
-      ...cols.map((c) => row[c] ?? null),
+      ...cols.map((c) => cell(row[c])),
       row.id,
     );
   }
@@ -249,8 +259,9 @@ export function openLedger(path, options = {}) {
       'SELECT 1 FROM goals WHERE id = ? UNION ALL SELECT 1 FROM tasks WHERE id = ? ' +
         'UNION ALL SELECT 1 FROM habits WHERE id = ? UNION ALL SELECT 1 FROM places WHERE id = ? ' +
         'UNION ALL SELECT 1 FROM bookings WHERE id = ? UNION ALL SELECT 1 FROM reports WHERE id = ? ' +
-        'UNION ALL SELECT 1 FROM threads WHERE id = ? UNION ALL SELECT 1 FROM messages WHERE id = ?',
-      id, id, id, id, id, id, id, id,
+        'UNION ALL SELECT 1 FROM threads WHERE id = ? UNION ALL SELECT 1 FROM messages WHERE id = ? ' +
+        'UNION ALL SELECT 1 FROM attachments WHERE id = ?',
+      id, id, id, id, id, id, id, id, id,
     );
   }
 
@@ -1140,21 +1151,30 @@ export function openLedger(path, options = {}) {
     const row = one('SELECT * FROM threads WHERE id = ?', id);
     return row ? { ...row } : null;
   };
-  const messageRow = (id) => {
-    const row = one('SELECT * FROM messages WHERE id = ?', id);
-    return row ? { ...row } : null;
+  // A message with its data read from JSON (null when it has none).
+  const messageView = (row) => {
+    if (!row) return null;
+    let data = null;
+    try {
+      data = row.data ? JSON.parse(row.data) : null;
+    } catch {
+      data = null;
+    }
+    return { ...row, data };
   };
+  const messageRow = (id) => messageView(one(`SELECT ${MESSAGE_COLUMNS.join(', ')} FROM messages WHERE id = ?`, id));
 
   const getMessage = (id) => messageRow(id);
 
-  function getThread(kind = SECRETARY_THREAD.kind) {
-    return threadRow(kind);
+  // The secretary's thread (getThread()), or a thread by its id (getThread('c_…')).
+  function getThread(kindOrId = SECRETARY_THREAD.kind) {
+    return isValidId(kindOrId) ? threadById(kindOrId) : threadRow(kindOrId);
   }
 
   // The thread of a kind, made (and recorded) the first time it is needed.
   function ensureThread(kind = SECRETARY_THREAD.kind, opts) {
     const w = requireWriter(opts);
-    if (!THREAD_KINDS.includes(kind)) throw new LedgerError([`会話の種類は ${THREAD_KINDS.join(', ')} のどれかです`]);
+    if (kind !== SECRETARY_THREAD.kind) throw new LedgerError(['ensureThread で作れるのは秘書との会話だけです。スレッドは openThread で作ります']);
     return transaction(() => {
       const found = threadRow(kind);
       if (found) return found;
@@ -1174,8 +1194,10 @@ export function openLedger(path, options = {}) {
     const before = threadById(id);
     if (!before) throw new LedgerError([`${id} という会話はありません`]);
     const input = fields ?? {};
-    const problems = unknownFields(input, ['session_id', 'seen_until', 'runner']);
+    const problems = unknownFields(input, ['session_id', 'seen_until', 'runner', 'read_until', 'pending_options']);
     const next = { ...before, ...input };
+    if (next.read_until !== null && messageRow(next.read_until)?.thread_id !== id) problems.push(`${next.read_until} はこの会話のメッセージではありません`);
+    if (next.pending_options !== null && typeof next.pending_options !== 'string') problems.push('pending_options は JSON の文字列です');
     if (!THREAD_RUNNERS.includes(next.runner)) problems.push(`runner は ${THREAD_RUNNERS.join(', ')} のどれかです`);
     if (next.session_id !== null && (typeof next.session_id !== 'string' || !/^[A-Za-z0-9-]{1,100}$/.test(next.session_id))) {
       problems.push('session_id は英数字と - で書きます');
@@ -1204,16 +1226,259 @@ export function openLedger(path, options = {}) {
     return messageRow(row.id);
   }
 
-  // Adds a message ({ role, body }) to a thread. Line ends become \n and the ends are trimmed.
+  // Adds a message ({ role, body, kind?, data?, attachments? }) to a thread. Line ends become
+  // \n and the ends are trimmed. kind: text (the default), trigger (warifuri's call into the
+  // conversation at a set time) or digest (what was said in a thread, for the main session).
+  // data: an object kept with it as JSON. attachments: ids of files uploaded and not sent yet;
+  // they go with this message (the person's only), and a message of files alone may have no
+  // words.
   function addMessage(threadId, fields, opts) {
     const w = requireWriter(opts);
     const input = fields ?? {};
-    const problems = unknownFields(input, ['role', 'body']);
+    const problems = unknownFields(input, ['role', 'body', 'kind', 'data', 'attachments']);
     if (!threadById(threadId)) problems.push(`${threadId} という会話はありません`);
-    const row = { thread_id: threadId, role: input.role, kind: 'text', body: tidyText(input.body) };
+    const kind = input.kind ?? 'text';
+    if (!['text', 'trigger', 'digest'].includes(kind)) problems.push('kind は text、trigger、digest のどれかです');
+    if (kind !== 'text' && input.role !== 'system') problems.push(`${kind} は warifuri のお知らせ(system)だけが書けます`);
+    const data = input.data === undefined || input.data === null ? {} : input.data;
+    if (typeof data !== 'object' || Array.isArray(data)) problems.push('data はオブジェクトで渡します');
+    const files = [];
+    if (input.attachments !== undefined && input.attachments !== null) {
+      if (input.role !== 'user') problems.push('ファイルを添えられるのは本人のメッセージだけです');
+      if (!Array.isArray(input.attachments) || input.attachments.length > ATTACHMENTS_MAX) problems.push(`添えるファイルは${ATTACHMENTS_MAX}個までです`);
+      else {
+        for (const id of input.attachments) {
+          const a = typeof id === 'string' ? attachmentRow(id) : null;
+          if (!a) problems.push(`${id} という添付はありません`);
+          else if (a.message_id) problems.push(`${a.name} はもう送ってあります`);
+          else files.push(a);
+        }
+      }
+    }
+    let body = tidyText(input.body);
+    if (files.length && (typeof body !== 'string' || body === '')) {
+      body = files.map((a) => a.name).join('、');
+      data.files_only = true;
+    }
+    if (files.length) data.attachments = files.map((a) => ({ id: a.id, name: a.name, type: a.type, size: a.size }));
+    const row = { thread_id: threadId, role: input.role, kind, body, data: Object.keys(data).length ? data : null };
     problems.push(...checkMessage(row));
+    if (row.data && JSON.stringify(row.data).length > DATA_MAX) problems.push('data が大きすぎます');
     if (problems.length) throw new LedgerError(problems);
-    return transaction(() => insertMessage(row, w));
+    return transaction(() => {
+      const m = insertMessage(row, w);
+      for (const a of files) {
+        db.prepare('UPDATE attachments SET message_id = ? WHERE id = ?').run(m.id, a.id);
+        record(w, 'attachment', a.id, 'send', { message_id: [null, m.id] });
+      }
+      return m;
+    });
+  }
+
+  // Changes the data of a message (a reply's steps or buttons), recorded.
+  function setMessageData(id, data, opts) {
+    const w = requireWriter(opts);
+    const before = messageRow(id);
+    if (!before) throw new LedgerError([`${id} というメッセージはありません`]);
+    if (data !== null && (typeof data !== 'object' || Array.isArray(data) || JSON.stringify(data).length > DATA_MAX)) throw new LedgerError(['data はオブジェクトで、大きすぎないものです']);
+    return transaction(() => {
+      const next = { ...before, data };
+      updateRow('messages', MESSAGE_COLUMNS, next);
+      record(w, 'message', id, 'data', { data: [before.data, data] });
+      return messageRow(id);
+    });
+  }
+
+  // スレッド. The thread started from a message of the secretary's conversation: the one there
+  // is, or a new one (one per message). Its title is the start of that message.
+  function openThread(parentId, opts) {
+    const w = requireWriter(opts);
+    const main = threadRow(SECRETARY_THREAD.kind);
+    const parent = messageRow(parentId);
+    if (!parent || !main || parent.thread_id !== main.id || ['trigger', 'digest'].includes(parent.kind) || parent.role === 'system') {
+      throw new LedgerError([`${parentId} は、スレッドを始められる秘書との会話の発言ではありません`]);
+    }
+    return transaction(() => {
+      const found = one('SELECT id FROM threads WHERE parent_id = ?', parentId);
+      if (found) return threadById(found.id);
+      const t = nowIso();
+      const title = [...parent.body.replace(/\s+/g, ' ')].slice(0, 40).join('');
+      const row = { kind: 'sub', title, runner: 'resume', parent_id: parentId, created_at: t, updated_at: t };
+      row.id = chooseId('thread', undefined, []);
+      insert('threads', THREAD_COLUMNS, row);
+      record(w, 'thread', row.id, 'create', diff(null, row, THREAD_COLUMNS));
+      return threadById(row.id);
+    });
+  }
+
+  // What the person and the secretary said in a thread (not warifuri's notes).
+  const SPOKEN = "role IN ('user','secretary') AND kind IN ('text','ask','answer')";
+
+  // Each thread started from a message: { [parent_id]: { id, count, unread } }. count: what
+  // was said in it; unread: the secretary's messages after the last one the person saw.
+  function threadCounts() {
+    const out = {};
+    for (const t of all("SELECT id, parent_id, read_until FROM threads WHERE kind = 'sub'")) {
+      const count = one(`SELECT count(*) AS n FROM messages WHERE thread_id = ? AND ${SPOKEN}`, t.id).n;
+      const from = t.read_until ? one('SELECT rowid AS n FROM messages WHERE id = ?', t.read_until)?.n ?? 0 : 0;
+      const unread = one(`SELECT count(*) AS n FROM messages WHERE thread_id = ? AND role = 'secretary' AND kind IN ('text','ask') AND rowid > ?`, t.id, from).n;
+      out[t.parent_id] = { id: t.id, count, unread };
+    }
+    return out;
+  }
+
+  // The person has seen the thread up to its last message.
+  function markThreadRead(threadId, opts) {
+    const last = one('SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1', threadId);
+    if (!threadById(threadId)) throw new LedgerError([`${threadId} という会話はありません`]);
+    if (!last) return threadById(threadId);
+    return updateThread(threadId, { read_until: last.id }, opts);
+  }
+
+  // 返事の候補: the buttons for the reply the secretary is writing in a thread now.
+  function setReplyOptions(threadId, options, opts) {
+    const checked = checkReplyOptions(options);
+    if (checked.problems) throw new LedgerError(checked.problems);
+    if (!threadById(threadId)) throw new LedgerError([`${threadId} という会話はありません`]);
+    return updateThread(threadId, { pending_options: JSON.stringify(checked.options) }, opts);
+  }
+
+  // 添付. A file the person uploaded, before the message it goes with.
+  const attachmentRow = (id) => {
+    const row = one(`SELECT ${ATTACHMENT_COLUMNS.join(', ')} FROM attachments WHERE id = ?`, id);
+    return row ? { ...row } : null;
+  };
+  function addAttachment(fields, opts) {
+    const w = requireWriter(opts);
+    const input = fields ?? {};
+    const problems = unknownFields(input, ['name', 'type', 'size', 'sha256']);
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    // eslint-disable-next-line no-control-regex
+    if (name === '' || charLength(name) > 200 || /[\u0000-\u001f\u007f/\\]/.test(name)) problems.push('ファイルの名前は200文字までで、/ や制御文字を入れません');
+    if (typeof input.type !== 'string' || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(input.type)) problems.push('ファイルの種類(type)が読めません');
+    if (!Number.isInteger(input.size) || input.size < 0) problems.push('size は0以上の整数です');
+    if (typeof input.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(input.sha256)) problems.push('sha256 は16進の64文字です');
+    if (problems.length) throw new LedgerError(problems);
+    return transaction(() => {
+      const row = { name, type: input.type.toLowerCase(), size: input.size, sha256: input.sha256, message_id: null, device: w.device, created_at: nowIso() };
+      row.id = chooseId('attachment', undefined, []);
+      insert('attachments', ATTACHMENT_COLUMNS, row);
+      record(w, 'attachment', row.id, 'create', diff(null, row, ATTACHMENT_COLUMNS));
+      return attachmentRow(row.id);
+    });
+  }
+  const getAttachment = (id) => attachmentRow(id);
+
+  // 質問(ask): the secretary's questions in a thread (the secretary's conversation unless
+  // thread names another), open until the person answers each one.
+  function ask(fields, opts) {
+    const w = requireWriter(opts);
+    const input = fields ?? {};
+    const problems = unknownFields(input, ['thread', 'questions']);
+    const checked = checkAsk(input.questions);
+    if (checked.problems) problems.push(...checked.problems);
+    let threadId = input.thread ?? null;
+    if (threadId !== null && !threadById(threadId)) problems.push(`${threadId} という会話はありません`);
+    for (const q of checked.questions ?? []) {
+      if (q.about && !getTaskRow(q.about) && !getGoalRow(q.about)) problems.push(`${q.about} というゴールやタスクはありません`);
+      if (q.proposal) {
+        const p = messageRow(q.proposal);
+        if (!p || p.kind !== 'proposal') problems.push(`${q.proposal} という案はありません`);
+        else if (p.state !== 'open') problems.push(`案 ${q.proposal} には、もう答えがあります`);
+      }
+    }
+    if (problems.length) throw new LedgerError(problems);
+    return transaction(() => {
+      if (threadId === null) threadId = ensureThread(SECRETARY_THREAD.kind, w).id;
+      const body = checked.questions.map((q) => `【${q.header}】${q.question}`).join('\n');
+      const data = { questions: checked.questions, answers: checked.questions.map(() => null) };
+      return insertMessage({ thread_id: threadId, role: 'secretary', kind: 'ask', body, state: 'open', data }, w);
+    });
+  }
+
+  const answerText = (a) => (a.later ? 'あとで' : [a.picked.join('、'), a.other].filter(Boolean).join(' / '));
+
+  // The outcome an answer gives for the autonomy kind of its question (原則13): the first
+  // option (the recommended one, as proposed) alone is approved, words of the person's own
+  // (その他) are changed, and any other choice is refused.
+  const outcomeOf = (q, a) => (a.other ? 'changed' : a.picked.length === 1 && a.picked[0] === q.options[0].label ? 'approved' : 'refused');
+
+  // The person's answer to one question of an ask: { index, picked: [labels], other } or
+  // { later: true } (あとで, for the questions not answered yet). Answering a question again
+  // changes the answer: when the old one had the secretary act (approved or changed) under an
+  // autonomy kind, that is recorded as a revoke first, and one line in the conversation says
+  // what changed. In one transaction: the ask, the autonomy outcome (and the proposal the
+  // question was about), the person's answer as a message, and the notes. Returns
+  // { ask, message, outcome, changed }.
+  function answerAsk(id, fields, opts) {
+    const w = requireWriter(opts);
+    const input = fields ?? {};
+    const problems = unknownFields(input, ['index', 'picked', 'other', 'later']);
+    const before = messageRow(id);
+    if (!before || before.kind !== 'ask') throw new LedgerError([`${id} という質問はありません`]);
+    const { questions, answers } = before.data;
+    if (input.later === true) {
+      if (before.state === 'answered') problems.push('この質問には、もう全部答えています');
+      if (problems.length) throw new LedgerError(problems);
+      return transaction(() => {
+        const next = { ...before, state: 'later', answered_at: nowIso() };
+        updateRow('messages', MESSAGE_COLUMNS, next);
+        record(w, 'message', id, 'later', { state: [before.state, 'later'] });
+        const message = insertMessage({ thread_id: before.thread_id, role: 'user', kind: 'answer', body: 'あとで', data: { ask: id, later: true, header: questions[answers.findIndex((a) => !a)]?.header ?? null } }, w);
+        return { ask: messageRow(id), message, outcome: null, changed: false };
+      });
+    }
+    const index = input.index;
+    if (!Number.isInteger(index) || index < 0 || index >= questions.length) throw new LedgerError([`index は0〜${questions.length - 1}の整数です`]);
+    const q = questions[index];
+    const picked = Array.isArray(input.picked) ? [...new Set(input.picked)] : [];
+    if (input.picked !== undefined && !Array.isArray(input.picked)) problems.push('picked は選んだ選択肢の名前の配列です');
+    for (const l of picked) if (!q.options.some((o) => o.label === l)) problems.push(`「${l}」という選択肢はありません`);
+    if (!q.multiSelect && picked.length > 1) problems.push('この問いで選べるのは1つだけです');
+    const other = tidyText(input.other) || null;
+    if (input.other !== undefined && input.other !== null && typeof input.other !== 'string') problems.push('その他は文字で書きます');
+    else if (other && charLength(other) > ANSWER_MAX) problems.push(`その他は${ANSWER_MAX}文字までです`);
+    if (!picked.length && !other) problems.push('選択肢を選ぶか、その他に書きます');
+    const old = answers[index];
+    if (old && !problems.length && old.other === other && old.picked.join('\n') === picked.join('\n')) problems.push('前と同じ答えです');
+    if (problems.length) throw new LedgerError(problems);
+    return transaction(() => {
+      const t = nowIso();
+      const answer = { picked, other, at: t };
+      const proposal = q.proposal ? messageRow(q.proposal) : null;
+      const kind = q.kind ?? proposal?.autonomy_kind ?? null;
+      const about = q.about ?? proposal?.about ?? undefined;
+      const notes = [];
+      if (old) {
+        answer.previous = [...(old.previous ?? []), { picked: old.picked, other: old.other, at: old.at, outcome: old.outcome ?? null }];
+        if (kind && ['approved', 'changed'].includes(old.outcome)) recordAutonomyOutcome(kind, 'revoked', { about }, w);
+        notes.push(`「${q.header}」の答えを「${answerText(old)}」から「${answerText(answer)}」に変えました。前の答えで行ったことを取り消してから、新しい答えのとおりに行います。`);
+      }
+      let outcome = null;
+      if (kind) {
+        answer.outcome = outcomeOf(q, answer);
+        outcome = recordAutonomyOutcome(kind, answer.outcome, { about }, w);
+        if (outcome.announce) notes.push(outcome.announce);
+      }
+      if (proposal) {
+        // The proposal takes the answer; a changed answer clears its done mark, so that it is
+        // carried out again as answered now.
+        const pNext = { ...proposal, state: answer.outcome, answer: answerText(answer), answered_at: t, done_at: null, done_note: null };
+        updateRow('messages', MESSAGE_COLUMNS, pNext);
+        record(w, 'message', proposal.id, 'answer', diff(proposal, pNext, MESSAGE_COLUMNS));
+      }
+      const nextAnswers = answers.map((a, i) => (i === index ? answer : a));
+      const state = nextAnswers.every(Boolean) ? 'answered' : 'open';
+      const next = { ...before, state, answered_at: t, data: { questions, answers: nextAnswers } };
+      updateRow('messages', MESSAGE_COLUMNS, next);
+      record(w, 'message', id, 'answer', { index, answer, state: [before.state, state] });
+      const message = insertMessage({
+        thread_id: before.thread_id, role: 'user', kind: 'answer', body: answerText(answer),
+        data: { ask: id, index, header: q.header, question: q.question, changed: Boolean(old) },
+      }, w);
+      for (const body of notes) insertMessage({ thread_id: before.thread_id, role: 'system', kind: 'text', body }, w);
+      return { ask: messageRow(id), message, outcome, changed: Boolean(old) };
+    });
   }
 
   // Messages of a thread, oldest first: the newest limit (MESSAGES_DEFAULT, at most
@@ -1222,12 +1487,12 @@ export function openLedger(path, options = {}) {
     if (after !== undefined && after !== null) {
       const ref = one('SELECT rowid AS n FROM messages WHERE id = ? AND thread_id = ?', after, threadId);
       if (!ref) throw new LedgerError([`${after} はこの会話のメッセージではありません`]);
-      return all(`SELECT ${MESSAGE_COLUMNS.join(', ')} FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid`, threadId, ref.n).map((r) => ({ ...r }));
+      return all(`SELECT ${MESSAGE_COLUMNS.join(', ')} FROM messages WHERE thread_id = ? AND rowid > ? ORDER BY rowid`, threadId, ref.n).map(messageView);
     }
     const n = limit ?? MESSAGES_DEFAULT;
     if (!Number.isInteger(n) || n < 1 || n > MESSAGES_MAX) throw new LedgerError([`limit は 1〜${MESSAGES_MAX} の整数です`]);
     return all(`SELECT ${MESSAGE_COLUMNS.join(', ')} FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?`, threadId, n)
-      .map((r) => ({ ...r }))
+      .map(messageView)
       .reverse();
   }
 
@@ -1296,7 +1561,7 @@ export function openLedger(path, options = {}) {
       recent: 'state IS NOT NULL',
     }[which];
     const order = which === 'recent' ? 'DESC' : 'ASC';
-    return all(`SELECT ${MESSAGE_COLUMNS.join(', ')} FROM messages WHERE kind = 'proposal' AND ${where} ORDER BY rowid ${order} LIMIT ?`, n).map((r) => ({ ...r }));
+    return all(`SELECT ${MESSAGE_COLUMNS.join(', ')} FROM messages WHERE kind = 'proposal' AND ${where} ORDER BY rowid ${order} LIMIT ?`, n).map(messageView);
   }
 
   // Marks an approved (or changed) proposal as carried out, with a one-line note of what was done.
@@ -1758,7 +2023,16 @@ export function openLedger(path, options = {}) {
     getThread,
     ensureThread,
     updateThread,
+    openThread,
+    threadCounts,
+    markThreadRead,
+    setReplyOptions,
     addMessage,
+    setMessageData,
+    addAttachment,
+    getAttachment,
+    ask,
+    answerAsk,
     getMessage,
     listMessages,
     propose,

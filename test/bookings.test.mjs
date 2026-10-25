@@ -78,7 +78,7 @@ test('schema: a version 3 file gains bookings and devices.last_seen_at, keeps it
   assert.throws(() => ins.run('2026-10-03T00:00:00.000Z', 'human', null, 'booking', 'b1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 8);
+  assert.equal(SCHEMA_VERSION, 9);
   const L = openLedger(file, { now: handClock().now });
   assert.deepEqual(L.listDevices().map((d) => [d.name, d.last_seen_at]), [['laptop', null]]);
   assert.deepEqual(L.records('hobby').map((r) => [r.id, r.entity]), [[2, 'knowledge']]);
