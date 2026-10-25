@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Please do not paste tokens, keys, or the contents of your own tasks.
-        鍵やトークン、自分のタスクの中身は貼らないでください。
+        シークレットやトークン、自分のタスクの中身は貼らないでください。
   - type: dropdown
     id: stage
     attributes:
