@@ -10,6 +10,8 @@ export const HUMAN_TIME_MODES = ['human_with_ai', 'human'];
 export const LOADS = ['heavy', 'normal', 'light'];
 export const BODY_MAX = 2000;
 export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
+export const BOOKING_KINDS = ['task', 'habit', 'fixed'];
+export const BOOKING_MAX_MS = 24 * 60 * 60 * 1000;
 
 // Fields that belong to a state. Leaving the state clears them.
 export const STATE_FIELDS = {
@@ -44,6 +46,13 @@ export function isValidDue(value) {
   m = DATETIME_RE.exec(value);
   if (m) return isRealDate(m[1], m[2], m[3]);
   return false;
+}
+
+// An ISO datetime with an offset (Z or +09:00); a date alone is not enough.
+export function isValidDateTime(value) {
+  if (typeof value !== 'string') return false;
+  const m = DATETIME_RE.exec(value);
+  return !!m && isRealDate(m[1], m[2], m[3]);
 }
 
 export function isValidId(value) {
@@ -166,6 +175,35 @@ export function checkHabit(row, ctx = {}) {
   if (!(Number.isInteger(row.duration_min) && row.duration_min > 0)) p.push('習慣の長さ(duration_min)は1以上の整数(分)です');
   if (!isBlank(row.goal_id) && !ctx.goalExists) p.push(`ゴール ${row.goal_id} がありません`);
   if (!isFlag(row.active)) p.push('active は 0 か 1 です');
+  return p;
+}
+
+// A booking (予定) about to be written. starts_at and ends_at are as the caller gave them.
+// ctx.taskExists / ctx.habitExists: whether task_id / habit_id name existing rows.
+export function checkBooking(row, ctx = {}) {
+  const p = [];
+  if (!BOOKING_KINDS.includes(row.kind)) p.push(`予定の種類(kind)は ${BOOKING_KINDS.join(', ')} のどれかです`);
+  if (row.kind === 'task') {
+    if (isBlank(row.task_id)) p.push('タスクの予定には、タスク(task_id)が要ります');
+    else if (!ctx.taskExists) p.push(`タスク ${row.task_id} がありません`);
+  } else if (!isBlank(row.task_id)) p.push('task_id は、種類が task の予定にだけ書けます');
+  if (row.kind === 'habit') {
+    if (isBlank(row.habit_id)) p.push('習慣の予定には、習慣(habit_id)が要ります');
+    else if (!ctx.habitExists) p.push(`習慣 ${row.habit_id} がありません`);
+  } else if (!isBlank(row.habit_id)) p.push('habit_id は、種類が habit の予定にだけ書けます');
+  if (row.kind === 'fixed' && isBlank(row.title)) p.push('固定の予定には題名(title)が要ります');
+  if (!isText(row.title)) p.push('題名(title)は文字列です');
+  if (!isText(row.note)) p.push('メモ(note)は文字列です');
+  const startOk = isValidDateTime(row.starts_at);
+  const endOk = isValidDateTime(row.ends_at);
+  const form = 'は時差つきの ISO 日時(例 2026-11-01T09:00:00+09:00)で書きます';
+  if (!startOk) p.push(isBlank(row.starts_at) ? '予定には始まり(starts_at)が要ります' : `始まり(starts_at)${form}`);
+  if (!endOk) p.push(isBlank(row.ends_at) ? '予定には終わり(ends_at)が要ります' : `終わり(ends_at)${form}`);
+  if (startOk && endOk) {
+    const ms = Date.parse(row.ends_at) - Date.parse(row.starts_at);
+    if (ms <= 0) p.push('終わり(ends_at)は始まり(starts_at)より後にします');
+    else if (ms > BOOKING_MAX_MS) p.push('1つの予定の長さは24時間までです。長いものは日ごとに分けます');
+  }
   return p;
 }
 

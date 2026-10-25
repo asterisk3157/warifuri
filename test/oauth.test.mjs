@@ -286,6 +286,8 @@ test('the full flow: registration, GitHub, consent, code with PKCE, tokens on /m
   const made = JSON.parse((await mcp.callTool({ name: 'create_task', arguments: { title: 'Read papers', mode: 'ai_worker' } })).content[0].text);
   const created = s.ledger.records(made.id)[0];
   assert.deepEqual([created.actor, created.device], [`oauth:${id}`, 'laptop']);
+  // Using the token marks the device as seen.
+  assert.equal(typeof s.ledger.listDevices().find((d) => d.name === 'laptop').last_seen_at, 'string');
   // /api takes machine keys only.
   const api = await s.go('/api/held?dir=/home/alex/thesis', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
   assert.equal(api.status, 401);
