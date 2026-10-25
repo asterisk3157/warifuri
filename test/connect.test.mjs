@@ -9,7 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { CLI } from './cli.mjs';
 import { openLedger } from '../src/ledger/ledger.mjs';
-import { connect, mergeGateHook, setEnvLine, codexServer, CLAUDE_MATCHER } from '../src/client/connect.mjs';
+import { connect, mergeGateHook, setEnvLine, codexServer, gateCommand, CLAUDE_MATCHER } from '../src/client/connect.mjs';
 import { loadConfig } from '../src/config.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-connect-'));
@@ -274,4 +274,19 @@ test('the small pieces: hook merge, env lines, the Codex table', () => {
 
   assert.deepEqual(codexServer('[other]\nurl = "x"\n[mcp_servers.warifuri]\nurl = "https://a/mcp"\nbearer_token_env_var = "K"\n[next]\nurl = "y"'), { url: 'https://a/mcp', bearer: 'K' });
   assert.equal(codexServer('[mcp_servers.other]\nurl = "x"'), null);
+});
+
+test('the hook runs warifuri.cmd on Windows when warifuri is on PATH, so the execution policy does not matter', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'path-'));
+  fs.writeFileSync(path.join(dir, 'warifuri.cmd'), '');
+  const win = { PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' };
+  assert.equal(gateCommand({ env: win, platform: 'win32', home: dir, homeIsDefault: true }), 'warifuri.cmd hook gate');
+  assert.equal(gateCommand({ env: win, platform: 'win32', home: 'C:\\data', homeIsDefault: false }), 'warifuri.cmd hook gate --home "C:\\data"');
+  if (process.platform !== 'win32') {
+    fs.writeFileSync(path.join(dir, 'warifuri'), '');
+    fs.chmodSync(path.join(dir, 'warifuri'), 0o755);
+    assert.equal(gateCommand({ env: { PATH: dir }, platform: 'linux', home: dir, homeIsDefault: true }), 'warifuri hook gate');
+  }
+  // Not on PATH: node and this package's bin, on every platform.
+  assert.match(gateCommand({ env: { PATH: '' }, platform: 'win32', home: dir, homeIsDefault: true }), /warifuri\.mjs" hook gate$/);
 });

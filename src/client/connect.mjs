@@ -162,11 +162,13 @@ export function mergeGateHook(json, { matcher, handler }) {
   return { changed: true, json: out };
 }
 
-// The command line of the hook. `warifuri` when it is on PATH (npm puts warifuri.cmd there on
-// Windows, which the shell finds by the same name); otherwise node and this package's bin.
+// The command line of the hook. `warifuri` when it is on PATH, or `warifuri.cmd` on Windows:
+// npm also puts a warifuri.ps1 there, which PowerShell may refuse to run under its execution
+// policy. Otherwise node and this package's bin.
 export function gateCommand({ env, platform, home, homeIsDefault }) {
   const q = (s) => `"${s}"`;
-  const head = findOnPath('warifuri', env, platform) ? 'warifuri' : `${q(process.execPath)} ${q(BIN)}`;
+  const onPath = findOnPath('warifuri', env, platform) ? (platform === 'win32' ? 'warifuri.cmd' : 'warifuri') : null;
+  const head = onPath ?? `${q(process.execPath)} ${q(BIN)}`;
   return `${head} hook gate${homeIsDefault ? '' : ` --home ${q(home)}`}`;
 }
 
