@@ -1,7 +1,7 @@
 // The Web screens (src/server/web.mjs): who may look (open on this machine, else a one-time
-// login and a session cookie), the shapes of the read endpoints, the one write (the profile),
-// and that no key, token or hash ever leaves. The layout of the flowchart (src/web/flow.js)
-// is checked here too.
+// login and a session cookie), the shapes of the read endpoints, the writes (the profile, and
+// on 秘書 a message and the answer of a proposal), and that no key, token or hash ever leaves.
+// The layout of the flowchart (src/web/flow.js) is checked here too.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -177,20 +177,30 @@ test('endpoint shapes', async (t) => {
 
   const sec = await (await get(base, '/web/api/secretary')).json();
   assert.match(sec.now, /^\d{4}-/);
-  assert.equal(sec.reports.length, 1);
-  assert.deepEqual(Object.keys(sec.reports[0]).sort(), ['body', 'created_at', 'id', 'kind', 'title']);
-  assert.equal(sec.reports[0].kind, 'nightly');
+  assert.equal(sec.items.length, 1);
+  assert.deepEqual(Object.keys(sec.items[0]).sort(), ['body', 'created_at', 'id', 'kind', 'title', 'type']);
+  assert.deepEqual([sec.items[0].type, sec.items[0].kind], ['report', 'nightly']);
   // Stored and returned as the text it is; the page puts it in as text.
-  assert.equal(sec.reports[0].title, '<b>Night</b>');
-  assert.equal(sec.reports[0].body, '- on track\n- <script>x</script>');
+  assert.equal(sec.items[0].title, '<b>Night</b>');
+  assert.equal(sec.items[0].body, '- on track\n- <script>x</script>');
 });
 
-test('秘書: the newest 30 reports first, and none on an empty ledger', async (t) => {
+test('秘書: one timeline of reports, messages and proposals, oldest first; off when there is no chat', async (t) => {
   const { base, ledger } = await start(t);
   for (let i = 0; i < 31; i += 1) ledger.writeReport({ kind: i % 2 ? 'morning' : 'inbox', title: `R${i}`, body: 'b' }, { actor: 'device-key', device: 'desk' });
-  const { reports } = await (await get(base, '/web/api/secretary')).json();
+  const thread = ledger.ensureThread('secretary', { actor: 'web' });
+  ledger.addMessage(thread.id, { role: 'user', body: '<b>hi</b>' }, { actor: 'web' });
+  const p = ledger.propose({ kind: 'close_forgotten', title: '閉じる', body: '記録から', about: undefined }, { actor: 'device-key', device: 'secretary' });
+  const out = await (await get(base, '/web/api/secretary')).json();
+  assert.deepEqual(out.secretary, { on: false, replying: false });
+  const reports = out.items.filter((x) => x.type === 'report');
   assert.equal(reports.length, 30);
-  assert.deepEqual(reports.slice(0, 2).map((r) => r.title), ['R30', 'R29']);
+  assert.deepEqual(reports.slice(-2).map((r) => r.title), ['R29', 'R30']);
+  assert.deepEqual(out.items.slice(-2).map((x) => [x.type, x.role ?? x.state]), [['message', 'user'], ['proposal', 'open']]);
+  assert.equal(out.items.at(-2).body, '<b>hi</b>');
+  assert.deepEqual(Object.keys(out.items.at(-1)).sort(), ['about', 'answer', 'answered_at', 'autonomy_kind', 'body', 'created_at', 'done_at', 'done_note', 'id', 'label', 'state', 'title', 'type']);
+  assert.equal(out.items.at(-1).id, p.id);
+  assert.equal(out.items.at(-1).label, '閉じ忘れたタスクを閉じる');
 
   const bare = openLedger(':memory:');
   const server = createServer({ ledger: bare });
@@ -201,7 +211,86 @@ test('秘書: the newest 30 reports first, and none on an empty ledger', async (
     bare.close();
   });
   const empty = await (await get(`http://127.0.0.1:${server.address().port}`, '/web/api/secretary')).json();
-  assert.deepEqual(empty.reports, []);
+  assert.deepEqual(empty.items, []);
+});
+
+// A chat that stores the message as the real one does, and counts the sends.
+function stubChat(ledger, on = true) {
+  const sent = [];
+  return {
+    sent,
+    on,
+    send(text, writer) {
+      sent.push({ text, writer });
+      return ledger.addMessage(ledger.ensureThread('secretary', writer).id, { role: 'user', body: text }, writer);
+    },
+    status: () => ({ on, replying: on && sent.length > 0, waiting: 0 }),
+  };
+}
+
+test('秘書: a message goes to the chat, JSON from this origin only, and not while the secretary is off', async (t) => {
+  let chat;
+  const { base, ledger } = await start(t, { chat: { on: true, send: (...a) => chat.send(...a), status: () => chat.status() } });
+  chat = stubChat(ledger);
+  const post = (body, headers = {}) =>
+    fetch(`${base}/web/api/secretary/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  assert.equal((await post({ text: 'hi' }, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await post({ text: 'hi' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  assert.equal((await post('text=hi', { 'Content-Type': 'application/x-www-form-urlencoded' })).status, 415);
+  assert.equal((await post({ text: 1 })).status, 400);
+  assert.equal((await post({ text: 'hi', to: 'x' })).status, 400);
+  assert.equal(chat.sent.length, 0);
+  // The ledger's rules answer for the text itself, in Japanese.
+  const blank = await post({ text: '  ' });
+  assert.equal(blank.status, 400);
+  assert.match((await blank.json()).problems.join(' '), /本文/);
+  // 4000 characters of Japanese is more than the 8 KB a profile may send.
+  const long = await post({ text: 'あ'.repeat(4000) });
+  assert.equal(long.status, 202);
+  const ok = await post({ text: 'おはよう' }, { 'Sec-Fetch-Site': 'same-origin' });
+  assert.equal(ok.status, 202);
+  const out = await ok.json();
+  assert.match(out.id, /^m_/);
+  assert.equal(out.items.at(-1).body, 'おはよう');
+  assert.deepEqual(out.secretary, { on: true, replying: true });
+  assert.deepEqual(chat.sent.at(-1).writer, { actor: 'web', device: null });
+  assert.equal(ledger.records(out.id)[0].entity, 'message');
+});
+
+test('秘書: sending is refused while the secretary is off', async (t) => {
+  const { base, ledger } = await start(t);
+  const res = await fetch(`${base}/web/api/secretary/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ text: 'hi' }) });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).problems[0], /止まっている/);
+  assert.equal(ledger.getThread(), null);
+});
+
+test('秘書: answering a proposal marks it, records autonomy_outcome and tells the session, once', async (t) => {
+  const { base, ledger } = await start(t);
+  const S = { actor: 'device-key', device: 'secretary' };
+  const p = ledger.propose({ kind: 'reschedule_block', title: '予定を明日へ', body: 'b' }, S);
+  const answer = (id, body, headers = {}) =>
+    fetch(`${base}/web/api/secretary/proposals/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify(body) });
+  assert.equal((await answer(p.id, { answer: 'approved' }, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await answer(p.id, { answer: 'revoked' })).status, 400);
+  assert.equal((await answer(p.id, { answer: 'approved', by: 'x' })).status, 400);
+  assert.equal((await answer('m_20261025000000_nothin', { answer: 'approved' })).status, 404);
+  const empty = await answer(p.id, { answer: 'changed', text: ' ' });
+  assert.equal(empty.status, 400);
+  assert.match((await empty.json()).problems[0], /どう直すか/);
+  assert.equal(ledger.getMessage(p.id).state, 'open');
+
+  const res = await answer(p.id, { answer: 'changed', text: '明後日にして' });
+  assert.equal(res.status, 200);
+  const out = await res.json();
+  const item = out.items.find((x) => x.id === p.id);
+  assert.deepEqual([item.state, item.answer], ['changed', '明後日にして']);
+  assert.match(out.items.at(-1).body, /直して了承されました。\n本人の言葉: 明後日にして/);
+  assert.equal(out.items.at(-1).role, 'system');
+  const rec = ledger.records('reschedule_block').at(-1);
+  assert.deepEqual([rec.entity, rec.actor, rec.changes.outcome], ['autonomy', 'web', 'changed']);
+  assert.equal((await answer(p.id, { answer: 'approved' })).status, 400);
+  assert.deepEqual(ledger.listProposals().map((x) => x.id), [p.id]);
 });
 
 test('the profile: JSON from this origin only, checked, kept in settings and recorded', async (t) => {

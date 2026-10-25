@@ -42,6 +42,7 @@ import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
+import { createChat } from './secretary/chat.mjs';
 import { JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -365,17 +366,21 @@ function runServe(args) {
   } catch (err) {
     return fail(err, `cannot open ${values.WARIFURI_DB}`);
   }
+  // The conversation on the 秘書 screen, when the secretary is on (the same check as its clock).
+  const chat = createChat(ledger, cfg, { log: (line) => process.stdout.write(`warifuri: ${line}\n`) });
   let server;
   try {
     server = createServer({
       ledger, home: cfg.home, oauth: oauth.config, trustProxy: values.WARIFURI_TRUST_PROXY,
-      host: values.WARIFURI_HOST, publicUrl: values.WARIFURI_PUBLIC_URL ?? null,
+      host: values.WARIFURI_HOST, publicUrl: values.WARIFURI_PUBLIC_URL ?? null, chat,
     });
   } catch (err) {
+    chat.stop();
     ledger.close();
     return usage(`WARIFURI_TRUST_PROXY (--trust-proxy): ${err.message}`);
   }
   server.on('error', (err) => {
+    chat.stop();
     process.stderr.write(`warifuri: cannot listen: ${err.message}\n`);
     ledger.close();
     process.exitCode = 1;
@@ -397,12 +402,15 @@ function runServe(args) {
       process.stdout.write(`warifuri: web screens at ${base}/calendar; log in once with this URL (single use, 15 minutes):\n`);
       process.stdout.write(`warifuri:   ${base}/web/login#token=${server.web.issueLogin()}\n`);
     }
+    // Messages sent before a restart and not answered yet get their reply now.
+    chat.kick();
   });
   let stopping = false;
   const stop = () => {
     if (stopping) return;
     stopping = true;
     sched?.stop();
+    chat.stop();
     server.close(() => {
       ledger.close();
       process.stdout.write('warifuri: stopped\n');

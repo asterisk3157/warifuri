@@ -775,7 +775,8 @@ function apiRouter(ledger, limit) {
 // is read from plugins.yaml in home on each note.
 // host: the address the server listens on, and publicUrl the public URL (WARIFURI_PUBLIC_URL,
 // also when the GitHub login is off): together with trustProxy they decide whether the Web
-// screens (web.mjs) open without a login. app.locals.web is { mode, issueLogin }.
+// screens (web.mjs) open without a login. chat: the conversation with the secretary
+// (src/secretary/chat.mjs) for the 秘書 screen, or null. app.locals.web is { mode, issueLogin }.
 export function createApp({
   ledger,
   home = null,
@@ -787,6 +788,7 @@ export function createApp({
   host = '127.0.0.1',
   publicUrl = oauth?.publicUrl ?? null,
   webLimit = apiLimit,
+  chat = null,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -815,7 +817,7 @@ export function createApp({
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
   app.use('/api', apiRouter(ledger, apiLimit));
-  web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), limit: webLimit });
+  web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit });
   app.use(web.router);
   app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };
 
