@@ -278,7 +278,8 @@ test('the small pieces: hook merge, env lines, the Codex table', () => {
 
 test('the hook runs warifuri.cmd on Windows when warifuri is on PATH, so the execution policy does not matter', () => {
   const dir = fs.mkdtempSync(path.join(tmp, 'path-'));
-  fs.writeFileSync(path.join(dir, 'warifuri.cmd'), '');
+  // Named as PATHEXT spells it: Windows ignores case, but Linux, where this also runs, does not.
+  fs.writeFileSync(path.join(dir, 'warifuri.CMD'), '');
   const win = { PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' };
   assert.equal(gateCommand({ env: win, platform: 'win32', home: dir, homeIsDefault: true }), 'warifuri.cmd hook gate');
   assert.equal(gateCommand({ env: win, platform: 'win32', home: 'C:\\data', homeIsDefault: false }), 'warifuri.cmd hook gate --home "C:\\data"');
