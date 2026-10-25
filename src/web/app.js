@@ -64,15 +64,13 @@ function banner() {
   return h('div', { class: 'wf-banner', role: 'status' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), `サーバーにつながりません。${when}`);
 }
 
-// The card at the foot of the sidebar: where warifuri runs, and the server machine's name
-// (not the machine of this browser, which may be another one).
+// The card at the foot of the sidebar: where warifuri runs (ローカルホスト or サーバー). It
+// opens the dialog of the host machine.
 function card() {
   const a = state.about;
   const label = state.offline ? 'つながっていません' : (a?.label ?? 'ローカルホスト');
   return h('button', { type: 'button', class: ['wf-card', state.offline && 'wf-offline'], title: 'このサーバーについて', onclick: (e) => openAbout({ type: 'server' }, e.currentTarget) },
-    h('span', { class: 'wf-card-row wf-card-label' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), label),
-    h('span', { class: 'wf-card-sep', 'aria-hidden': 'true' }),
-    h('span', { class: 'wf-card-row' }, icon('serverSmall', 16, 1.8), h('span', { class: 'wf-card-name', text: a?.machine?.name ?? '…' })));
+    h('span', { class: 'wf-card-row wf-card-label' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), label));
 }
 
 function navItem(key, label, iconName) {
@@ -143,7 +141,7 @@ async function refresh() {
   timer = setTimeout(refresh, REFRESH_MS);
 }
 
-// The about dialog: of the server's machine (chip, memory, OS, 接続先), or of one device
+// The about dialog: of the host machine (chip, memory, OS, 接続先), or of one device
 // (its name, 接続先, 最終接続).
 function openAbout(what, opener) {
   const a = state.about;
@@ -167,8 +165,7 @@ function openAbout(what, opener) {
     const m = a?.machine;
     body = [
       machinePicture(m?.kind),
-      h('span', { class: 'wf-dialog-name', id: 'wf-dialog-title', text: m?.name ?? 'warifuri' }),
-      h('span', { class: 'wf-dialog-model', text: 'warifuri サーバーの機械' }),
+      h('span', { class: 'wf-dialog-name', id: 'wf-dialog-title', text: 'ホストマシン' }),
       h('dl', { class: 'wf-spec' },
         h('dt', { text: 'チップ' }), h('dd', { text: m ? `${m.chip}${m.cores ? `（${m.cores}コア）` : ''}` : '—' }),
         h('dt', { text: 'メモリ' }), h('dd', { text: m ? `${m.memory_gb} GB` : '—' }),
