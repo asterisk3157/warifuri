@@ -79,7 +79,7 @@ warifuri connect
 <details>
 <summary>connect の詳細</summary>
 
-- この PC 用のシークレット(`wf_` で始まる文字列)を発行し、あなただけが読めるファイル `~/.warifuri/device.key` に保存します。デバイス名は PC のホスト名で、`--device <名前>` で変更できます。
+- この PC 用のシークレット(`wf_` で始まる文字列)を発行し、ユーザーだけが読めるファイル `~/.warifuri/device.key` に保存します。デバイス名は PC のホスト名で、`--device <名前>` で変更できます。
 - `claude` と `codex` に、MCP サーバーを `warifuri` という名前で登録します。
 - タスク確認を、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に追加します。
 - 秘書のスキルをコピーします。
@@ -158,7 +158,7 @@ GitHub ログインを用いることで、VM や常に起動している PC に
 
    ```
    WARIFURI_PUBLIC_URL=https://warifuri.example.com
-   WARIFURI_GITHUB_USER=<あなたの GitHub のユーザー名>
+   WARIFURI_GITHUB_USER=<GitHub のユーザー名>
    WARIFURI_GITHUB_CLIENT_ID=<OAuth App の Client ID>
    ```
 
@@ -204,7 +204,7 @@ warifuri key add <デバイス名>
 
 ## 秘書
 
-秘書は、タスク管理と予定調整を定期実行する AI エージェントです。既定ではオフです。何をするかと話し方は[使い方](usage.md#秘書)にあります。
+秘書は、タスク管理と予定調整を定期実行する AI エージェントです。既定ではオフです。何をするかは[使い方](usage.md#3-秘書)にあります。
 
 サーバーの PC で Claude Code にログインしてから、次を実行し、`warifuri serve` を再起動します。
 
