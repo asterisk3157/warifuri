@@ -37,6 +37,9 @@ import {
   checkBooking,
   checkAutonomy,
   checkStateExtra,
+  AUTONOMY_KINDS,
+  AUTONOMY_OUTCOMES,
+  AUTONOMY_STREAK,
   applyState,
 } from './rules.mjs';
 
@@ -877,7 +880,12 @@ export function openLedger(path, options = {}) {
 
   // Stores a kind's level and counters. A new kind starts at 'ask' with zero counts (原則13).
   function setAutonomy(kind, fields, opts) {
-    const w = requireWriter(opts);
+    return writeAutonomy(kind, fields, requireWriter(opts));
+  }
+
+  // note: values kept in the record beside the changes (who decided, the outcome); with a
+  // note, the record is written even when no column changed, so every decision is kept.
+  function writeAutonomy(kind, fields, w, note = null) {
     const before = getAutonomy(kind);
     const input = fields ?? {};
     const problems = unknownFields(input, ['level', 'approvals_in_row', 'revokes']);
@@ -892,7 +900,7 @@ export function openLedger(path, options = {}) {
     problems.push(...checkAutonomy(next));
     if (problems.length) throw new LedgerError(problems);
     const columns = ['kind', 'level', 'approvals_in_row', 'revokes'];
-    const changes = diff(before, next, columns);
+    const changes = { ...diff(before, next, columns), ...(note ?? {}) };
     if (before && Object.keys(changes).length === 0) return before;
     next.updated_at = nowIso();
     return transaction(() => {
@@ -904,6 +912,112 @@ export function openLedger(path, options = {}) {
       record(w, 'autonomy', kind, before ? 'update' : 'create', changes);
       return getAutonomy(kind);
     });
+  }
+
+  function autonomyKind(kind) {
+    const def = AUTONOMY_KINDS.find((k) => k.kind === kind);
+    if (!def) throw new LedgerError([`${kind} という動きの種類はありません。種類は ${AUTONOMY_KINDS.map((k) => k.kind).join(', ')} です(原則13)`]);
+    return def;
+  }
+
+  // One kind as the secretary and the Web screen show it. A kind never written is at ask.
+  // by_person: its level was last set by the person's word; at ask, the count does not
+  // raise it again (原則13: the person's word wins).
+  function autonomyView({ kind, label, stage }) {
+    const row = getAutonomy(kind);
+    const lastSet = records(kind)
+      .filter((r) => r.entity === 'autonomy' && (r.changes.by === 'person' || r.changes.level))
+      .at(-1);
+    return {
+      kind,
+      label,
+      stage,
+      level: row?.level ?? 'ask',
+      approvals_in_row: row?.approvals_in_row ?? 0,
+      revokes: row?.revokes ?? 0,
+      by_person: lastSet?.changes.by === 'person',
+      updated_at: row?.updated_at ?? null,
+    };
+  }
+
+  // Every kind in the fixed list, with the approvals in a row that raise one.
+  function listAutonomy() {
+    return { streak: AUTONOMY_STREAK, kinds: AUTONOMY_KINDS.map(autonomyView) };
+  }
+
+  // The outcome of one proposal of a kind (原則13). approved (as proposed) adds to the run of
+  // approvals, and the AUTONOMY_STREAK-th in a row raises ask to act_then_tell; changed and
+  // refused end the run; revoked (the person cancelled it after the fact) ends the run and
+  // brings act_then_tell back to ask. about: the goal or task it concerned; an approval in a
+  // goal the person leads (原則8) is not counted. A kind the person held at ask stays there.
+  // level_changed is 'raised', 'lowered' or null, with announce: the one line to tell the person.
+  function recordAutonomyOutcome(kind, outcome, { about } = {}, opts) {
+    const w = requireWriter(opts);
+    const def = autonomyKind(kind);
+    if (!AUTONOMY_OUTCOMES.includes(outcome)) {
+      throw new LedgerError([`結果(outcome)は ${AUTONOMY_OUTCOMES.join(', ')} のどれかです`]);
+    }
+    let goal = null;
+    if (about !== undefined && about !== null) {
+      const task = getTaskRow(about);
+      goal = task ? (task.goal_id ? getGoalRow(task.goal_id) : null) : getGoalRow(about);
+      if (!task && !goal) throw new LedgerError([`${about} というゴールやタスクはありません`]);
+    }
+    const cur = autonomyView(def);
+    let { level, approvals_in_row: streak, revokes } = cur;
+    let counted = true;
+    let changed = null;
+    let reason = null;
+    if (outcome === 'approved') {
+      if (goal?.human_led) {
+        counted = false;
+        reason = '人が主導するゴールでの了承なので、回数に数えませんでした(原則8)';
+      } else {
+        streak += 1;
+        if (level === 'ask' && streak >= AUTONOMY_STREAK) {
+          if (cur.by_person) reason = '本人の言葉で「毎回聞いて」にしてある種類なので、了承が続いても上げません';
+          else {
+            level = 'act_then_tell';
+            changed = 'raised';
+          }
+        }
+      }
+    } else {
+      streak = 0;
+      if (outcome === 'revoked') {
+        revokes += 1;
+        if (level === 'act_then_tell') {
+          level = 'ask';
+          changed = 'lowered';
+        }
+      }
+    }
+    const note = { outcome, counted, ...(about ? { about } : {}) };
+    writeAutonomy(kind, { level, approvals_in_row: streak, revokes }, w, note);
+    const announce =
+      changed === 'raised'
+        ? `「${def.label}」は${AUTONOMY_STREAK}回続けてそのまま了承されたので、これからはやってから知らせます`
+        : changed === 'lowered'
+          ? `「${def.label}」は取り消されたので、これからは聞いてからにします`
+          : null;
+    return { ...autonomyView(def), outcome, counted, level_changed: changed, announce, reason };
+  }
+
+  // Sets a kind's level on the person's explicit word (「これは聞かなくていい」「これは毎回聞いて」),
+  // whatever the count; the run of approvals starts again. by_person must be true: the
+  // secretary never sets a level on its own. said: the person's words, kept in the record.
+  function setAutonomyByPerson(kind, level, { by_person: byPerson, said } = {}, opts) {
+    const w = requireWriter(opts);
+    const def = autonomyKind(kind);
+    if (byPerson !== true) {
+      throw new LedgerError([
+        '自律度を直接変えるのは、人が明示したときだけです。本人に「これは聞かなくていい」「これは毎回聞いて」と言われたときに、by_person を true にして渡します(原則13)',
+      ]);
+    }
+    if (said !== undefined && typeof said !== 'string') throw new LedgerError(['said は本人の言葉を文字で渡します']);
+    const note = { by: 'person', ...(said ? { said } : {}) };
+    writeAutonomy(kind, { level, approvals_in_row: 0 }, w, note);
+    return autonomyView(def);
   }
 
   // A note written to a profile's knowledge or inbox (src/knowledge/profiles.mjs writes the
@@ -1337,6 +1451,9 @@ export function openLedger(path, options = {}) {
     listPlaces,
     setAutonomy,
     getAutonomy,
+    listAutonomy,
+    recordAutonomyOutcome,
+    setAutonomyByPerson,
     get,
     board,
     search,

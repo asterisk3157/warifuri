@@ -18,7 +18,7 @@ import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { STATES, MODES, LOADS, BOOKING_KINDS, isValidId } from '../ledger/rules.mjs';
+import { STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, isValidId } from '../ledger/rules.mjs';
 import { LedgerError } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
@@ -206,6 +206,19 @@ function buildServer(ledger, device, knowledge) {
       annotations: readOnly,
     },
     guarded(async ({ from, to }) => result(ledger.schedule({ from, to }))),
+  );
+
+  server.registerTool(
+    'autonomy',
+    {
+      description:
+        "List the secretary's autonomy (原則13) for each kind of action: level ask (ask before acting) or " +
+        'act_then_tell (act, then tell the person), approvals_in_row, revokes, and by_person (the level was set by ' +
+        "the person's word). streak is the approvals in a row that raise a kind. Kinds that go outside or cannot be undone are never allowed.",
+      inputSchema: {},
+      annotations: readOnly,
+    },
+    async () => result(ledger.listAutonomy()),
   );
 
   registerWriteTools(server, ledger, device, { write, writer, knowledge });
@@ -491,6 +504,29 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
     { id: z.string().min(1) },
     async ({ id }) => result(ledger.unbook(id, writer)),
     { ...write, destructiveHint: true },
+  );
+
+  const autonomyKind = z.enum(AUTONOMY_KINDS.map((k) => k.kind));
+
+  tool(
+    'autonomy_outcome',
+    "Record how the person answered one of the secretary's proposals of a kind (原則13). outcome: approved (as " +
+      'proposed), changed (approved with changes), refused, or revoked (the person cancelled it after it was done). ' +
+      'Approvals in a row raise the kind to act_then_tell; a revoke brings it back to ask. about: the goal or task it ' +
+      'concerned; approvals in a goal the person leads are not counted. When level_changed is set, tell the person ' +
+      'announce, once.',
+    { kind: autonomyKind, outcome: z.enum(AUTONOMY_OUTCOMES), about: z.string().min(1).optional() },
+    async ({ kind, outcome, about }) => result(ledger.recordAutonomyOutcome(kind, outcome, { about }, writer)),
+  );
+
+  tool(
+    'autonomy_set',
+    "Set a kind's level directly, only on the person's explicit word: act_then_tell for 「これは聞かなくていい」, " +
+      'ask for 「これは毎回聞いて」. by_person must be true, or it is refused; said: their words. The run of approvals ' +
+      'starts again, and a kind the person set to ask is not raised by approvals.',
+    { kind: autonomyKind, level: z.enum(AUTONOMY_LEVELS), by_person: z.boolean().optional(), said: z.string().optional() },
+    async ({ kind, level, by_person: byPerson, said }) =>
+      result(ledger.setAutonomyByPerson(kind, level, { by_person: byPerson, said }, writer)),
   );
 
   tool(
