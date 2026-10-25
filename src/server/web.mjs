@@ -35,6 +35,9 @@ import { profileDir } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
 
+// Pictures a sent message shows in its bubble; other files show only their name.
+const PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ASSETS_DIR = path.join(HERE, '..', 'web');
 const PACKAGE = path.join(HERE, '..', '..', 'package.json');
@@ -553,7 +556,10 @@ export function createWeb({
       steps: (d.steps ?? []).map((x) => ({ kind: x.kind, label: x.label })),
       options: d.options ?? [],
       scheduled: d.scheduled ?? null,
-      files: (d.attachments ?? []).map((a) => ({ name: a.name, type: a.type, size: a.size })),
+      files: (d.attachments ?? []).map((a) => ({
+        name: a.name, type: a.type, size: a.size,
+        preview: PREVIEW_TYPES.includes(a.type) ? `/web/api/secretary/files/${encodeURIComponent(a.id)}` : null,
+      })),
       files_only: d.files_only === true,
       answer: m.kind === 'answer' ? { ask: d.ask ?? null, index: d.index ?? null, header: d.header ?? null, later: d.later === true, changed: d.changed === true } : null,
     };
@@ -714,6 +720,24 @@ export function createWeb({
   // The secretary's replies as they are written, as Server-Sent Events: 'hello' with the
   // replies being written now, then 'live' ({ thread, phase, text, steps, scheduled }) and
   // 'done' ({ thread, message }). A comment every PING_MS keeps the connection open.
+  // A picture sent with a message, for its bubble: only pictures, only ones that went with a
+  // message, read from the owner-only folder, never as anything the browser could run.
+  api.get('/secretary/files/:id', (req, res) => {
+    const a = home ? ledger.getAttachment(req.params.id) : null;
+    const file = a ? path.join(secretaryPaths(home).uploads, a.id) : null;
+    if (!a || !a.message_id || !PREVIEW_TYPES.includes(a.type) || !/^[A-Za-z0-9_-]+$/.test(a.id) || !fs.existsSync(file)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.set({
+      'Content-Type': a.type,
+      'Content-Disposition': 'inline',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'Cache-Control': 'private, max-age=86400',
+    });
+    res.send(fs.readFileSync(file));
+  });
+
   api.get('/secretary/stream', (req, res) => {
     res.status(200).set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
     res.flushHeaders();

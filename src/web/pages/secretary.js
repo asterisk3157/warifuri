@@ -322,7 +322,10 @@ function message(m, { where, last, threads }) {
       h('div', { class: 'wf-bubble wf-bubble-me' },
         a && !a.later ? h('small', { class: 'wf-about', text: `「${a.header ?? ''}」${a.changed ? 'の答えを変えました' : 'への答え'}` }) : null,
         m.files_only ? null : h('p', { class: 'wf-plain', text: m.body }),
-        m.files.length ? h('span', { class: 'wf-sentfiles' }, ...m.files.map((f) => h('span', { text: f.name }))) : null),
+        ...m.files.filter((f) => f.preview).map((f) => h('figure', { class: 'wf-attach' },
+          h('img', { src: f.preview, alt: f.name, loading: 'lazy' }),
+          h('figcaption', { text: f.name }))),
+        m.files.some((f) => !f.preview) ? h('span', { class: 'wf-sentfiles' }, ...m.files.filter((f) => !f.preview).map((f) => h('span', { text: f.name }))) : null),
       h('span', { class: 'wf-foot' }, change, startThread, threadLink(t, m.id), time));
   }
   const options = last && m.options.length

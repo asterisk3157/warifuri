@@ -254,7 +254,7 @@ warifuri サーバーは、台帳をブラウザで読むための画面も出�
 
 - 本人のプロフィール: `POST /web/api/profile` に名前(40字まで)、自己紹介(400字まで)、6つから選ぶ色を送ります。値はデータベースの `settings` に `profile.name` のような名前で入ります(記録の種類は `settings`)。
 - 秘書へのメッセージ: `POST /web/api/secretary/messages` に `text`(4,000字まで)と、添えるファイルの id(`attachments`、4個まで)、スレッドなら `thread` を送ります。秘書が止まっているときは断ります。返事は、あとから会話に入ります(下の「会話」の小節)。
-- ファイル: `POST /web/api/secretary/uploads` に、ファイルの中身をそのまま、種類を `Content-Type`、名前を `X-File-Name`(URI の形で符号化)に入れて送ります。5 MB までです。返った id を、次のメッセージの `attachments` に入れます。送ったファイルを画面に返す口はありません。
+- ファイル: `POST /web/api/secretary/uploads` に、ファイルの中身をそのまま、種類を `Content-Type`、名前を `X-File-Name`(URI の形で符号化)に入れて送ります。5 MB までです。返った id を、次のメッセージの `attachments` に入れます。メッセージと一緒に送った画像(PNG、JPEG、GIF、WebP)だけは、吹き出しに見本を出すために `GET /web/api/secretary/files/<id>` で読めます。ほかのファイルと、まだ送っていないファイルは読めません。
 - 質問への答え: `POST /web/api/secretary/asks/<id>` に、問いの番号(`index`)と選んだ選択肢の名前(`picked`)、その他の言葉(`other`)を送ります。「あとで」は `{ "later": true }` です。答えた問いにもう一度答えると、答えを変えたことになります。秘書が止まっていても答えられます。
 - スレッド: `POST /web/api/secretary/threads` に元の発言(`parent`)を送ると、その発言のスレッドを開きます(なければ作ります)。`GET /web/api/secretary/threads/<id>` で中身を読み、`POST /web/api/secretary/threads/<id>/read` で読んだ印を付けます。
 - 案への答え: `POST /web/api/secretary/proposals/<id>` に `answer`(`approved`、`changed`、`refused`)と、直して了承のときは `text` を送ります。秘書の窓は案を質問として出すので、これは画面からは使いませんが、台帳の口として残しています。
@@ -411,7 +411,7 @@ Claude Code は、MCP サーバーのツールを `mcp__<サーバーの名前>_
 
 #### 添付
 
-本人は、クリップのボタン、ドラッグ、貼り付けでファイルを添えられます。画面は送るときにファイルを1つずつ `/web/api/secretary/uploads` に送り、返った id をメッセージに付けます。warifuri は中身をデータのフォルダの `secretary/uploads/<id>` に、本人だけが読める形(フォルダは 700、ファイルは 600)で置き、名前、種類、大きさ、ハッシュを台帳に入れます。1つのファイルは 5 MB まで、1つのメッセージに4個までで、1つのファイルは1つのメッセージにしか付けられません。
+本人は、クリップのボタン、ドラッグ、貼り付けでファイルを添えられます。画面は送るときにファイルを1つずつ `/web/api/secretary/uploads` に送り、返った id をメッセージに付けます。warifuri は中身をデータのフォルダの `secretary/uploads/<id>` に、本人だけが読める形(フォルダは 700、ファイルは 600)で置き、名前、種類、大きさ、ハッシュを台帳に入れます。1つのファイルは 5 MB まで、1つのメッセージに4個までで、1つのファイルは1つのメッセージにしか付けられません。送った画像は、その発言の吹き出しの中に見本として出ます(ほかのファイルは名前だけ)。見本は、ほかのページの中では動かない形(`sandbox`)で返します。
 
 秘書にはファイルを読むツールを渡さないまま、warifuri が中身を渡します。画像(PNG、JPEG、GIF、WebP)は `--input-format stream-json` で、手引きと一緒に画像の中身として渡します。文字のファイル(UTF-8 で読めるもの)は、50,000字まで手引きの中に資料として入れます。ほかのファイルは名前と大きさだけを伝えます。`--input-format stream-json` を知らない `claude` には、画像の名前だけを伝えます。
 

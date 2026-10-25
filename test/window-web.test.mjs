@@ -154,15 +154,22 @@ test('uploads: this origin only, at most the cap, kept owner-only by id; a messa
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.equal(fs.statSync(paths(home).uploads).mode & 0o777, 0o700);
   }
-  // Files are never served back: the window shows only their names.
+  // A file is not served back before it goes with a message, and not by its upload path.
   assert.equal((await fetch(`${base}/web/api/secretary/uploads/${a.id}`)).status, 404);
+  assert.equal((await fetch(`${base}/web/api/secretary/files/${a.id}`)).status, 404);
 
   const sent = await post('/web/api/secretary/messages', { text: 'この時間割、来週の予定に入れておいて', attachments: [a.id] });
   assert.equal(sent.status, 202);
   const out = await sent.json();
   const mine = out.items.at(-1);
-  assert.deepEqual(mine.files, [{ name: '時間割.png', type: 'image/png', size: png.length }]);
-  assert.ok(!JSON.stringify(out).includes(a.id), 'the screen does not need the ids of files sent');
+  // A picture that went with a message is shown in its bubble, as a picture only.
+  assert.deepEqual(mine.files, [{ name: '時間割.png', type: 'image/png', size: png.length, preview: `/web/api/secretary/files/${a.id}` }]);
+  const pic = await fetch(`${base}${mine.files[0].preview}`);
+  assert.equal(pic.status, 200);
+  assert.equal(pic.headers.get('content-type'), 'image/png');
+  assert.match(pic.headers.get('content-security-policy'), /sandbox/);
+  assert.deepEqual(Buffer.from(await pic.arrayBuffer()), png);
+  assert.equal((await fetch(`${base}/web/api/secretary/files/..%2Fmcp.json`)).status, 404);
   assert.deepEqual(chat.sent.at(-1).attachments, [a.id]);
   const again = await post('/web/api/secretary/messages', { text: 'もう一度', attachments: [a.id] });
   assert.equal(again.status, 400);

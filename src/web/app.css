@@ -285,6 +285,9 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-bubble-me { background: #f5f8fb; padding: 8px 16px; }
 .wf-plain { margin: 0; white-space: pre-wrap; }
 .wf-about { display: block; text-align: right; font-size: 13px; color: var(--sub); line-height: 1.5; }
+.wf-attach { margin: 8px 0 0; width: 300px; max-width: 100%; border: 1px solid var(--hair); border-radius: 10px; overflow: hidden; background: #ffffff; }
+.wf-attach img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: contain; background: var(--bg); }
+.wf-attach figcaption { padding: 4px 10px; font-size: 13px; color: var(--sub); border-top: 1px solid var(--hair); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-sentfiles { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 12px; font-size: 13px; color: var(--sub); line-height: 1.5; }
 .wf-who { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sub); line-height: 1.5; }
 .wf-badge-sched { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--tint); border: 1px solid #cfe3f4; border-radius: 999px; padding: 0 8px; line-height: 20px; }
