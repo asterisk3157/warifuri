@@ -25,6 +25,7 @@ import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { readSettings, writeSettings, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
+import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
 import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
 
 const VERSION = '0.0.0';
@@ -207,6 +208,26 @@ function buildServer(ledger, device, knowledge) {
       annotations: readOnly,
     },
     guarded(async ({ from, to }) => result(ledger.schedule({ from, to }))),
+  );
+
+  server.registerTool(
+    'free_time',
+    {
+      description:
+        "The person's free time in [from, to) where a task can be placed, inside their limits (settings). from and to " +
+        `as in schedule (from defaults to today, to to one day after from); at most ${FREE_TIME_MAX_DAYS} days. Returns ` +
+        '{ from, to, limits, days: [{ date, booked_hours, remaining_hours, habits_to_place, free: [{ starts_at, ends_at, ' +
+        'minutes }] }] }, one entry per local day. Free time is only between limits.earliest and latest, avoids every ' +
+        'booking, and leaves out slots shorter than block_min_minutes. habits_to_place: habits of that day not booked ' +
+        'yet, each placed at the earliest spot in its window (starts_at null when it fits nowhere); their time is kept ' +
+        'out of free, so book them first. booked_hours counts task and habit bookings inside earliest-latest (not ' +
+        'fixed ones); remaining_hours is day_max_hours minus that and the habits to place, and free never adds up to ' +
+        'more: slots are offered from the earliest and the last one is cut. A slot may be longer than ' +
+        'limits.block_max_minutes; cut it into blocks of at most that length when booking.',
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+      annotations: readOnly,
+    },
+    guarded(async ({ from, to }) => result(freeTimeFor(ledger, { from, to }))),
   );
 
   server.registerTool(
