@@ -418,6 +418,7 @@ export function createWeb({
   function devicesWithHolds() {
     const { all } = openWork();
     const paths = new Map(ledger.listPlaces().map((p) => [p.id, p]));
+    const loggedIn = new Set(ledger.oauth.tokenActivity().filter((a) => a.live).map((a) => a.device));
     return ledger
       .listDevices()
       .filter((d) => d.revoked_at === null)
@@ -426,6 +427,7 @@ export function createWeb({
         created_at: d.created_at,
         last_seen_at: d.last_seen_at,
         has_key: d.has_key,
+        github_login: loggedIn.has(d.name),
         holds: [...all.values()]
           .filter((t) => t.hold?.device === d.name)
           .map((t) => {
