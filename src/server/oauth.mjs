@@ -102,11 +102,24 @@ const withoutSlash = (u) => String(u).replace(/#.*$/, '').replace(/\/$/, '');
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+// The look of the Web screens (src/web/app.css): a white card on pale sky, text 13/15/17/24px,
+// radii 6 and 10, one blue for the main button.
 const STYLE =
-  'body{font-family:system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;line-height:1.7;color:#222;background:#fff}' +
-  'h1{font-size:1.3rem}code{background:#f2f2f2;padding:0 .3em;border-radius:3px;word-break:break-all}' +
-  'label{display:block;margin-top:1rem}select,input{font:inherit;padding:.3rem;width:100%;box-sizing:border-box}' +
-  '.buttons{margin-top:1.5rem;display:flex;gap:.8rem}button{font:inherit;padding:.4rem 1.2rem}.error{color:#a00}';
+  ':root{--ink:#1d1d1f;--sub:#6e6e73;--hair:#e5e5ea;--line:#d2d2d7;--accent:#2f6fa5;--tint:#e2f0fb;--bg:#edf5fc;--red:#c4282e}' +
+  "body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,'Segoe UI','Yu Gothic UI','Meiryo','Hiragino Sans','Noto Sans JP',sans-serif}" +
+  'main{max-width:520px;margin:10vh auto;padding:28px;background:#fff;border:1px solid var(--hair);border-radius:10px;box-sizing:border-box}' +
+  '@media (max-width:560px){main{margin:16px;padding:20px}}' +
+  'h1{margin:0 0 12px;font-size:24px;font-weight:600}h2{margin:20px 0 4px;font-size:17px;font-weight:600}p{margin:8px 0}.sub{color:var(--sub)}' +
+  'code{font-size:13px;background:var(--tint);padding:1px 6px;border-radius:6px;word-break:break-all}' +
+  'ul{margin:4px 0;padding-left:1.2em}li{margin:4px 0}' +
+  '.app{margin:12px 0;padding:12px 14px;background:var(--tint);border-radius:10px}.app strong{font-size:17px}' +
+  'label{display:block;margin-top:16px;font-size:13px;color:var(--sub)}' +
+  'select,input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;font:inherit;font-size:15px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:6px}' +
+  'select:focus,input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}' +
+  '.buttons{margin-top:24px;display:flex;gap:10px}' +
+  'button{flex:1;font:inherit;font-weight:600;padding:10px 16px;border:0;border-radius:6px;cursor:pointer;background:#f2f2f4;color:var(--ink)}' +
+  'button:hover{background:#e8e8ec}button.primary{background:var(--accent);color:#fff}button.primary:hover{background:#275d8a}' +
+  '.error{color:var(--red)}';
 
 // Sends a small HTML page. body is HTML already escaped by the caller.
 function sendPage(res, status, title, body) {
@@ -122,12 +135,23 @@ function sendPage(res, status, title, body) {
   });
   res.send(
     `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
-      `<title>${escapeHtml(title)}</title><style>${STYLE}</style></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`,
+      `<title>warifuri · ${escapeHtml(title)}</title><style>${STYLE}</style></head><body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`,
   );
 }
 
 function plainPage(res, status, title, text) {
   sendPage(res, status, title, `<p>${escapeHtml(text)}</p>`);
+}
+
+// How to start the login again, under a refusal that ends it.
+const RETRY =
+  '<h2>つなぎ直し方</h2><ul>' +
+  '<li>Claude Code: <code>/mcp</code> から warifuri を認証</li>' +
+  '<li>Codex: <code>codex mcp login warifuri</code></li></ul>' +
+  `<p class="sub">始めてから ${PENDING_MS / 60_000} 分以内に、許可まで済ませてください。</p>`;
+
+function retryPage(res, status, title, text) {
+  sendPage(res, status, title, `<p>${escapeHtml(text)}</p>${RETRY}`);
 }
 
 // The value of one cookie from the request, or ''.
@@ -325,18 +349,17 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     sendPage(
       res,
       status,
-      'warifuri への接続の許可',
-      `<p><strong>${escapeHtml(name)}</strong>(アプリが自分で名乗った名前)が、${escapeHtml(pending.github_login)} として warifuri のデータベースを使おうとしています。` +
-        `戻り先は <strong>${escapeHtml(host)}</strong> です。</p>` +
-        `<p>許可すると、このアプリはデータベースの全部を読めます。名前はアプリが自由に名乗れるので、戻り先の <code>${escapeHtml(pending.redirect_uri)}</code> に心当たりがあるかで確かめてください。心当たりがなければ断ってください。</p>` +
+      '接続の許可',
+      `<div class="app"><strong>${escapeHtml(name)}</strong><br><span class="sub">戻り先 </span><strong>${escapeHtml(host)}</strong></div>` +
+        `<p>許可すると、このアプリが ${escapeHtml(pending.github_login)} として、データベースを読み書きできます。</p>` +
         (error ? `<p class="error">${escapeHtml(error)}</p>` : '') +
         `<form method="post" action="${CONSENT_PATH}">` +
         `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">` +
-        `<label>この機械のデバイス<select name="device"><option value="">(選ばない)</option>${options}</select></label>` +
-        `<label>新しいデバイスの名前(書いたときはこちらを使います。英数字と . _ - の 1〜64 文字)` +
-        `<input type="text" name="new_device" maxlength="64" value="${escapeHtml(typed)}" autocomplete="off"></label>` +
-        `<div class="buttons"><button type="submit" name="action" value="approve">許可する</button>` +
-        `<button type="submit" name="action" value="deny">断る</button></div></form>`,
+        `<label>デバイス<select name="device"><option value="">(選ばない)</option>${options}</select></label>` +
+        `<label>新しいデバイス` +
+        `<input type="text" name="new_device" maxlength="64" value="${escapeHtml(typed)}" placeholder="英数字と . _ -" autocomplete="off"></label>` +
+        `<div class="buttons"><button type="submit" name="action" value="deny">断る</button>` +
+        `<button type="submit" name="action" value="approve" class="primary">許可する</button></div></form>`,
     );
   }
 
@@ -369,7 +392,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const id = readCookie(req, cookieName);
     const pending = store.takeGithubState(id, str(req.query.state));
     if (!pending) {
-      plainPage(res, 400, 'ログインを続けられません', 'warifuri から始めたログインの続きではないか、時間が切れています。ハーネスからつなぎ直してください。');
+      retryPage(res, 400, 'ログインを続けられません', '時間が切れたか、このログインを始めたのが warifuri ではありません。');
       return;
     }
     const code = str(req.query.code);
@@ -386,7 +409,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
       log(`warifuri: GitHub login failed: ${err.message}`);
       store.deletePending(id);
       clearCookie(res);
-      plainPage(res, 502, 'ログインを続けられません', 'GitHub に本人の確認を頼めませんでした。少し待ってから、つなぎ直してください。');
+      retryPage(res, 502, 'ログインを続けられません', 'GitHub に確認を頼めませんでした。少し待ってから、つなぎ直してください。');
       return;
     }
     if (!isAllowed(user)) {
@@ -403,7 +426,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const id = readCookie(req, cookieName);
     const pending = store.getPending(id);
     if (!pending || !pending.github_login) {
-      plainPage(res, 400, '許可の画面を開けません', '時間が切れたか、GitHub でのログインがまだです。ハーネスからつなぎ直してください。');
+      retryPage(res, 400, '許可の画面をひらけませんでした', '時間が切れたか、GitHub でのログインがまだです。');
       return;
     }
     renderConsent(res, 200, id, pending);
@@ -413,7 +436,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const id = readCookie(req, cookieName);
     const body = req.body ?? {};
     if (!store.checkCsrf(id, str(body.csrf))) {
-      plainPage(res, 403, '許可を受けつけられません', '確認の印が合わないか、時間が切れています。ハーネスからつなぎ直してください。');
+      retryPage(res, 403, '許可を受けつけられません', '確認の印が合わないか、時間が切れています。');
       return;
     }
     const pending = store.getPending(id);
@@ -426,6 +449,10 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const typed = str(body.new_device).trim();
     const device = typed || str(body.device);
     const actor = `github:${pending.github_login}`;
+    if (typed && str(body.device)) {
+      renderConsent(res, 400, id, pending, { error: 'デバイスか新しいデバイスの、どちらか一方にしてください。', typed, selected: str(body.device) });
+      return;
+    }
     if (!device) {
       renderConsent(res, 400, id, pending, { error: 'デバイスを選ぶか、新しい名前を書いてください。' });
       return;
@@ -444,7 +471,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const out = store.approve(id, device, { actor });
     clearCookie(res);
     if (!out) {
-      plainPage(res, 400, '許可を受けつけられません', '時間が切れています。ハーネスからつなぎ直してください。');
+      retryPage(res, 400, '許可を受けつけられません', '時間が切れています。');
       return;
     }
     backToClient(res, out, { code: out.code });
