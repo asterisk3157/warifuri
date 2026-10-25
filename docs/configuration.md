@@ -4,9 +4,9 @@
 
 ## 設定のファイル
 
-warifuri の設定と台帳は、データのフォルダにまとめます。既定のデータのフォルダは `~/.warifuri/` で、`WARIFURI_HOME` か、どのコマンドにも付けられる `--home` で変えられます。台帳も既定ではこのフォルダの `ledger.sqlite` なので、別の機械に移すときは、このフォルダを1つ運べば済みます。
+warifuri の設定と台帳は、データのフォルダにまとめます。既定のデータのフォルダは `~/.warifuri/`(Windows では `%USERPROFILE%\.warifuri`)で、`WARIFURI_HOME` か、どのコマンドにも付けられる `--home` で変えられます。台帳も既定ではこのフォルダの `ledger.sqlite` なので、別の機械に移すときは、このフォルダを1つ運べば済みます。
 
-設定は、データのフォルダの `warifuri.env` に、1行に1つ `名前=値` の形で書きます。`#` で始まる行は読みません。秘密は同じフォルダの `secrets.env` に分けて書き、本人だけが読めるようにしておきます(`chmod 600`)。どちらのファイルも warifuri が起動のたびに読むので、環境変数として読み込んでおく必要はありません。設定ファイルの中の相対的な道は、データのフォルダから読みます。
+設定は、データのフォルダの `warifuri.env` に、1行に1つ `名前=値` の形で書きます。`#` で始まる行は読みません。秘密は同じフォルダの `secrets.env` に分けて書き、本人だけが読めるようにしておきます(`chmod 600`)。Windows にはこの権限の仕組みがないので、warifuri は権限を確かめず、警告も出しません。ユーザーのフォルダの中に置けば、ほかのユーザーからは読めません。どちらのファイルも warifuri が起動のたびに読むので、環境変数として読み込んでおく必要はありません。設定ファイルの中の相対的な道は、データのフォルダから読みます。
 
 `warifuri init` は、データのフォルダを作り、すべての項目をコメントにした `warifuri.env` のひな形と、値の入っていない `secrets.env` を置きます。`secrets.env` は本人だけが読める形(600)で作ります。すでにあるファイルは書き換えないので、何度実行してもかまいません。
 
@@ -34,15 +34,19 @@ warifuri の設定と台帳は、データのフォルダにまとめます。�
 
 項目の値が正しくないときは、その項目を読むコマンドが起動を断り、何が正しくないかを出します。使わない項目の誤りでは止まりません。
 
+## 使う機械の設定
+
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と着手の確かめのフック(`warifuri hook gate`)が読みます。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。機械の鍵は設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+
 ## 項目
 
 <!-- settings:start -->
 | 名前 | 内容 | 既定 | 引数 | 秘密 | 使うコマンド |
 |---|---|---|---|---|---|
 | `WARIFURI_HOME` | データのフォルダ。設定ファイルと台帳を置く。設定ファイルの中では書けない | `~/.warifuri` | `--home` |  | すべて |
-| `WARIFURI_DB` | 台帳の SQLite のファイル | `WARIFURI_HOME/ledger.sqlite` | `--db` |  | import、key、backup、oauth、serve |
+| `WARIFURI_DB` | 台帳の SQLite のファイル | `WARIFURI_HOME/ledger.sqlite` | `--db` |  | import、key、backup、oauth、serve、connect |
 | `WARIFURI_HOST` | 待ち受けるアドレス。この機械の外から受けるときだけ変える | `127.0.0.1` | `--host` |  | serve |
-| `WARIFURI_PORT` | 待ち受けるポート | `8787` | `--port` |  | serve |
+| `WARIFURI_PORT` | 待ち受けるポート | `8787` | `--port` |  | serve、connect |
 | `WARIFURI_PUBLIC_URL` | ハーネスから見えるサーバーの URL。https で始まり、道を含まない。GitHub のログインに要る | なし | `--public-url` |  | serve |
 | `WARIFURI_GITHUB_USER` | ログインしてよい人の GitHub のユーザー名。GitHub のログインに要る | なし | `--github-user` |  | serve |
 | `WARIFURI_GITHUB_ID` | ログインしてよい人の GitHub の数値の ID。空なら最初のログインで覚える | なし |  |  | serve |
@@ -50,6 +54,9 @@ warifuri の設定と台帳は、データのフォルダにまとめます。�
 | `WARIFURI_GITHUB_CLIENT_SECRET` | GitHub の OAuth App の Client Secret。GitHub のログインに要る | なし |  | 秘密 | serve |
 | `WARIFURI_TRUST_PROXY` | 同じ機械のトンネルや逆プロキシを信じる範囲(loopback や段数)。回数の制限を呼び出し元ごとに数えるために使う | なし | `--trust-proxy` |  | serve |
 | `WARIFURI_REDIRECT_HOSTS` | ログインのあとに戻してよい https の先。claude.ai と claude.com に足す。カンマ区切り | なし |  |  | serve |
+| `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手の確かめのフックが読む | なし | `--url` |  | connect、hook |
+| `WARIFURI_DEVICE_KEY_FILE` | この機械の鍵を1行で置くファイル。本人だけが読めるようにする。connect が書き、着手の確かめのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
+| `WARIFURI_GATE` | 着手の確かめ。off にすると、持っているタスクがなくても編集を止めない | `on` |  |  | hook |
 <!-- settings:end -->
 
 一覧はコードの中の1つの表から作っています。項目を足したり変えたりしたら、`node scripts/settings-table.mjs --write` でこの表を書き直します。食い違ったままだとテストが落ちます。
