@@ -157,7 +157,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_SECRETARY_MORNING',
     section: 'secretary',
-    about: '朝の報告の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ',
+    about: '朝の時刻。秘書との会話に「朝の時間です」を送り、会話の秘書が朝の言葉を書いて質問する。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ',
     def: '07:00',
     commands: SECRETARY,
     check: (v) => parseWhen(v).error ?? null,
