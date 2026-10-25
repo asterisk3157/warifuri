@@ -198,6 +198,7 @@ test('cli: warifuri config shows the values, the GitHub login and the warnings',
 });
 
 test('the table in docs/configuration.md is the one made from the settings', () => {
-  const doc = fs.readFileSync(new URL('../docs/configuration.md', import.meta.url), 'utf8');
+  // A Windows checkout may turn line ends into CRLF; the table is made with LF.
+  const doc = fs.readFileSync(new URL('../docs/configuration.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(doc, withTable(doc), 'run node scripts/settings-table.mjs --write');
 });
