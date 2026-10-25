@@ -58,7 +58,7 @@ function seed(L) {
   const weed = L.createTask({ title: 'Weed the garden', mode: 'ai_worker', goal_id: bare.id, place_id: hobbyPlace.id }, ACTOR);
   const loose = L.createTask({ title: 'Loose task', mode: 'ai_worker', place_id: clubPlace.id }, ACTOR);
   const nowhere = L.createTask({ title: 'Nowhere task', mode: 'ai_worker' }, ACTOR);
-  const run = L.createHabit({ title: 'Run', rule: 'Mon Wed Fri 7:00', duration_min: 30, goal_id: research.id }, ACTOR);
+  const run = L.createHabit({ title: 'Run', rule: { days: ['月', '水', '金'], window: '07:00-07:30' }, duration_min: 30, goal_id: research.id }, ACTOR);
   return { research, bare, read, weed, loose, nowhere, run };
 }
 
@@ -386,7 +386,7 @@ test('import: bookings whose task did not come back are deleted and counted; oth
     { id: T2, title: 'Gone', mode: 'ai_worker', state: 'ready' },
   ];
   assert.equal(L.replaceFromSnapshot(doc(both), ACTOR).dropped_bookings, 0);
-  const habit = L.createHabit({ title: 'Stretch', rule: 'daily', duration_min: 10 }, ACTOR);
+  const habit = L.createHabit({ title: 'Stretch', rule: { days: 'daily' }, duration_min: 10 }, ACTOR);
   const span = { starts_at: '2026-10-25T10:00:00+09:00', ends_at: '2026-10-25T11:00:00+09:00' };
   const keep = L.book({ kind: 'task', task_id: T1, ...span }, ACTOR).booking;
   const gone = L.book({ kind: 'task', task_id: T2, ...span }, ACTOR).booking;

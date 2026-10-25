@@ -308,3 +308,37 @@ test('places lists every place with its paths, including places with no task, an
   const { data: only } = await call(laptop, 'places', { profile: 'research' });
   assert.deepEqual(only.places.map((p) => p.name), ['lab']);
 });
+
+test('habit makes, changes and stops a habit; a stopped habit stays with its records', async (t) => {
+  const { ledger, keys, connect } = await start(t);
+  const laptop = await connect(keys.laptop);
+  const { data: goal } = await call(laptop, 'create_goal', { title: 'Keep fit', mode: 'ai_worker' });
+  const { data: run } = await call(laptop, 'habit', {
+    title: 'Run', rule: { days: ['金', '月', '水'], window: '07:00-07:30' }, duration_min: 30, goal_id: goal.id,
+  });
+  assert.deepEqual(run.rule, { days: ['月', '水', '金'], window: '07:00-07:30' });
+  assert.equal(run.active, true);
+  const rec = ledger.records(run.id)[0];
+  assert.deepEqual([rec.action, rec.actor, rec.device], ['create', 'device-key', 'laptop']);
+
+  await refused(laptop, 'habit', { title: 'Run' }, /rule/);
+  await refused(laptop, 'habit', { title: 'Run', rule: { days: ['Mon'] }, duration_min: 30 }, /Mon は読めません/);
+  await refused(laptop, 'habit', { title: 'Run', rule: { days: 'daily', every: 2 }, duration_min: 30 }, /every は書けません/);
+  await refused(laptop, 'habit', { id: run.id, duration_min: 60 }, /収まりません/);
+  await refused(laptop, 'habit', { id: 'h_20261025000000_nohabt', title: 'x' }, /習慣はありません/);
+  await refused(laptop, 'habit', { id: goal.id, stop: true }, /習慣はありません/);
+  await refused(laptop, 'habit', { stop: true }, /id を渡します/);
+  await refused(laptop, 'habit', { id: run.id, stop: true, title: 'x' }, /stop と一緒には/);
+
+  const { data: changed } = await call(laptop, 'habit', { id: run.id, rule: { days: 'weekdays' }, duration_min: 45, goal_id: null });
+  assert.deepEqual(changed.rule, { days: 'weekdays' });
+  assert.equal(changed.goal_id, null);
+  assert.equal(changed.title, 'Run');
+
+  const { data: stopped } = await call(laptop, 'habit', { id: run.id, stop: true });
+  assert.equal(stopped.active, false);
+  assert.equal(ledger.records(run.id).at(-1).action, 'stop');
+  assert.equal(ledger.get(run.id).kind, 'habit');
+  const { data: again } = await call(laptop, 'habit', { id: run.id, active: true });
+  assert.equal(again.active, true);
+});

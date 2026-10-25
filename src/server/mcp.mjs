@@ -558,6 +558,40 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
   );
 
   tool(
+    'habit',
+    'Make, change or stop a habit (something that repeats and never ends: a weekly meeting, exercise, sleep). ' +
+      'Without id, makes one: title, rule and duration_min (minutes) are needed. rule: { days, window? }; days is ' +
+      '"daily", "weekdays" (月〜金) or a list such as ["月","水","金"]; window such as "07:00-07:30" is the part of the ' +
+      'day it goes in (an end not after the start runs past midnight), and duration_min must fit in it. goal_id links ' +
+      'it to a goal. With id, changes only the fields given; stop: true stops it (it is kept with its records, not ' +
+      'deleted), and active: true starts a stopped one again.',
+    {
+      id: z.string().min(1).optional(),
+      title: z.string().optional(),
+      // Loose here, so the ledger's checks say in Japanese what is wrong with a rule.
+      rule: z
+        .object({ days: z.union([z.enum(['daily', 'weekdays']), z.array(z.string())]).optional(), window: z.string().optional() })
+        .passthrough()
+        .optional(),
+      duration_min: z.number().int().optional(),
+      goal_id: clearable,
+      active: z.boolean().optional(),
+      stop: z.boolean().optional(),
+    },
+    async ({ id, stop, ...fields }) => {
+      const change = given(fields);
+      if (id === undefined) {
+        if (stop) return refusal(['止める習慣の id を渡します']);
+        return result(ledger.createHabit(change, writer));
+      }
+      if (ledger.get(id)?.kind !== 'habit') return refusal([`${id} という習慣はありません`]);
+      if (!stop) return result(ledger.updateHabit(id, change, writer));
+      if (Object.keys(change).length) return refusal(['stop と一緒には、ほかの項目を渡せません。直すときは別に呼びます']);
+      return result(ledger.stopHabit(id, writer));
+    },
+  );
+
+  tool(
     'place',
     'Register a place (a working directory that belongs to a profile), or change one by id. path: its directory on ' +
       'this device, absolute; null removes this device\'s path. Paths of other devices are set from those devices.',

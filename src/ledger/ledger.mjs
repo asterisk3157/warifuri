@@ -33,6 +33,8 @@ import {
   checkTask,
   checkBlock,
   checkHabit,
+  habitRuleText,
+  readHabitRule,
   checkPlace,
   checkBooking,
   checkAutonomy,
@@ -113,6 +115,14 @@ function present(row) {
   const out = { ...row };
   for (const f of FLAG_FIELDS) if (f in out) out[f] = out[f] === 1;
   if ('review' in out) out.review = out.review === null ? null : JSON.parse(out.review);
+  return out;
+}
+
+// A habit as returned to callers: its rule as an object (as stored text when it cannot be read).
+function habitView(row) {
+  if (!row) return row;
+  const out = present(row);
+  out.rule = readHabitRule(row.rule).rule ?? row.rule;
   return out;
 }
 
@@ -582,7 +592,7 @@ export function openLedger(path, options = {}) {
     const id = chooseId('habit', input.id, problems);
     const t = nowIso();
     const row = {
-      id, title: input.title, rule: input.rule, duration_min: input.duration_min,
+      id, title: input.title, rule: habitRuleText(input.rule), duration_min: input.duration_min,
       goal_id: input.goal_id ?? null, active: input.active ?? 1, created_at: t, updated_at: t,
     };
     problems.push(...checkHabit(row, { goalExists: row.goal_id ? !!getGoalRow(row.goal_id) : true }));
@@ -590,7 +600,7 @@ export function openLedger(path, options = {}) {
     return transaction(() => {
       insert('habits', HABIT_COLUMNS, row);
       record(w, 'habit', id, 'create', diff(null, row, HABIT_COLUMNS));
-      return present(getHabitRow(id));
+      return habitView(getHabitRow(id));
     });
   }
 
@@ -601,15 +611,16 @@ export function openLedger(path, options = {}) {
     const input = normalizeFlags(fields ?? {});
     const problems = unknownFields(input, HABIT_EDITABLE);
     const next = { ...before, ...input };
+    if ('rule' in input) next.rule = habitRuleText(input.rule);
     problems.push(...checkHabit(next, { goalExists: next.goal_id ? !!getGoalRow(next.goal_id) : true }));
     if (problems.length) throw new LedgerError(problems);
     const changes = diff(before, next, HABIT_COLUMNS);
-    if (Object.keys(changes).length === 0) return present(before);
+    if (Object.keys(changes).length === 0) return habitView(before);
     next.updated_at = nowIso();
     return transaction(() => {
       updateRow('habits', HABIT_COLUMNS, next);
       record(w, 'habit', id, action, changes);
-      return present(getHabitRow(id));
+      return habitView(getHabitRow(id));
     });
   }
 
@@ -1109,7 +1120,7 @@ export function openLedger(path, options = {}) {
       };
     }
     const habit = getHabitRow(id);
-    if (habit) return { kind: 'habit', ...present(habit), records: records(id) };
+    if (habit) return { kind: 'habit', ...habitView(habit), records: records(id) };
     const place = placeWithPaths(id);
     if (place) return { kind: 'place', ...place, records: records(id) };
     return null;

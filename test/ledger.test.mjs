@@ -419,20 +419,32 @@ test('places: one path per device', (t) => {
 test('habits: create and update with checks', (t) => {
   const { L } = fresh(t);
   const g = L.createGoal({ title: 'Keep training', outcome: 'Training is logged every week', mode: 'human', due: '2027-03-31' }, ACTOR);
+  const mwf = { days: ['金', '月', '水', '月'], window: '07:00-07:30' };
   refuses(() => L.createHabit({ title: 'Run', rule: '', duration_min: 0 }, ACTOR), 'rule', 'duration_min');
-  refuses(() => L.createHabit({ title: 'Run', rule: 'Mon 07:00', duration_min: 30, goal_id: 'g_20261024000000_nogoal' }, ACTOR), 'がありません');
-  const h = L.createHabit({ title: 'Run', rule: '毎週月水金 07:00-07:30', duration_min: 30, goal_id: g.id }, ACTOR);
+  refuses(() => L.createHabit({ title: 'Run', rule: mwf, duration_min: 30, goal_id: 'g_20261024000000_nogoal' }, ACTOR), 'がありません');
+  const h = L.createHabit({ title: 'Run', rule: mwf, duration_min: 30, goal_id: g.id }, ACTOR);
   assert.match(h.id, /^h_/);
   assert.equal(h.active, true);
+  // Stored as JSON in 月〜日 order without repeats, and returned as an object.
+  assert.deepEqual(h.rule, { days: ['月', '水', '金'], window: '07:00-07:30' });
+  assert.deepEqual(L.get(h.id).rule, h.rule);
+  assert.equal(L.records(h.id)[0].changes.rule.after, '{"days":["月","水","金"],"window":"07:00-07:30"}');
   const off = L.updateHabit(h.id, { active: false }, ACTOR);
   assert.equal(off.active, false);
   refuses(() => L.updateHabit(h.id, { duration_min: -5 }, ACTOR), 'duration_min');
+  refuses(() => L.updateHabit(h.id, { duration_min: 45 }, ACTOR), '収まりません');
   assert.equal(L.records(h.id).length, 2);
   assert.deepEqual(L.records(h.id)[1].changes.active, { before: 1, after: 0 });
   L.updateHabit(h.id, { active: true }, ACTOR);
+  // The same rule given as JSON text with its days in another order is no change.
+  L.updateHabit(h.id, { rule: '{"window":"07:00-07:30","days":["水","金","月"]}' }, ACTOR);
+  assert.equal(L.records(h.id).length, 3);
+  const daily = L.updateHabit(h.id, { rule: { days: 'daily' }, duration_min: 45 }, ACTOR);
+  assert.deepEqual(daily.rule, { days: 'daily' });
   const stopped = L.stopHabit(h.id, ACTOR);
   assert.equal(stopped.active, false);
   assert.equal(L.records(h.id).at(-1).action, 'stop');
+  assert.equal(L.get(h.id).kind, 'habit'); // stopped, not deleted
   refuses(() => L.stopHabit('h_20261024000000_nohabt', ACTOR), '習慣はありません');
 });
 
