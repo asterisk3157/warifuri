@@ -131,6 +131,27 @@ $env:WARIFURI_DEVICE_KEY = (Get-Content "$env:USERPROFILE\.warifuri\device.key" 
 
 Claude Code や Codex に「今日なにやる」「時間を取っておいて」「止まってるものある?」「次なにする」のように話しかけると、このスキルが使われます。
 
+## 秘書を動かす
+
+サーバーの機械では、秘書に決まった時刻の仕事をさせられます。毎日 23:00 にゴールが期日に間に合うかを見て予定を組み直し、07:00 に朝の報告を書き、日曜の 23:00 に受信箱を整理します。秘書の頭は、その機械の Claude Code(`claude -p`)です。cron やタスク スケジューラは要らず、`warifuri serve` が時刻を見て起こします。
+
+1. サーバーの機械に Claude Code を入れ、一度 `claude` を起動して、自分でログインします。warifuri はこのログインを読みません。
+2. 秘書を入れます。
+
+   ```bash
+   warifuri secretary enable
+   ```
+
+3. `warifuri serve` を動かし直します。起動のときに `secretary on:` と、仕事の時刻が出ます。
+
+すぐに1つ動かして確かめるときは、`warifuri serve` を動かしたまま、次を実行します。`claude` の出力は、データのフォルダの `secretary/logs/` に残ります。
+
+```bash
+warifuri secretary run morning
+```
+
+止めるときは `warifuri secretary disable` を実行し、`warifuri serve` を動かし直します。時刻や夜の時間帯は[設定](configuration.md)で変えられます。秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを渡すかどうかは、考えて決めてください。渡し方と仕組みは、[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+
 ## 別の機械から使う(GitHub のログイン)
 
 ほかの機械や、Claude の Web やアプリから使うときは、サーバーを外から届く場所に置き、GitHub のログインを設定します。GitHub の OAuth App の作り方、サーバーに渡す設定、使う機械での `warifuri connect --url https://<サーバー> --device <デバイスの名前>` の流れは、[構成](architecture.md)の「つなぎ方」と「着手ゲート」の節にあります。外に出すときは、前に HTTPS を置いてください。
