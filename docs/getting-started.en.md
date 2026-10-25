@@ -150,6 +150,8 @@ To try a job right away, keep `warifuri serve` running and run the command below
 warifuri secretary run morning
 ```
 
+You can talk to the secretary on the 秘書 (secretary) page of the Web screen (`/secretary`). Write in the box at the bottom and send; the secretary checks the ledger and replies, and its reports and proposals appear on the same page. Answer a proposal with 了承 (approve), 直して了承 (approve with a change) or 断る (refuse); the secretary carries out approved ones the next time it runs.
+
 To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times and the night hours are [settings](configuration.md). The secretary can use warifuri's tools only; the claude.ai connectors (mail, calendar) are off for it by default. Give it a calendar only on purpose; how, and how it works, is in the secretary plug-in section of the [architecture](architecture.md) (Japanese).
 
 ## Using it from another machine (GitHub login)
