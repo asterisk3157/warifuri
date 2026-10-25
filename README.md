@@ -63,6 +63,8 @@ If it says `command not found: warifuri`, add the `bin` folder under the path th
 
 - Principles: [the ideas behind it](docs/principles.md) (Japanese)
 - Getting started: [from install to connecting](docs/getting-started.en.md)
+- Usage: [what to ask your agents and the secretary](docs/usage.md) (Japanese)
+- Integrations: [Google Calendar and more](docs/integrations.md) (Japanese)
 - Architecture: [how it fits together](docs/architecture.md) (Japanese)
 - Configuration: [the list of settings](docs/configuration.md) (Japanese)
 

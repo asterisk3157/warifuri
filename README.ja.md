@@ -62,7 +62,9 @@ warifuri connect
 ## ドキュメント
 
 - 設計思想:[原則](docs/principles.md)
-- はじめかた:[インストールから接続まで](docs/getting-started.md)
+- 導入方法:[インストールから接続まで](docs/getting-started.md)
+- 使い方:[AI エージェントと秘書に頼めること](docs/usage.md)
+- 連携の例:[Google カレンダーなど](docs/integrations.md)
 - 構成:[全体の仕組み](docs/architecture.md)
 - 設定:[設定項目の一覧](docs/configuration.md)
 
