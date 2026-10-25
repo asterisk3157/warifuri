@@ -65,6 +65,38 @@ test('the data directory: --home, then WARIFURI_HOME, then ~/.warifuri; never fr
   if (process.platform === 'win32') assert.equal(loadConfig({ env: { WARIFURI_HOME: '~\\wf' } }).home, path.join(os.homedir(), 'wf'));
 });
 
+test('settings files with a UTF-8 BOM, or saved as UTF-16, read the same', () => {
+  const text = '# 設定\r\nWARIFURI_PORT=1001\r\nWARIFURI_GITHUB_USER=from-file\r\n';
+  const utf16be = (s) => Buffer.from(s, 'utf16le').swap16();
+  const files = {
+    bom: [Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]), null],
+    le: [Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]), 'UTF-16LE'],
+    be: [Buffer.concat([Buffer.from([0xfe, 0xff]), utf16be(text)]), 'UTF-16BE'],
+    'le without a BOM': [Buffer.from(text, 'utf16le'), 'UTF-16LE'],
+  };
+  for (const [name, [bytes, encoding]] of Object.entries(files)) {
+    const dir = home({ settings: bytes });
+    const cfg = loadConfig({ env: { WARIFURI_HOME: dir } });
+    assert.deepEqual(cfg.problems, [], name);
+    assert.equal(cfg.values.WARIFURI_PORT, '1001', name);
+    assert.equal(cfg.values.WARIFURI_GITHUB_USER, 'from-file', name);
+    const warned = cfg.warnings.filter((w) => /save it as UTF-8/.test(w));
+    if (encoding) {
+      assert.equal(warned.length, 1, name);
+      assert.match(warned[0], new RegExp(`warifuri\\.env is saved as ${encoding}`), name);
+      assert.match(warned[0], /UTF-8 で保存し直してください/, name);
+    } else {
+      assert.deepEqual(cfg.warnings, [], name);
+    }
+  }
+  // secrets.env too, and a secret given as a file.
+  const dir = home({ secrets: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('WARIFURI_GITHUB_CLIENT_SECRET=s3cret\n', 'utf16le')]) });
+  assert.equal(loadConfig({ env: { WARIFURI_HOME: dir } }).values.WARIFURI_GITHUB_CLIENT_SECRET, 's3cret');
+  fs.writeFileSync(path.join(dir, 'secret.txt'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('from-a-file\n')]));
+  const viaFile = loadConfig({ env: { WARIFURI_HOME: home(), WARIFURI_GITHUB_CLIENT_SECRET_FILE: path.join(dir, 'secret.txt') } });
+  assert.equal(viaFile.values.WARIFURI_GITHUB_CLIENT_SECRET, 'from-a-file');
+});
+
 test('settings files written with CRLF line endings read the same', () => {
   const dir = home({
     settings: '# a comment\r\nWARIFURI_PORT=1001\r\nWARIFURI_GITHUB_USER="from-file"\r\n',

@@ -154,11 +154,42 @@ const expandTilde = (p) =>
   p === '~' || p.startsWith('~/') || (path.sep === '\\' && p.startsWith('~\\')) ? path.join(os.homedir(), p.slice(1)) : p;
 const clean = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 
+// The text of a file saved as UTF-8 (with or without a BOM) or as UTF-16, which Windows
+// editors and the >> of Windows PowerShell 5.1 may write. Returns { text, encoding }:
+// encoding is null for UTF-8, else 'UTF-16LE' or 'UTF-16BE'.
+export function decodeText(buf) {
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return { text: buf.subarray(3).toString('utf8'), encoding: null };
+  let encoding = null;
+  let start = 0;
+  if (buf[0] === 0xff && buf[1] === 0xfe) [encoding, start] = ['UTF-16LE', 2];
+  else if (buf[0] === 0xfe && buf[1] === 0xff) [encoding, start] = ['UTF-16BE', 2];
+  else if (buf.length >= 4) {
+    // No BOM: mostly-ASCII text in UTF-16 has a NUL in every other byte.
+    let even = 0;
+    let odd = 0;
+    for (let i = 0; i < buf.length; i++) if (buf[i] === 0) i % 2 ? odd++ : even++;
+    const pairs = buf.length / 2;
+    if (odd > pairs / 2 && odd > even) encoding = 'UTF-16LE';
+    else if (even > pairs / 2 && even > odd) encoding = 'UTF-16BE';
+  }
+  if (!encoding) return { text: buf.toString('utf8'), encoding: null };
+  const body = Buffer.from(buf.subarray(start, start + ((buf.length - start) & ~1)));
+  if (encoding === 'UTF-16BE') body.swap16();
+  return { text: body.toString('utf16le').replace(/^﻿/, ''), encoding };
+}
+
 // Reads one settings file of the data directory: { values, mode } or null when it is absent.
-function readFile(file, problems) {
+function readFile(file, problems, warnings) {
   let text;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    const decoded = decodeText(fs.readFileSync(file));
+    text = decoded.text;
+    if (decoded.encoding) {
+      warnings.push(
+        `${file} is saved as ${decoded.encoding}; it was read, but please save it as UTF-8` +
+          ` (このファイルは ${decoded.encoding} で保存されています。読み込みましたが、UTF-8 で保存し直してください)`,
+      );
+    }
   } catch (err) {
     if (err.code !== 'ENOENT') problems.push(`cannot read ${file}: ${err.message}`);
     return null;
@@ -176,7 +207,7 @@ function readFile(file, problems) {
 // Reads <NAME>_FILE: the file's text without one trailing newline.
 function readSecretFile(file, problems, label) {
   try {
-    return fs.readFileSync(file, 'utf8').replace(/\r?\n$/, '');
+    return decodeText(fs.readFileSync(file)).text.replace(/\r?\n$/, '');
   } catch (err) {
     problems.push(`${label}: cannot read ${file}: ${err.message}`);
     return undefined;
@@ -201,8 +232,8 @@ export function loadConfig({ flags = {}, env = process.env, command = 'config' }
 
   const settingsPath = path.join(home, SETTINGS_FILE);
   const secretsPath = path.join(home, SECRETS_FILE);
-  const settingsFile = readFile(settingsPath, problems);
-  const secretsFile = readFile(secretsPath, problems);
+  const settingsFile = readFile(settingsPath, problems, warnings);
+  const secretsFile = readFile(secretsPath, problems, warnings);
   // Later layers lose: secrets.env is read before warifuri.env.
   const layers = [
     { source: 'env', values: env },

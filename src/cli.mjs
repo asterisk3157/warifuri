@@ -15,6 +15,7 @@
 //   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
 //                    [--no-hook] [--no-skills] [--force] [--dry-run]
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
+//   warifuri --version               (also -v; the version of this package)
 //
 // Every command takes --home <dir> (the data directory) and --db <ledger.sqlite>. The flags
 // override the settings of src/config.mjs, which come from the environment, then from
@@ -38,6 +39,8 @@ import { PROFILES_DIR } from './knowledge/profiles.mjs';
 import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
 
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
 const USAGE = [
   'usage: warifuri init',
   '       warifuri config',
@@ -53,6 +56,7 @@ const USAGE = [
   '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
   '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
   '       warifuri hook gate',
+  '       warifuri --version',
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
   'when neither is given) and --db <ledger.sqlite> (or WARIFURI_DB; ledger.sqlite in the',
@@ -481,6 +485,10 @@ function main(argv) {
     if (rest[0] !== 'gate') return usage('hook takes gate');
     runHook(rest);
     return undefined;
+  }
+  if (command === '--version' || command === '-v') {
+    process.stdout.write(`${VERSION}\n`);
+    return 0;
   }
   if (command === '--help' || command === '-h') {
     process.stdout.write(`${USAGE}\n`);

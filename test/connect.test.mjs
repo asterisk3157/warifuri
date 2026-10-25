@@ -9,7 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { CLI } from './cli.mjs';
 import { openLedger } from '../src/ledger/ledger.mjs';
-import { connect, mergeGateHook, setEnvLine, codexServer, CLAUDE_MATCHER } from '../src/client/connect.mjs';
+import { connect, mergeGateHook, setEnvLine, codexServer, gateCommand, CLAUDE_MATCHER } from '../src/client/connect.mjs';
 import { loadConfig } from '../src/config.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-connect-'));
@@ -76,7 +76,15 @@ function world({ harnesses = ['claude', 'codex'], ledger = true } = {}) {
   // Only the fake bin and node: a real harness can never be reached. Windows also needs its
   // own folder, for cmd.exe.
   const sys = process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: '.COM;.EXE;.BAT;.CMD' } : {};
-  const dirs = [bin, path.dirname(process.execPath), ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot, 'System32')] : [])];
+  // node comes from a folder of its own, since a warifuri installed beside it would
+  // otherwise be found on PATH (Windows uses node's folder, as copying node is heavy).
+  let nodeDir = path.dirname(process.execPath);
+  if (process.platform !== 'win32') {
+    nodeDir = path.join(root, 'node');
+    fs.mkdirSync(nodeDir);
+    fs.symlinkSync(process.execPath, path.join(nodeDir, 'node'));
+  }
+  const dirs = [bin, nodeDir, ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot, 'System32')] : [])];
   const env = { ...sys, PATH: dirs.join(path.delimiter), HOME: user, USERPROFILE: user, WARIFURI_HOME: data, FAKE_LOG: log };
   const calls = () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   return { root, user, data, bin, env, log, calls };
@@ -266,4 +274,32 @@ test('the small pieces: hook merge, env lines, the Codex table', () => {
 
   assert.deepEqual(codexServer('[other]\nurl = "x"\n[mcp_servers.warifuri]\nurl = "https://a/mcp"\nbearer_token_env_var = "K"\n[next]\nurl = "y"'), { url: 'https://a/mcp', bearer: 'K' });
   assert.equal(codexServer('[mcp_servers.other]\nurl = "x"'), null);
+});
+
+test('the hook runs warifuri.cmd on Windows when warifuri is on PATH, so the execution policy does not matter', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'path-'));
+  // Named as PATHEXT spells it: Windows ignores case, but Linux, where this also runs, does not.
+  fs.writeFileSync(path.join(dir, 'warifuri.CMD'), '');
+  const win = { PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' };
+  assert.equal(gateCommand({ env: win, platform: 'win32', home: dir, homeIsDefault: true }), 'warifuri.cmd hook gate');
+  assert.equal(gateCommand({ env: win, platform: 'win32', home: 'C:\\data', homeIsDefault: false }), 'warifuri.cmd hook gate --home "C:\\data"');
+  if (process.platform !== 'win32') {
+    fs.writeFileSync(path.join(dir, 'warifuri'), '');
+    fs.chmodSync(path.join(dir, 'warifuri'), 0o755);
+    assert.equal(gateCommand({ env: { PATH: dir }, platform: 'linux', home: dir, homeIsDefault: true }), 'warifuri hook gate');
+  }
+  // Not on PATH: node and this package's bin, on every platform.
+  assert.match(gateCommand({ env: { PATH: '' }, platform: 'win32', home: dir, homeIsDefault: true }), /warifuri\.mjs" hook gate$/);
+});
+
+test('a warifuri.env saved as UTF-16 is written back as UTF-8, with its lines kept', () => {
+  const w = world({ harnesses: ['claude'] });
+  const text = 'WARIFURI_GATE=on\r\n';
+  fs.writeFileSync(path.join(w.data, 'warifuri.env'), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]));
+  const r = run(w, ['--device', 'laptop', '--no-skills']);
+  assert.equal(r.status, 0, r.all);
+  const now = fs.readFileSync(path.join(w.data, 'warifuri.env'), 'utf8');
+  assert.ok(!now.includes('\0'), now);
+  assert.match(now, /^WARIFURI_GATE=on\r?$/m);
+  assert.match(now, /^WARIFURI_SERVER_URL=http:\/\/127\.0\.0\.1:8787$/m);
 });

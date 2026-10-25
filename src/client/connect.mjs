@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openLedger } from '../ledger/ledger.mjs';
 import { oauthConfig } from '../server/oauth.mjs';
-import { initHome, SETTINGS_FILE } from '../config.mjs';
+import { initHome, decodeText, SETTINGS_FILE } from '../config.mjs';
 import { readKey } from './gate.mjs';
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -162,11 +162,13 @@ export function mergeGateHook(json, { matcher, handler }) {
   return { changed: true, json: out };
 }
 
-// The command line of the hook. `warifuri` when it is on PATH (npm puts warifuri.cmd there on
-// Windows, which the shell finds by the same name); otherwise node and this package's bin.
+// The command line of the hook. `warifuri` when it is on PATH, or `warifuri.cmd` on Windows:
+// npm also puts a warifuri.ps1 there, which PowerShell may refuse to run under its execution
+// policy. Otherwise node and this package's bin.
 export function gateCommand({ env, platform, home, homeIsDefault }) {
   const q = (s) => `"${s}"`;
-  const head = findOnPath('warifuri', env, platform) ? 'warifuri' : `${q(process.execPath)} ${q(BIN)}`;
+  const onPath = findOnPath('warifuri', env, platform) ? (platform === 'win32' ? 'warifuri.cmd' : 'warifuri') : null;
+  const head = onPath ?? `${q(process.execPath)} ${q(BIN)}`;
   return `${head} hook gate${homeIsDefault ? '' : ` --home ${q(home)}`}`;
 }
 
@@ -255,9 +257,11 @@ export function connect(cfg, opts, ctx = {}) {
 
   // Remember the URL in warifuri.env, where the hook reads it.
   const settingsFile = cfg.files.settings;
+  // A file saved as UTF-16 or with a BOM is read as text, and written back as UTF-8.
+  const readSettings = () => decodeText(fs.readFileSync(settingsFile)).text;
   let settingsText = '';
   try {
-    settingsText = fs.readFileSync(settingsFile, 'utf8');
+    settingsText = readSettings();
   } catch {
     // written below
   }
@@ -267,7 +271,7 @@ export function connect(cfg, opts, ctx = {}) {
     if (!dry) {
       try {
         if (!fs.existsSync(settingsFile)) initHome(cfg.home);
-        fs.writeFileSync(settingsFile, setEnvLine(fs.readFileSync(settingsFile, 'utf8'), 'WARIFURI_SERVER_URL', url));
+        fs.writeFileSync(settingsFile, setEnvLine(readSettings(), 'WARIFURI_SERVER_URL', url));
       } catch (err) {
         problems.push(`cannot write ${settingsFile}: ${err.message}`);
       }
