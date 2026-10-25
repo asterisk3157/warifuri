@@ -182,7 +182,8 @@ function buildServer(ledger, device, knowledge) {
         "Read a profile's knowledge before working: people.md and knowledge.md as text, and the file names in " +
         'knowledge/ and procedures/. place: the place id or the directory you work in (its place gives the profile); ' +
         'profile: that profile (wins over place). name: one of the returned file names (such as procedures/release.md), ' +
-        'to read that file instead. Text past 64 KiB is cut (truncated: true). Notes marked 未確認 are guesses, not facts.',
+        'to read that file instead. Text past 64 KiB is cut (truncated: true). Notes marked 未確認 are guesses, not facts. ' +
+        "inbox is the profile's inbox.md: agents' notes waiting for the secretary to sort, not yet knowledge.",
       inputSchema: {
         place: z.string().min(1).optional(),
         profile: z.string().min(1).optional(),

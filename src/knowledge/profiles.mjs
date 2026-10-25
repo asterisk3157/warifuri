@@ -115,8 +115,8 @@ function listFolder(dir) {
   return { names: names.slice(0, MAX_LIST), onDisk, more: Math.max(0, names.length - MAX_LIST) };
 }
 
-// What an agent reads before working in a profile: people.md and knowledge.md (null when
-// absent), and the names in knowledge/ and procedures/ as "knowledge/<file>". With name (one
+// What an agent reads before working in a profile: people.md, knowledge.md and inbox.md
+// (null when absent; the inbox is for the secretary to sort), and the names in knowledge/ and procedures/ as "knowledge/<file>". With name (one
 // of those names), that one file instead.
 export function readContext(home, profile, { name } = {}) {
   const dir = profileDir(home, profile);
@@ -137,6 +137,7 @@ export function readContext(home, profile, { name } = {}) {
     exists: fs.existsSync(dir),
     people: readCapped(path.join(dir, 'people.md')),
     knowledge: readCapped(path.join(dir, 'knowledge.md')),
+    inbox: readCapped(path.join(dir, 'inbox.md')),
     files: Object.fromEntries(FOLDERS.map((f) => [f, listings[f].names.map((n) => `${f}/${n}`)])),
     more: Object.fromEntries(FOLDERS.map((f) => [f, listings[f].more])),
   };
