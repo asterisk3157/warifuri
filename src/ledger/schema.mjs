@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -276,6 +276,29 @@ export const MIGRATIONS = [
   INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
     SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v3;
   DROP TABLE records_v3;
+  CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
+  CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
+    BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+  `
+  -- Records may also name 'settings': a change of the person's settings kept in the settings
+  -- table (such as the profile the Web screens show). The table is rebuilt as in version 3.
+  ALTER TABLE records RENAME TO records_v4;
+  CREATE TABLE records (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        TEXT NOT NULL,
+    actor     TEXT NOT NULL CHECK (length(actor) > 0),
+    device    TEXT,
+    entity    TEXT NOT NULL CHECK (entity IN ('goal','task','habit','place','block','autonomy','import','device','oauth','knowledge','booking','settings')),
+    entity_id TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    changes   TEXT NOT NULL
+  );
+  INSERT INTO records (id, at, actor, device, entity, entity_id, action, changes)
+    SELECT id, at, actor, device, entity, entity_id, action, changes FROM records_v4;
+  DROP TABLE records_v4;
   CREATE INDEX IF NOT EXISTS records_entity ON records(entity_id);
   CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;

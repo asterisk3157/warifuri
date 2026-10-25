@@ -352,7 +352,10 @@ function runServe(args) {
   }
   let server;
   try {
-    server = createServer({ ledger, home: cfg.home, oauth: oauth.config, trustProxy: values.WARIFURI_TRUST_PROXY });
+    server = createServer({
+      ledger, home: cfg.home, oauth: oauth.config, trustProxy: values.WARIFURI_TRUST_PROXY,
+      host: values.WARIFURI_HOST, publicUrl: values.WARIFURI_PUBLIC_URL ?? null,
+    });
   } catch (err) {
     ledger.close();
     return usage(`WARIFURI_TRUST_PROXY (--trust-proxy): ${err.message}`);
@@ -370,6 +373,13 @@ function runServe(args) {
       process.stdout.write(`warifuri: GitHub login on for ${oauth.config.githubUser}${oauth.config.githubId ? ` (id ${oauth.config.githubId})` : ''}, at ${oauth.config.publicUrl}/mcp\n`);
     } else {
       process.stdout.write(`warifuri: GitHub login off (missing ${oauth.missing.join(', ')}); only device keys work\n`);
+    }
+    const base = (values.WARIFURI_PUBLIC_URL ?? `http://${host}:${addr.port}`).replace(/\/$/, '');
+    if (server.web.mode === 'open') {
+      process.stdout.write(`warifuri: web screens at ${base}/calendar (open from this machine, no login)\n`);
+    } else {
+      process.stdout.write(`warifuri: web screens at ${base}/calendar; log in once with this URL (single use, 15 minutes):\n`);
+      process.stdout.write(`warifuri:   ${base}/web/login?token=${server.web.issueLogin()}\n`);
     }
   });
   let stopping = false;
