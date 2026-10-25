@@ -77,7 +77,7 @@ test('schema: a version 3 file gains bookings and devices.last_seen_at, keeps it
   assert.throws(() => ins.run('2026-10-03T00:00:00.000Z', 'human', null, 'booking', 'b1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal(SCHEMA_VERSION, 5);
   const L = openLedger(file, { now: handClock().now });
   assert.deepEqual(L.listDevices().map((d) => [d.name, d.last_seen_at]), [['laptop', null]]);
   assert.deepEqual(L.records('hobby').map((r) => [r.id, r.entity]), [[2, 'knowledge']]);
@@ -87,11 +87,11 @@ test('schema: a version 3 file gains bookings and devices.last_seen_at, keeps it
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '4');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '5');
   assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'bookings_starts'").get());
   assert.equal(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'records_v3'").get(), undefined);
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);
-  check.prepare("UPDATE meta SET value = '5' WHERE key = 'schema_version'").run();
+  check.prepare("UPDATE meta SET value = '6' WHERE key = 'schema_version'").run();
   check.close();
   assert.throws(() => openLedger(file), /newer than this warifuri/);
 });

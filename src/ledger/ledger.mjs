@@ -877,6 +877,57 @@ export function openLedger(path, options = {}) {
     transaction(() => record(w, 'knowledge', profile, 'note', changes));
   }
 
+  // Every order between tasks, as { before_id, after_id }.
+  function blocks() {
+    return all('SELECT before_id, after_id FROM blocks ORDER BY before_id, after_id').map((r) => ({ ...r }));
+  }
+
+  // The person's settings kept in the settings table under one prefix (profile.name and so
+  // on), as { name: value }. Keys of the server's own (github_id) have no prefix and are
+  // never returned here.
+  const SETTINGS_PREFIX = /^[a-z][a-z_]{0,31}$/;
+  const SETTINGS_NAME = /^[a-z][a-z_]{0,31}$/;
+  function checkPrefix(prefix) {
+    if (typeof prefix !== 'string' || !SETTINGS_PREFIX.test(prefix)) throw new LedgerError(['設定の区分の名前は、英小文字と _ です']);
+  }
+  function getSettings(prefix) {
+    checkPrefix(prefix);
+    const out = {};
+    for (const r of all('SELECT key, value FROM settings WHERE substr(key, 1, ?) = ? ORDER BY key', prefix.length + 1, `${prefix}.`)) out[r.key.slice(prefix.length + 1)] = r.value;
+    return out;
+  }
+
+  // Writes settings under a prefix: { name: string } sets one, { name: null } removes it.
+  // One record (entity 'settings', the prefix as its id) lists what changed; nothing is
+  // written or recorded when nothing changes. The caller checks the values.
+  function setSettings(prefix, values, opts) {
+    const w = requireWriter(opts);
+    checkPrefix(prefix);
+    const problems = [];
+    for (const [k, v] of Object.entries(values ?? {})) {
+      if (!SETTINGS_NAME.test(k)) problems.push(`設定の名前 ${k} は、英小文字と _ で書きます`);
+      if (v !== null && typeof v !== 'string') problems.push(`設定 ${k} の値は文字列です`);
+    }
+    if (problems.length) throw new LedgerError(problems);
+    const before = getSettings(prefix);
+    const changes = {};
+    for (const [k, v] of Object.entries(values)) if ((before[k] ?? null) !== v) changes[k] = { before: before[k] ?? null, after: v };
+    if (Object.keys(changes).length === 0) return before;
+    const t = nowIso();
+    return transaction(() => {
+      for (const [k, { after }] of Object.entries(changes)) {
+        if (after === null) db.prepare('DELETE FROM settings WHERE key = ?').run(`${prefix}.${k}`);
+        else {
+          db.prepare(
+            'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+          ).run(`${prefix}.${k}`, after, t);
+        }
+      }
+      record(w, 'settings', prefix, 'update', changes);
+      return getSettings(prefix);
+    });
+  }
+
   function records(entityId) {
     return all('SELECT * FROM records WHERE entity_id = ? ORDER BY id', entityId).map((r) => ({
       ...r,
@@ -1247,6 +1298,9 @@ export function openLedger(path, options = {}) {
     stale,
     records,
     recordNote,
+    blocks,
+    getSettings,
+    setSettings,
     addDevice,
     issueKey,
     revokeKey,

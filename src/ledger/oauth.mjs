@@ -82,6 +82,17 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
     });
   }
 
+  // For each app and device that ever got a token: when the newest token was issued
+  // (last_at) and whether one is still live. Never a token or its hash.
+  function tokenActivity() {
+    return all(
+      'SELECT client_id, device, max(created_at) AS last_at, ' +
+        'max(CASE WHEN revoked_at IS NULL AND expires_at > ? THEN 1 ELSE 0 END) AS live ' +
+        'FROM oauth_tokens GROUP BY client_id, device ORDER BY client_id, device',
+      iso(nowMs()),
+    ).map((r) => ({ client_id: r.client_id, device: r.device, last_at: r.last_at, live: r.live === 1 }));
+  }
+
   // Authorization requests. createPending returns the pending id (for the browser's cookie)
   // and the state to send to GitHub; both are shown here only.
   function createPending({ clientId, redirectUri, codeChallenge, scopes, state }) {
@@ -344,6 +355,7 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
     registerClient,
     getClient,
     listClients,
+    tokenActivity,
     createPending,
     getPending,
     takeGithubState,

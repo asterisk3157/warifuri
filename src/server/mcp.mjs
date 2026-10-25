@@ -22,6 +22,8 @@ import { STATES, MODES, LOADS, BOOKING_KINDS, isValidId } from '../ledger/rules.
 import { LedgerError } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
+import { rateLimit } from './limit.mjs';
+import { createWeb } from './web.mjs';
 import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
 
 const VERSION = '0.0.0';
@@ -534,27 +536,6 @@ async function handleMcp(ledger, knowledge, req, res) {
   await transport.handleRequest(req, res);
 }
 
-// A fixed window per caller's address: at most `max` requests in each `windowMs`. Windows
-// that have ended are swept when many addresses are kept.
-function rateLimit({ max, windowMs, now = Date.now }) {
-  const hits = new Map();
-  return (req, res, next) => {
-    const t = now();
-    if (hits.size > 10_000) for (const [k, h] of hits) if (h.reset <= t) hits.delete(k);
-    let h = hits.get(req.ip);
-    if (!h || h.reset <= t) {
-      h = { count: 0, reset: t + windowMs };
-      hits.set(req.ip, h);
-    }
-    h.count += 1;
-    if (h.count > max) {
-      res.status(429).set('Retry-After', String(Math.ceil((h.reset - t) / 1000))).json({ error: 'too many requests' });
-      return;
-    }
-    next();
-  };
-}
-
 // The HTTP API for scripts such as hooks. Machine keys only: OAuth tokens are issued for /mcp
 // alone (their resource), and a script on a machine has its key, not a login.
 function apiRouter(ledger, limit) {
@@ -595,6 +576,9 @@ function apiRouter(ledger, limit) {
 // home: the data directory, whose profiles/ the context and note tools use; without it they
 // refuse. secretary: true or false says whether agents' notes go to the inbox; left out, it
 // is read from plugins.yaml in home on each note.
+// host: the address the server listens on, and publicUrl the public URL (WARIFURI_PUBLIC_URL,
+// also when the GitHub login is off): together with trustProxy they decide whether the Web
+// screens (web.mjs) open without a login. app.locals.web is { mode, issueLogin }.
 export function createApp({
   ledger,
   home = null,
@@ -603,6 +587,9 @@ export function createApp({
   github,
   trustProxy,
   apiLimit = { max: 600, windowMs: 60_000 },
+  host = '127.0.0.1',
+  publicUrl = oauth?.publicUrl ?? null,
+  webLimit = apiLimit,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -630,6 +617,9 @@ export function createApp({
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
   app.use('/api', apiRouter(ledger, apiLimit));
+  const web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, limit: webLimit });
+  app.use(web.router);
+  app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };
 
   app.use((req, res) => sendText(res, 404, 'not found'));
   // Errors from the routes above; the message may come from a library, so it is not echoed.
@@ -641,6 +631,10 @@ export function createApp({
   return app;
 }
 
+// The HTTP server; server.web is the app's { mode, issueLogin } for the Web screens.
 export function createServer(options) {
-  return http.createServer(createApp(options));
+  const app = createApp(options);
+  const server = http.createServer(app);
+  server.web = app.locals.web;
+  return server;
 }
