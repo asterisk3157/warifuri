@@ -10,6 +10,25 @@ export const HUMAN_TIME_MODES = ['human_with_ai', 'human'];
 export const LOADS = ['heavy', 'normal', 'light'];
 export const BODY_MAX = 2000;
 export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
+// The kinds of the secretary's actions whose autonomy is kept (原則13), with the stage of
+// each (2: its own place, 3: the database and knowledge). Stage 4 (going outside, or what
+// cannot be undone) is never allowed, so no kind of it is here. A new kind is added here.
+export const AUTONOMY_KINDS = [
+  { kind: 'reschedule_block', label: 'ずれた予定の組み直し', stage: 2 },
+  { kind: 'tidy_inbox', label: '受信箱の整理', stage: 2 },
+  { kind: 'close_forgotten', label: '閉じ忘れたタスクを閉じる', stage: 3 },
+  { kind: 'move_task', label: 'タスクをほかのゴールへ移す', stage: 3 },
+  { kind: 'bundle_loose_tasks', label: 'ゴールにつながっていないタスクを束ねる', stage: 3 },
+  { kind: 'add_knowledge', label: 'ナレッジに入れる', stage: 3 },
+  { kind: 'split_knowledge', label: 'ナレッジを分ける', stage: 3 },
+  { kind: 'mark_stale_knowledge', label: 'ナレッジに古い印を付ける', stage: 3 },
+];
+// The outcome of one proposal: approved as proposed, approved with changes, refused, or
+// cancelled by the person after it was done.
+export const AUTONOMY_OUTCOMES = ['approved', 'changed', 'refused', 'revoked'];
+// Approvals in a row that raise a kind to act_then_tell: the default the person agreed to
+// when installing warifuri (原則13). It changes only on the person's word.
+export const AUTONOMY_STREAK = 3;
 export const BOOKING_KINDS = ['task', 'habit', 'fixed'];
 export const BOOKING_MAX_MS = 24 * 60 * 60 * 1000;
 
@@ -233,6 +252,9 @@ export function checkPlace(row) {
 export function checkAutonomy(row) {
   const p = [];
   if (isBlank(row.kind)) p.push('自律度には、動きの種類(kind)が要ります');
+  else if (!AUTONOMY_KINDS.some((k) => k.kind === row.kind)) {
+    p.push(`${row.kind} という動きの種類はありません。種類は ${AUTONOMY_KINDS.map((k) => k.kind).join(', ')} です(原則13)`);
+  }
   if (!AUTONOMY_LEVELS.includes(row.level)) p.push(`自律度は ${AUTONOMY_LEVELS.join(', ')} のどちらかです(原則13)`);
   if (!isNonNegInt(row.approvals_in_row)) p.push('approvals_in_row は0以上の整数です');
   if (!isNonNegInt(row.revokes)) p.push('revokes は0以上の整数です');
