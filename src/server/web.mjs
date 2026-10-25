@@ -9,7 +9,8 @@
 //   machine" means a loopback socket, no forwarding headers, and a Host header naming
 //   localhost, 127.0.0.1 or [::1] (so a page elsewhere cannot rebind its name to us).
 // - Login: otherwise, a browser needs a session cookie. `warifuri serve` prints a one-time
-//   login URL at startup (a random token, single use, 15 minutes); opening it sets an
+//   login URL at startup (a random token, single use, 15 minutes). The token rides after the
+//   # so that it never reaches a proxy or a server log: the page posts it back, and that sets an
 //   HttpOnly, SameSite=Strict cookie (Secure over https). Sessions live in memory, so a
 //   restart ends them and prints a new URL.
 // Device keys and OAuth tokens are never taken here, as cookies or otherwise. No response
@@ -288,16 +289,47 @@ export function createWeb({
   const limited = rateLimit(limit);
   router.use('/web', limited);
 
-  // The one-time login: uses the token up, starts a session, and moves on to the calendar
-  // with a page of its own, so that the next request is same-site and the Strict cookie goes.
+  // A write from a browser: JSON from this origin only. A form from elsewhere cannot send
+  // application/json, and a script elsewhere is stopped by the Origin check.
+  const sameOrigin = (req, res, next) => {
+    const site = req.headers['sec-fetch-site'];
+    const from = req.headers.origin;
+    const own = new Set([origin(req), `${req.protocol}://${req.get('host')}`]);
+    if ((site !== undefined && site !== 'same-origin') || typeof from !== 'string' || !own.has(from)) {
+      res.status(403).json({ error: 'cross-origin request refused' });
+      return;
+    }
+    if (!req.is('application/json')) {
+      res.status(415).json({ error: 'send application/json' });
+      return;
+    }
+    next();
+  };
+  const smallJson = express.json({ limit: '8kb', strict: true });
+
+  // The one-time login. The page reads the token after the #, posts it here and goes on to the
+  // calendar, so that the next request is same-site and the Strict cookie goes.
   router.get('/web/login', (req, res) => {
-    if (!store.takeLogin(typeof req.query.token === 'string' ? req.query.token : '')) {
-      notice(res, 403, 'ログインできません', 'この URL は使えません。1回だけ、15分まで使えます。warifuri serve を動かし直すと、新しい URL を表示します。');
+    guard(res);
+    res
+      .type('html')
+      .send(
+        '<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+          '<title>warifuri · ログイン</title><link rel="stylesheet" href="/web/app.css"><script src="/web/login.js" defer></script></head>' +
+          '<body class="wf-notice"><main><h1 id="title">ログインしています</h1><p id="text">少し待ってください。</p>' +
+          '<noscript><p>ログインには JavaScript が要ります。</p></noscript></main></body></html>',
+      );
+  });
+  router.post('/web/login', sameOrigin, smallJson, (req, res) => {
+    if (!store.takeLogin(typeof req.body?.token === 'string' ? req.body.token : '')) {
+      guard(res);
+      res.status(403).json({ error: 'login refused' });
       return;
     }
     const id = store.newSession();
+    guard(res);
     res.cookie(cookieName, id, { httpOnly: true, sameSite: 'strict', secure, path: '/', maxAge: SESSION_MS });
-    notice(res, 200, 'ログインしました', 'カレンダーを開きます。', { href: '/calendar', text: 'カレンダーを開く', refresh: true });
+    res.json({ next: '/calendar' });
   });
 
   router.get('/', limited, (req, res) => res.redirect(302, '/calendar'));
@@ -475,22 +507,8 @@ export function createWeb({
 
   api.get('/profile', (req, res) => res.json(profileOut()));
 
-  // The one write. A browser sends the JSON from this origin only: a form from elsewhere
-  // cannot send application/json, and a script elsewhere is stopped by the Origin check.
-  api.post('/profile', (req, res, next) => {
-    const site = req.headers['sec-fetch-site'];
-    const from = req.headers.origin;
-    const own = new Set([origin(req), `${req.protocol}://${req.get('host')}`]);
-    if ((site !== undefined && site !== 'same-origin') || typeof from !== 'string' || !own.has(from)) {
-      res.status(403).json({ error: 'cross-origin request refused' });
-      return;
-    }
-    if (!req.is('application/json')) {
-      res.status(415).json({ error: 'send application/json' });
-      return;
-    }
-    next();
-  }, express.json({ limit: '8kb', strict: true }), (req, res) => {
+  // The one write to the ledger.
+  api.post('/profile', sameOrigin, smallJson, (req, res) => {
     const checked = checkProfile(req.body);
     if (checked.problems) {
       res.status(400).json({ error: 'refused', problems: checked.problems });

@@ -383,7 +383,7 @@ function runServe(args) {
       process.stdout.write(`warifuri: web screens at ${base}/calendar (open from this machine, no login)\n`);
     } else {
       process.stdout.write(`warifuri: web screens at ${base}/calendar; log in once with this URL (single use, 15 minutes):\n`);
-      process.stdout.write(`warifuri:   ${base}/web/login?token=${server.web.issueLogin()}\n`);
+      process.stdout.write(`warifuri:   ${base}/web/login#token=${server.web.issueLogin()}\n`);
     }
   });
   let stopping = false;
