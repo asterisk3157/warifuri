@@ -1,13 +1,41 @@
 {
   "name": "warifuri",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "A secretary for people who work alongside AI agents: a ledger of goals and tasks.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "tasks",
+    "goals",
+    "secretary",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/asterisk3157/warifuri#readme",
+  "bugs": {
+    "url": "https://github.com/asterisk3157/warifuri/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asterisk3157/warifuri.git"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "warifuri": "bin/warifuri.mjs"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "harness/",
+    "docs/",
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
   "engines": {
     "node": ">=22.13"
   },
