@@ -366,8 +366,8 @@ export function createWeb({
   for (const p of PAGES) {
     router.get(`/${p}`, limited, (req, res) => {
       if (!allowed(req)) {
-        if (githubLogin) notice(res, 401, 'ログイン', '', { href: '/web/login/github', text: 'GitHub でログイン', button: true });
-        else notice(res, 401, 'ログイン', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
+        if (githubLogin) notice(res, 401, 'warifuri へようこそ', '', { href: '/web/login/github', text: 'GitHub でログイン', button: true });
+        else notice(res, 401, 'warifuri へようこそ', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
         return;
       }
       guard(res);
