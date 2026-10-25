@@ -348,7 +348,7 @@ warifuri は Google カレンダーに自分ではつながず、Google の資�
 
 #### 入れ方
 
-サーバーの機械で `warifuri secretary enable` を実行します。`claude` が PATH にないときは、そう伝えて何も書かずに終わります。あれば、デバイス `secretary` のシークレットを発行し(前に発行したものがまだ使えれば、そのまま使います)、データのフォルダの `secretary/mcp.json` に、このサーバーの URL とシークレットを入れた MCP の設定を、本人だけが読める形で書きます。シークレットはこのファイルにだけ置き、コマンドの引数にも、環境変数にも、画面やログにも出しません。設定ファイルをなくしたときは、もう一度 `enable` を実行すると、古いシークレットを取り消して新しく発行します。最後に `warifuri.env` に `WARIFURI_SECRETARY=on` を書き、本人が自分ですること(その機械で一度 `claude` にログインする、`warifuri serve` を動かし直す)を出します。`warifuri secretary disable` は `WARIFURI_SECRETARY=off` を書き、`secretary` のシークレットを取り消します。
+サーバーの機械で `warifuri secretary enable` を実行します。`claude` が PATH にないときは、そう伝えて何も書かずに終わります。あれば、秘書のデバイス(既定は `secretary`、`WARIFURI_SECRETARY_DEVICE` で変えられます)のシークレットを発行し(前に発行したものがまだ使えれば、そのまま使います)、データのフォルダの `secretary/mcp.json` に、このサーバーの URL とシークレットを入れた MCP の設定を、本人だけが読める形で書きます。シークレットはこのファイルにだけ置き、コマンドの引数にも、環境変数にも、画面やログにも出しません。同じ名前のデバイスに、このファイルにないシークレットがまだ使える形であるときは、ほかで使っているかもしれないので取り消さず、`enable` は断ります。別の名前を `WARIFURI_SECRETARY_DEVICE` に書くか、使っていないと確かめてから `warifuri key revoke` で取り消します。最後に `warifuri.env` に `WARIFURI_SECRETARY=on` を書き、本人が自分ですること(その機械で一度 `claude` にログインする、`warifuri serve` を動かし直す)を出します。`warifuri secretary disable` は `WARIFURI_SECRETARY=off` を書き、秘書のデバイスのシークレットを取り消します。
 
 `plugins.yaml` には書きません。`plugins.yaml` に秘書の行があると、エージェントの気づきが受信箱に入るようになりますが(プロフィールの節)、受信箱からナレッジへ移すツールがまだないためです。受信箱を使うかどうかは、使う人が `plugins.yaml` で決めます。
 

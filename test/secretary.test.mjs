@@ -208,18 +208,31 @@ test('enable issues the key once, writes an owner-only config and turns the sche
   assert.match(again.stdout, /kept the key of device secretary/);
   assert.equal(readSecretaryKey(w.home), key);
 
-  // A lost config gets a new key, and the old one stops working.
+  // A lost config does not revoke a live key of that name (it may be in use elsewhere):
+  // enable refuses, and another device name gets its own key.
   fs.renameSync(mcp, `${mcp}.lost`);
-  assert.equal(cli(['secretary', 'enable'], { home: w.home, env: w.env }).status, 0);
+  const refused = cli(['secretary', 'enable'], { home: w.home, env: w.env });
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr + refused.stdout, /WARIFURI_SECRETARY_DEVICE/);
+  l = openLedger(path.join(w.home, 'ledger.sqlite'));
+  assert.equal(l.deviceForKey(key)?.name, 'secretary');
+  l.close();
+  const other = cli(['secretary', 'enable'], { home: w.home, env: { ...w.env, WARIFURI_SECRETARY_DEVICE: 'warifuri-secretary' } });
+  assert.equal(other.status, 0, other.stderr);
+  assert.match(other.stdout, /issued a key for device warifuri-secretary/);
   const renewed = readSecretaryKey(w.home);
   assert.notEqual(renewed, key);
+  l = openLedger(path.join(w.home, 'ledger.sqlite'));
+  assert.equal(l.deviceForKey(renewed)?.name, 'warifuri-secretary');
+  l.close();
 
-  const off = cli(['secretary', 'disable'], { home: w.home, env: w.env });
+  const off = cli(['secretary', 'disable'], { home: w.home, env: { ...w.env, WARIFURI_SECRETARY_DEVICE: 'warifuri-secretary' } });
   assert.equal(off.status, 0, off.stderr);
   assert.match(read(path.join(w.home, 'warifuri.env')), /^WARIFURI_SECRETARY=off$/m);
   l = openLedger(path.join(w.home, 'ledger.sqlite'));
   assert.equal(l.deviceForKey(renewed), null);
-  assert.equal(l.deviceForKey(key), null);
+  // disable revokes only the configured device's key.
+  assert.equal(l.deviceForKey(key)?.name, 'secretary');
   l.close();
 });
 
