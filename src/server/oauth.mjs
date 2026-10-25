@@ -355,7 +355,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
         (error ? `<p class="error">${escapeHtml(error)}</p>` : '') +
         `<form method="post" action="${CONSENT_PATH}">` +
         `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">` +
-        `<label>デバイス<select name="device"><option value="">(選ばない)</option>${options}</select></label>` +
+        `<label>このデバイスを登録<select name="device"><option value="">(選択なし)</option>${options}</select></label>` +
         `<label>新しいデバイス` +
         `<input type="text" name="new_device" maxlength="64" value="${escapeHtml(typed)}" placeholder="英数字と . _ -" autocomplete="off"></label>` +
         `<div class="buttons"><button type="submit" name="action" value="deny">断る</button>` +
@@ -450,7 +450,7 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     const device = typed || str(body.device);
     const actor = `github:${pending.github_login}`;
     if (typed && str(body.device)) {
-      renderConsent(res, 400, id, pending, { error: 'デバイスか新しいデバイスの、どちらか一方にしてください。', typed, selected: str(body.device) });
+      renderConsent(res, 400, id, pending, { error: '登録するデバイスか新しいデバイスの、どちらか一方にしてください。', typed, selected: str(body.device) });
       return;
     }
     if (!device) {
