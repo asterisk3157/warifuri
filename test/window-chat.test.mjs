@@ -98,7 +98,7 @@ function world(t, { values = {}, now } = {}) {
   const ledger = openLedger(':memory:', { now: ticking() });
   const claude = fakeClaude();
   const lines = [];
-  const clock = { now: now ?? new Date('2026-10-26T07:00:00+09:00') };
+  const clock = { now: now ?? new Date(2026, 9, 26, 7, 0, 0) };
   const chat = createChat(ledger, cfg, { env, spawn: claude.spawn, log: (l) => lines.push(l), now: () => clock.now });
   const events = [];
   chat.subscribe((e) => events.push(e));
@@ -249,9 +249,9 @@ test('the morning: a call into the same session, answered with the morning\'s in
   const reply = w.ledger.listMessages(w.main().id).at(-1);
   assert.deepEqual([reply.role, reply.data.scheduled], ['secretary', 'morning']);
 
-  w.clock.now = new Date('2026-10-26T23:30:00+09:00');
+  w.clock.now = new Date(2026, 9, 26, 23, 30, 0);
   assert.deepEqual(w.chat.trigger('morning'), { skipped: 'it is the night' });
-  w.clock.now = new Date('2026-10-27T06:59:00+09:00');
+  w.clock.now = new Date(2026, 9, 27, 6, 59, 0);
   assert.deepEqual(w.chat.trigger('morning'), { skipped: 'it is the night' });
   assert.ok(w.chat.trigger('morning', { force: true }).sent);
   await w.chat.idle();
@@ -259,7 +259,7 @@ test('the morning: a call into the same session, answered with the morning\'s in
   // The clock sends it at the morning's time and logs one line; the nightly run stays a run of its own.
   const ran = [];
   const logs = [];
-  let at = new Date('2026-10-27T06:59:30+09:00');
+  let at = new Date(2026, 9, 27, 6, 59, 30);
   let ticks = 0;
   const s = createScheduler({
     jobs: { nightly: parseWhen('23:00'), morning: parseWhen('07:00'), inbox: parseWhen('off') },
@@ -270,7 +270,7 @@ test('the morning: a call into the same session, answered with the morning\'s in
   });
   s.start();
   s.stop();
-  at = new Date('2026-10-27T07:00:10+09:00');
+  at = new Date(2026, 9, 27, 7, 0, 10);
   w.clock.now = at;
   await s.tick();
   assert.deepEqual(ran, ['morning']);
@@ -279,7 +279,7 @@ test('the morning: a call into the same session, answered with the morning\'s in
   await w.chat.idle();
   const nightOnly = createScheduler({ jobs: { nightly: parseWhen('off'), morning: parseWhen('23:30'), inbox: parseWhen('off') }, now: () => at, log: (l) => logs.push(l), run: async () => w.chat.trigger('morning') });
   nightOnly.start();
-  at = new Date('2026-10-27T23:30:10+09:00');
+  at = new Date(2026, 9, 27, 23, 30, 10);
   w.clock.now = at;
   await nightOnly.tick();
   nightOnly.stop();
