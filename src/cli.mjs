@@ -472,7 +472,11 @@ function main(argv) {
     runHook(rest);
     return undefined;
   }
-  if (command === undefined || command === '--help' || command === '-h') return usage();
+  if (command === '--help' || command === '-h') {
+    process.stdout.write(`${USAGE}\n`);
+    return 0;
+  }
+  if (command === undefined) return usage();
   return usage(`unknown command: ${command}`);
 }
 
