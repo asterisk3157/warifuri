@@ -29,10 +29,10 @@ const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 const REDIRECT_HOSTS = ['claude.ai', 'claude.com'];
 const CLIENT_NAME_MAX = 64;
 const CALLBACK_PATH = '/oauth/github/callback';
-// The Web screens' own GitHub login: it starts here and comes back under the callback above,
-// which GitHub allows without another registration.
+// The Web screens' own GitHub login starts here and comes back to the same callback, the one
+// registered with GitHub; its state starts with WEB_STATE so the callback tells the two apart.
 const WEB_LOGIN_PATH = '/web/login/github';
-const WEB_CALLBACK_PATH = `${CALLBACK_PATH}/web`;
+const WEB_STATE = 'web.';
 const CONSENT_PATH = '/oauth/consent';
 const GITHUB_TIMEOUT_MS = 10_000;
 // What makes OAuth possible; with any of these missing, only device keys work.
@@ -176,7 +176,6 @@ export function createOAuth({ ledger, config, github = {}, log, webLogin = null 
   const issuer = new URL(config.publicUrl);
   const resourceUrl = new URL('/mcp', issuer);
   const callbackUrl = new URL(CALLBACK_PATH, issuer).href;
-  const webCallbackUrl = new URL(WEB_CALLBACK_PATH, issuer).href;
   const webUrl = withoutSlash(github.webUrl ?? 'https://github.com');
   const apiUrl = withoutSlash(github.apiUrl ?? 'https://api.github.com');
   const fetchFn = github.fetch ?? globalThis.fetch;
@@ -306,12 +305,12 @@ export function createOAuth({ ledger, config, github = {}, log, webLogin = null 
 
   // Exchanges GitHub's code and reads the user ({ login, id }). GitHub's token lives only
   // inside this call.
-  async function githubLogin(code, redirectUri = callbackUrl) {
+  async function githubLogin(code) {
     const signal = AbortSignal.timeout(GITHUB_TIMEOUT_MS);
     const tokenRes = await fetchFn(`${webUrl}/login/oauth/access_token`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'warifuri' },
-      body: new URLSearchParams({ client_id: config.githubClientId, client_secret: config.githubClientSecret, code, redirect_uri: redirectUri }).toString(),
+      body: new URLSearchParams({ client_id: config.githubClientId, client_secret: config.githubClientSecret, code, redirect_uri: callbackUrl }).toString(),
       signal,
     });
     if (!tokenRes.ok) throw new Error(`GitHub's token endpoint answered ${tokenRes.status}`);
@@ -397,6 +396,10 @@ export function createOAuth({ ledger, config, github = {}, log, webLogin = null 
   );
 
   router.get(CALLBACK_PATH, async (req, res) => {
+    if (webLogin && str(req.query.state).startsWith(WEB_STATE)) {
+      await webCallback(req, res);
+      return;
+    }
     const id = readCookie(req, cookieName);
     const pending = store.takeGithubState(id, str(req.query.state));
     if (!pending) {
@@ -492,43 +495,45 @@ export function createOAuth({ ledger, config, github = {}, log, webLogin = null 
   });
   // The Web screens' GitHub login. The state lives only in a short cookie of this browser; a
   // GitHub user who is not the person is refused like on the MCP side.
+  const webCookie = { httpOnly: true, sameSite: 'lax', secure, path: '/' };
   if (webLogin) {
-    const webCookie = { httpOnly: true, sameSite: 'lax', secure, path: '/' };
     router.get(WEB_LOGIN_PATH, (req, res) => {
-      const state = randomBytes(32).toString('base64url');
+      const state = `${WEB_STATE}${randomBytes(32).toString('base64url')}`;
       res.cookie(webStateCookie, state, { ...webCookie, maxAge: PENDING_MS });
       const to = new URL(`${webUrl}/login/oauth/authorize`);
-      to.search = new URLSearchParams({ client_id: config.githubClientId, redirect_uri: webCallbackUrl, state, allow_signup: 'false' }).toString();
+      to.search = new URLSearchParams({ client_id: config.githubClientId, redirect_uri: callbackUrl, state, allow_signup: 'false' }).toString();
       res.redirect(302, to.href);
     });
-    router.get(WEB_CALLBACK_PATH, async (req, res) => {
-      const kept = Buffer.from(readCookie(req, webStateCookie));
-      const given = Buffer.from(str(req.query.state));
-      res.clearCookie(webStateCookie, webCookie);
-      const back = '<p><a href="/web/login/github">もう一度ログインする</a></p>';
-      if (kept.length === 0 || kept.length !== given.length || !timingSafeEqual(kept, given)) {
-        sendPage(res, 400, 'ログインできませんでした', `<p>時間が切れました。</p>${back}`);
-        return;
-      }
-      const code = str(req.query.code);
-      if (!code || req.query.error !== undefined) {
-        sendPage(res, 400, 'ログインできませんでした', `<p>GitHub でのログインが取りやめられました。</p>${back}`);
-        return;
-      }
-      let user;
-      try {
-        user = await githubLogin(code, webCallbackUrl);
-      } catch (err) {
-        log(`warifuri: GitHub login for the Web screens failed: ${err.message}`);
-        sendPage(res, 502, 'ログインできませんでした', `<p>GitHub に確認を頼めませんでした。</p>${back}`);
-        return;
-      }
-      if (!isAllowed(user)) {
-        plainPage(res, 403, 'このサーバーは使えません', 'このサーバーを使えるのは、設定された1人の GitHub ユーザーだけです。');
-        return;
-      }
-      webLogin(res);
-    });
+  }
+
+  // The end of the Web screens' GitHub login, from the callback.
+  async function webCallback(req, res) {
+    const kept = Buffer.from(readCookie(req, webStateCookie));
+    const given = Buffer.from(str(req.query.state));
+    res.clearCookie(webStateCookie, webCookie);
+    const back = '<p><a href="/web/login/github">もう一度ログインする</a></p>';
+    if (kept.length === 0 || kept.length !== given.length || !timingSafeEqual(kept, given)) {
+      sendPage(res, 400, 'ログインできませんでした', `<p>時間が切れました。</p>${back}`);
+      return;
+    }
+    const code = str(req.query.code);
+    if (!code || req.query.error !== undefined) {
+      sendPage(res, 400, 'ログインできませんでした', `<p>GitHub でのログインが取りやめられました。</p>${back}`);
+      return;
+    }
+    let user;
+    try {
+      user = await githubLogin(code);
+    } catch (err) {
+      log(`warifuri: GitHub login for the Web screens failed: ${err.message}`);
+      sendPage(res, 502, 'ログインできませんでした', `<p>GitHub に確認を頼めませんでした。</p>${back}`);
+      return;
+    }
+    if (!isAllowed(user)) {
+      plainPage(res, 403, 'このサーバーは使えません', 'このサーバーを使えるのは、設定された1人の GitHub ユーザーだけです。');
+      return;
+    }
+    webLogin(res);
   }
 
   return { router, bearer, resourceUrl };
