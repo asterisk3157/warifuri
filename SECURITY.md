@@ -13,4 +13,4 @@ You will get a reply within a week. Once a fix is ready, the advisory is publish
 
 ## Supported versions
 
-Nothing has been released yet. Until v0.1.0, only the latest commit on `main` is looked after.
+Security fixes go to the latest 0.1.x release and to `main`. Older releases are not patched, so please update to the latest one.
