@@ -143,6 +143,8 @@ Settings go in `warifuri.env` in the data directory, one `NAME=value` per line; 
 warifuri config
 ```
 
+Example settings for a made-up person, ready to copy and edit, are in [examples/](../examples/README.md) (in Japanese). They also show how to write the profile files (`profiles/`).
+
 Edit `warifuri.env` in an editor such as Notepad, and save it as UTF-8. In Windows PowerShell 5.1, do not append lines with `>>`: the appended part is written in UTF-16, and a file that mixes two encodings cannot be read. warifuri also reads UTF-8 files with a BOM and files that are entirely UTF-16, and warns you to save a UTF-16 file as UTF-8 again. Saving as UTF-8 is still the recommended way.
 
 ## Updating and removing

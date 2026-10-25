@@ -332,7 +332,7 @@ knowledge.md がおよそ200行を超えたら、話題ごとに `knowledge/` �
 
 ## 使う人が書く設定
 
-この節のうち、`warifuri.env`、`profiles/`、`secrets.env` のほかのファイル(`principles.md`、`life.md`、`places.md`、`habits.yaml`、`limits.yaml`、`plugins.yaml`)と `examples/` は、v0.1 では未実装の設計です。`plugins.yaml` だけは、`note` が秘書を入れているかを見分けるために読みます(上の節)。
+この節のうち、`warifuri.env`、`profiles/`、`secrets.env` のほかのファイル(`principles.md`、`life.md`、`places.md`、`habits.yaml`、`limits.yaml`、`plugins.yaml`)は、v0.1 では未実装の設計です。`plugins.yaml` だけは、`note` が秘書を入れているかを見分けるために読みます(上の節)。
 
 サーバーの設定フォルダに置きます。書くのは、人か、`profile` / `settings` のツールを使う秘書です。
 

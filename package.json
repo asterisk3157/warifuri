@@ -31,6 +31,7 @@
     "src/",
     "harness/",
     "docs/",
+    "examples/",
     "README.md",
     "README.ja.md",
     "LICENSE",
