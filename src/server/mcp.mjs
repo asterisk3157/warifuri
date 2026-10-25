@@ -24,6 +24,7 @@ import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
+import { readSettings, writeSettings, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
 import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
 
 const VERSION = '0.0.0';
@@ -527,6 +528,33 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
     { kind: autonomyKind, level: z.enum(AUTONOMY_LEVELS), by_person: z.boolean().optional(), said: z.string().optional() },
     async ({ kind, level, by_person: byPerson, said }) =>
       result(ledger.setAutonomyByPerson(kind, level, { by_person: byPerson, said }, writer)),
+  );
+
+  // One tool reads and writes, so it is not marked read-only; without a section it only reads.
+  const d = LIMIT_DEFAULTS;
+  tool(
+    'settings',
+    "Read or write the person's own settings that scheduling uses. With no section given it only reads, returning " +
+      'life, places and limits with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
+      'text] } for sleep, meals and fixed commitments, as plain rules. places: { places: [{ name, note }], travel: ' +
+      '[{ from, to, minutes }] } for the physical places the person goes to and the travel time between two of them ' +
+      '(both ways; not the working folders of the places tool). life and places are replaced as given. limits: ' +
+      `{ day_max_hours (default ${d.day_max_hours}), block_min_minutes (${d.block_min_minutes}), block_max_minutes ` +
+      `(${d.block_max_minutes}), earliest ('${d.earliest}'), latest ('${d.latest}') }, times as HH:MM; only the fields ` +
+      'given change, null puts one back to its default. Limits are the person\'s to change: write them only when the ' +
+      'person decided it in this conversation, with by_person: true; otherwise propose the change to them instead. ' +
+      'A section given as null goes back to its defaults.',
+    {
+      life: z.record(z.string(), z.unknown()).nullable().optional(),
+      places: z.record(z.string(), z.unknown()).nullable().optional(),
+      limits: z.record(z.string(), z.unknown()).nullable().optional(),
+      by_person: z.boolean().optional(),
+    },
+    async ({ by_person: byPerson, ...sections }) => {
+      const input = given(sections);
+      if (Object.keys(input).length === 0) return result(readSettings(ledger));
+      return result(writeSettings(ledger, input, { byPerson }, writer));
+    },
   );
 
   tool(

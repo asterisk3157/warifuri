@@ -1049,8 +1049,8 @@ export function openLedger(path, options = {}) {
   }
 
   // Writes settings under a prefix: { name: string } sets one, { name: null } removes it.
-  // One record (entity 'settings', the prefix as its id) lists what changed; nothing is
-  // written or recorded when nothing changes. The caller checks the values.
+  // One record (entity 'settings', the prefix as its id, action opts.action or 'update') lists
+  // what changed; nothing is written or recorded when nothing changes. The caller checks the values.
   function setSettings(prefix, values, opts) {
     const w = requireWriter(opts);
     checkPrefix(prefix);
@@ -1074,7 +1074,7 @@ export function openLedger(path, options = {}) {
           ).run(`${prefix}.${k}`, after, t);
         }
       }
-      record(w, 'settings', prefix, 'update', changes);
+      record(w, 'settings', prefix, opts?.action ?? 'update', changes);
       return getSettings(prefix);
     });
   }
