@@ -74,6 +74,7 @@ function buildServer(ledger, device, knowledge) {
     {
       description:
         'List open goals with their tasks, and the tasks with no goal; each task shows who holds it. ' +
+        'Under a goal, the tasks you can start now (actionable: ready, every task before it closed) come first; open_before names the earlier tasks still open. ' +
         'place: the directory you work in; the place it falls in on your device gives the profile to show. ' +
         'profile: show that profile (wins over place). Without place or profile, everything is shown. ' +
         'state and mode filter; review: true shows only rows flagged on import; include_closed: true adds done and discarded rows.',
@@ -277,7 +278,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
   tool(
     'create_task',
     'Create a task, under a goal or with no goal. Search first, so the same task is not made twice. ' +
-      'A task that takes a person\'s time needs done_when. place_id: the place it belongs to (board shows the one you are in).',
+      'A task that takes a person\'s time needs done_when. place_id: the place it belongs to (board shows the one you are in). ' +
+      'after: the ids of the tasks that come before it; under a goal, give them when you create it, so the goal has its order.',
     {
       title: z.string(),
       body: z.string().optional(),
@@ -290,6 +292,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
       due_provisional: z.boolean().optional(),
       place_id: z.string().optional(),
       delegated: z.boolean().optional(),
+      after: z.array(z.string().min(1)).optional(),
     },
     async (args) => result(ledger.createTask(given(args), writer)),
   );
@@ -339,7 +342,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
     'Hold a task before working on it: this device holds it in a place, and a ready task becomes running. ' +
       'place: the place id, or the directory you work in (the deepest place containing it on this device). ' +
       'This device holds one task per place: release the one you hold there (with next) before starting another. ' +
-      'A task held elsewhere moves here.',
+      'A task held elsewhere moves here. A task whose earlier tasks are still open can be started; the answer names them in open_before.',
     { task_id: z.string().min(1), place: z.string().min(1) },
     async ({ task_id: taskId, place: value }) => {
       const place = resolvePlace(ledger, device.name, value);
@@ -347,7 +350,10 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge }
       try {
         const task = ledger.start(taskId, { device: device.name, placeId: place.id }, writer);
         const moved = before && (before.device !== device.name || before.place_id !== place.id);
-        return result(moved ? { ...task, moved_from: before } : task);
+        // The order is a plan, not a lock (原則3): starting early is allowed, and said.
+        const open = ledger.openBefore(taskId);
+        const notice = open.length ? { open_before: open, notice: `前のタスク ${open.join(', ')} がまだ閉じていません。順序どおりでなくてよいか確かめてください` } : {};
+        return result({ ...task, ...(moved ? { moved_from: before } : {}), ...notice });
       } catch (err) {
         if (!(err instanceof LedgerError) || !err.heldTaskId) throw err;
         return refusal(err.problems, { held: ledger.held({ device: device.name, placeId: place.id }) });

@@ -305,10 +305,16 @@ export function openLedger(path, options = {}) {
     });
   }
 
+  // after: the tasks that come before this one (原則3), linked in the same transaction.
   function createTask(fields, opts) {
     const w = requireWriter(opts);
-    const input = normalizeFlags(fields ?? {});
+    const { after: afterIds, ...rest } = fields ?? {};
+    const input = normalizeFlags(rest);
     const problems = unknownFields(input, ['id', 'state', ...TASK_EDITABLE, ...ALL_STATE_FIELDS]);
+    const before = afterIds === undefined || afterIds === null ? [] : Array.isArray(afterIds) ? afterIds : [afterIds];
+    for (const b of before) {
+      if (typeof b !== 'string' || !getTaskRow(b)) problems.push(`先にやるタスク ${b} がありません`);
+    }
     const id = chooseId('task', input.id, problems);
     const { state, extra } = initialState(input, problems);
     const t = nowIso();
@@ -325,6 +331,10 @@ export function openLedger(path, options = {}) {
     return transaction(() => {
       insert('tasks', TASK_COLUMNS, row);
       record(w, 'task', id, 'create', diff(null, row, TASK_COLUMNS));
+      for (const b of new Set(before)) {
+        db.prepare('INSERT INTO blocks (before_id, after_id, created_at) VALUES (?, ?, ?)').run(b, id, t);
+        record(w, 'block', `${b}>${id}`, 'link', { before_id: b, after_id: id });
+      }
       return taskView(getTaskRow(id));
     });
   }
@@ -428,6 +438,16 @@ export function openLedger(path, options = {}) {
       throw new LedgerError([`${id} は先送りでも待ちでもありません(いまは ${item.row.state})。閉じたものを戻すときは reopen です`]);
     }
     return setState(id, 'ready', {}, opts);
+  }
+
+  // The tasks before taskId (順序) that are not closed yet.
+  function openBefore(taskId) {
+    const closed = CLOSED_STATES.map(() => '?').join(', ');
+    return all(
+      `SELECT p.id FROM blocks b JOIN tasks p ON p.id = b.before_id WHERE b.after_id = ? AND p.state NOT IN (${closed}) ORDER BY p.id`,
+      taskId,
+      ...CLOSED_STATES,
+    ).map((r) => r.id);
   }
 
   // Is `target` reachable from `start` along before→after edges?
@@ -992,8 +1012,16 @@ export function openLedger(path, options = {}) {
     const taskStmt = db.prepare(`${TASK_SELECT} WHERE t.goal_id = ?${openOnly('t')} ORDER BY t.created_at, t.id`);
     const goals = [];
     for (const g of goalRows) {
-      const tasks = taskStmt.all(g.id, ...openArgs).filter(matches);
-      if (matches(g) || tasks.length > 0) goals.push({ ...present(g), tasks: tasks.map((r) => taskView(r, holds)) });
+      // 着手可能 first (ready, every task before it closed), keeping the order within each part.
+      const tasks = taskStmt
+        .all(g.id, ...openArgs)
+        .filter(matches)
+        .map((r) => {
+          const open = openBefore(r.id);
+          return { ...taskView(r, holds), open_before: open, actionable: r.state === 'ready' && open.length === 0 };
+        })
+        .sort((a, b) => Number(b.actionable) - Number(a.actionable));
+      if (matches(g) || tasks.length > 0) goals.push({ ...present(g), tasks });
     }
     const loose = all(
       `${TASK_SELECT} WHERE t.goal_id IS NULL${openOnly('t')}${byProfile.length ? ' AND p.profile = ?' : ''} ORDER BY t.created_at, t.id`,
@@ -1271,6 +1299,7 @@ export function openLedger(path, options = {}) {
     replaceFromSnapshot,
     createGoal,
     createTask,
+    openBefore,
     update,
     setState,
     reopen,
