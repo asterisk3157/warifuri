@@ -169,3 +169,31 @@ test('board and get show the hold', (t) => {
   assert.equal(L.get(a.id).hold.place_id, repo.id);
   assert.equal(L.get(g.id).tasks[0].hold.device, 'laptop');
 });
+
+test('order (原則3): create_task links the tasks before it, start tells of open ones, board puts 着手可能 first', (t) => {
+  const { L, repo } = fresh(t);
+  const g = L.createGoal({ title: 'G', mode: 'ai_worker' }, ACTOR);
+  const a = L.createTask({ title: 'A', mode: 'ai_worker', goal_id: g.id }, ACTOR);
+  const b = L.createTask({ title: 'B', mode: 'ai_worker', goal_id: g.id }, ACTOR);
+  const c = L.createTask({ title: 'C', mode: 'ai_worker', goal_id: g.id, after: [a.id, b.id] }, ACTOR);
+  assert.deepEqual(L.get(c.id).blocked_by, [a.id, b.id].sort());
+  assert.equal(L.records(`${a.id}>${c.id}`).at(-1).action, 'link');
+  // An unknown task before it refuses the whole task.
+  const err = refusal(() => L.createTask({ title: 'D', mode: 'ai_worker', after: ['t_none'] }, ACTOR));
+  assert.match(err.problems.join(), /t_none/);
+  assert.equal(L.board().unassigned.some((x) => x.title === 'D'), false);
+
+  // C comes after A and B: listed after them, with the open ones named.
+  let tasks = L.board().goals[0].tasks;
+  assert.deepEqual(tasks.map((x) => [x.title, x.actionable]), [['A', true], ['B', true], ['C', false]]);
+  assert.deepEqual(tasks[2].open_before, [a.id, b.id].sort());
+
+  // Starting C early is allowed; the order is a plan, not a lock.
+  assert.deepEqual(L.openBefore(c.id), [a.id, b.id].sort());
+  L.setState(a.id, 'done', { result: 'ok' }, ACTOR);
+  L.setState(b.id, 'done', { result: 'ok' }, ACTOR);
+  assert.deepEqual(L.openBefore(c.id), []);
+  tasks = L.board().goals[0].tasks;
+  assert.deepEqual(tasks.map((x) => [x.title, x.actionable]), [['C', true]]);
+  assert.equal(L.start(c.id, { device: 'laptop', placeId: repo.id }, ACTOR).state, 'running');
+});
