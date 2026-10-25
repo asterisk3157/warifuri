@@ -11,8 +11,9 @@
 // - Login: otherwise, a browser needs a session cookie. `warifuri serve` prints a one-time
 //   login URL at startup (a random token, single use, 15 minutes). The token rides after the
 //   # so that it never reaches a proxy or a server log: the page posts it back, and that sets an
-//   HttpOnly, SameSite=Strict cookie (Secure over https). Sessions live in memory, so a
-//   restart ends them and prints a new URL.
+//   HttpOnly, SameSite=Strict cookie (Secure over https). When the GitHub login is on, the
+//   login page offers it too, for the one person allowed (oauth.mjs). A session lasts 30 days
+//   and is kept (as a hash) in the data directory, so a restart of the server does not end it.
 // Device keys and OAuth tokens are never taken here, as cookies or otherwise. No response
 // carries a key, a token or a hash of one.
 
@@ -36,6 +37,8 @@ const PACKAGE = path.join(HERE, '..', '..', 'package.json');
 export const PAGES = ['calendar', 'tasks', 'server', 'settings'];
 export const LOGIN_MS = 15 * 60 * 1000;
 export const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+// The file in the data directory that keeps the Web screens' sessions across restarts.
+export const SESSIONS_FILE = 'web-sessions.json';
 const MAX_LOGINS = 10;
 const MAX_SESSIONS = 100;
 const RECENT_DONE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -168,10 +171,31 @@ export function checkProfile(body) {
   return { values: { name, bio, color } };
 }
 
-// Sessions and one-time login tokens, in memory. Only hashes are kept.
-function sessionStore(now) {
+// Sessions and one-time login tokens. Only hashes are kept. With file, the sessions are also
+// kept there (hash and expiry, readable by the owner only), so that a restart of the server
+// does not log the browser out; login tokens stay in memory.
+function sessionStore(now, file = null) {
   const logins = new Map();
   const sessions = new Map();
+  if (file) {
+    try {
+      for (const [k, exp] of Object.entries(JSON.parse(fs.readFileSync(file, 'utf8')))) {
+        if (/^[0-9a-f]{64}$/.test(k) && Number.isFinite(exp)) sessions.set(k, exp);
+      }
+    } catch {
+      // No file yet, or one that cannot be read: start with no sessions.
+    }
+  }
+  const save = () => {
+    if (!file) return;
+    try {
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    } catch {
+      // The data directory cannot be written: the sessions last until the server stops.
+    }
+  };
   const sweep = (map) => {
     const t = now();
     for (const [k, exp] of map) if (exp <= t) map.delete(k);
@@ -200,6 +224,7 @@ function sessionStore(now) {
       const id = random();
       sessions.set(sha256(id), now() + SESSION_MS);
       cap(sessions, MAX_SESSIONS);
+      save();
       return id;
     },
     validSession(id) {
@@ -238,7 +263,8 @@ const escapeHtml = (s) =>
 // A small page of its own (login done, login needed), with the app's stylesheet.
 function notice(res, status, title, text, link) {
   guard(res);
-  const a = link ? `<p><a href="${escapeHtml(link.href)}">${escapeHtml(link.text)}</a></p>` : '';
+  const cls = link?.button ? ' class="wf-button"' : '';
+  const a = link ? `<p><a href="${escapeHtml(link.href)}"${cls}>${escapeHtml(link.text)}</a></p>` : '';
   const refresh = link?.refresh ? `<meta http-equiv="refresh" content="0;url=${escapeHtml(link.href)}">` : '';
   res
     .status(status)
@@ -246,7 +272,7 @@ function notice(res, status, title, text, link) {
     .send(
       `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${refresh}` +
         `<title>warifuri · ${escapeHtml(title)}</title><link rel="stylesheet" href="/web/app.css"></head>` +
-        `<body class="wf-notice"><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(text)}</p>${a}</main></body></html>`,
+        `<body class="wf-notice"><main><h1>${escapeHtml(title)}</h1>${text ? `<p>${escapeHtml(text)}</p>` : ''}${a}</main></body></html>`,
     );
 }
 
@@ -254,7 +280,8 @@ function notice(res, status, title, text, link) {
 // colours, backups), or null. host: the address the server listens on. publicUrl: the
 // public URL, or null. trustProxy: express's trust proxy value, when one is set. githubUser:
 // the GitHub login of the person, when the GitHub login is on. limit: the rate limit per
-// address. now: the clock (ms). Returns { router, mode, issueLogin }.
+// address. githubLogin: whether the login page offers GitHub (the router of oauth.mjs then
+// calls finishLogin). now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
 export function createWeb({
   ledger,
   home = null,
@@ -262,6 +289,7 @@ export function createWeb({
   publicUrl = null,
   trustProxy,
   githubUser = null,
+  githubLogin = false,
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
@@ -270,7 +298,7 @@ export function createWeb({
   const mode = isLoopbackHost(host) && !publicUrl && trustProxy === undefined ? 'open' : 'login';
   const secure = typeof publicUrl === 'string' && publicUrl.startsWith('https://');
   const cookieName = secure ? '__Host-warifuri_web' : 'warifuri_web';
-  const store = sessionStore(now);
+  const store = sessionStore(now, home ? path.join(home, SESSIONS_FILE) : null);
   const version = readVersion();
   const publicOrigin = publicUrl ? new URL(publicUrl).origin : null;
 
@@ -338,7 +366,8 @@ export function createWeb({
   for (const p of PAGES) {
     router.get(`/${p}`, limited, (req, res) => {
       if (!allowed(req)) {
-        notice(res, 401, 'ログインが要ります', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
+        if (githubLogin) notice(res, 401, 'ログイン', '', { href: '/web/login/github', text: 'GitHub でログイン', button: true });
+        else notice(res, 401, 'ログイン', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
         return;
       }
       guard(res);
@@ -529,5 +558,12 @@ export function createWeb({
   });
   router.use('/web/api', api);
 
-  return { router, mode, issueLogin: () => store.issueLogin() };
+  // Starts a session after the GitHub login, and moves on to the calendar with a page of its
+  // own, so that the next request is same-site and the Strict cookie goes.
+  const finishLogin = (res) => {
+    res.cookie(cookieName, store.newSession(), { httpOnly: true, sameSite: 'strict', secure, path: '/', maxAge: SESSION_MS });
+    notice(res, 200, 'ログインしました', '', { href: '/calendar', text: 'カレンダーを開く', refresh: true });
+  };
+
+  return { router, mode, issueLogin: () => store.issueLogin(), finishLogin };
 }

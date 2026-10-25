@@ -9,6 +9,7 @@
 // /revoke; this module gives it the provider, and adds the GitHub callback and the consent
 // page. Nothing here logs a token, code, client secret, the GitHub secret or GitHub's token.
 
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
@@ -28,6 +29,10 @@ const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 const REDIRECT_HOSTS = ['claude.ai', 'claude.com'];
 const CLIENT_NAME_MAX = 64;
 const CALLBACK_PATH = '/oauth/github/callback';
+// The Web screens' own GitHub login: it starts here and comes back under the callback above,
+// which GitHub allows without another registration.
+const WEB_LOGIN_PATH = '/web/login/github';
+const WEB_CALLBACK_PATH = `${CALLBACK_PATH}/web`;
 const CONSENT_PATH = '/oauth/consent';
 const GITHUB_TIMEOUT_MS = 10_000;
 // What makes OAuth possible; with any of these missing, only device keys work.
@@ -165,17 +170,20 @@ function readCookie(req, name) {
 
 // Builds the provider for the SDK (OAuthServerProvider), the GitHub callback and the consent
 // page, and the bearer check for /mcp. github: { webUrl, apiUrl, fetch } lets tests stand in
-// for GitHub. Returns { router, bearer }.
-export function createOAuth({ ledger, config, github = {}, log }) {
+// for GitHub. webLogin(res), when given, starts a session of the Web screens for the person
+// and answers; with it, the Web screens get a GitHub login too. Returns { router, bearer }.
+export function createOAuth({ ledger, config, github = {}, log, webLogin = null }) {
   const issuer = new URL(config.publicUrl);
   const resourceUrl = new URL('/mcp', issuer);
   const callbackUrl = new URL(CALLBACK_PATH, issuer).href;
+  const webCallbackUrl = new URL(WEB_CALLBACK_PATH, issuer).href;
   const webUrl = withoutSlash(github.webUrl ?? 'https://github.com');
   const apiUrl = withoutSlash(github.apiUrl ?? 'https://api.github.com');
   const fetchFn = github.fetch ?? globalThis.fetch;
   const secure = issuer.protocol === 'https:';
   // __Host- keeps the cookie to this exact host over HTTPS; browsers refuse it over http.
   const cookieName = secure ? '__Host-warifuri_oauth' : 'warifuri_oauth';
+  const webStateCookie = secure ? '__Host-warifuri_web_github' : 'warifuri_web_github';
   const allowedLogin = config.githubUser.toLowerCase();
   const redirectHosts = new Set(config.redirectHosts ?? REDIRECT_HOSTS);
   const store = ledger.oauth;
@@ -298,12 +306,12 @@ export function createOAuth({ ledger, config, github = {}, log }) {
 
   // Exchanges GitHub's code and reads the user ({ login, id }). GitHub's token lives only
   // inside this call.
-  async function githubLogin(code) {
+  async function githubLogin(code, redirectUri = callbackUrl) {
     const signal = AbortSignal.timeout(GITHUB_TIMEOUT_MS);
     const tokenRes = await fetchFn(`${webUrl}/login/oauth/access_token`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'warifuri' },
-      body: new URLSearchParams({ client_id: config.githubClientId, client_secret: config.githubClientSecret, code, redirect_uri: callbackUrl }).toString(),
+      body: new URLSearchParams({ client_id: config.githubClientId, client_secret: config.githubClientSecret, code, redirect_uri: redirectUri }).toString(),
       signal,
     });
     if (!tokenRes.ok) throw new Error(`GitHub's token endpoint answered ${tokenRes.status}`);
@@ -482,5 +490,46 @@ export function createOAuth({ ledger, config, github = {}, log }) {
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
     expectedResource: resourceUrl,
   });
+  // The Web screens' GitHub login. The state lives only in a short cookie of this browser; a
+  // GitHub user who is not the person is refused like on the MCP side.
+  if (webLogin) {
+    const webCookie = { httpOnly: true, sameSite: 'lax', secure, path: '/' };
+    router.get(WEB_LOGIN_PATH, (req, res) => {
+      const state = randomBytes(32).toString('base64url');
+      res.cookie(webStateCookie, state, { ...webCookie, maxAge: PENDING_MS });
+      const to = new URL(`${webUrl}/login/oauth/authorize`);
+      to.search = new URLSearchParams({ client_id: config.githubClientId, redirect_uri: webCallbackUrl, state, allow_signup: 'false' }).toString();
+      res.redirect(302, to.href);
+    });
+    router.get(WEB_CALLBACK_PATH, async (req, res) => {
+      const kept = Buffer.from(readCookie(req, webStateCookie));
+      const given = Buffer.from(str(req.query.state));
+      res.clearCookie(webStateCookie, webCookie);
+      const back = '<p><a href="/web/login/github">もう一度ログインする</a></p>';
+      if (kept.length === 0 || kept.length !== given.length || !timingSafeEqual(kept, given)) {
+        sendPage(res, 400, 'ログインできませんでした', `<p>時間が切れました。</p>${back}`);
+        return;
+      }
+      const code = str(req.query.code);
+      if (!code || req.query.error !== undefined) {
+        sendPage(res, 400, 'ログインできませんでした', `<p>GitHub でのログインが取りやめられました。</p>${back}`);
+        return;
+      }
+      let user;
+      try {
+        user = await githubLogin(code, webCallbackUrl);
+      } catch (err) {
+        log(`warifuri: GitHub login for the Web screens failed: ${err.message}`);
+        sendPage(res, 502, 'ログインできませんでした', `<p>GitHub に確認を頼めませんでした。</p>${back}`);
+        return;
+      }
+      if (!isAllowed(user)) {
+        plainPage(res, 403, 'このサーバーは使えません', 'このサーバーを使えるのは、設定された1人の GitHub ユーザーだけです。');
+        return;
+      }
+      webLogin(res);
+    });
+  }
+
   return { router, bearer, resourceUrl };
 }
