@@ -76,7 +76,15 @@ function world({ harnesses = ['claude', 'codex'], ledger = true } = {}) {
   // Only the fake bin and node: a real harness can never be reached. Windows also needs its
   // own folder, for cmd.exe.
   const sys = process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: '.COM;.EXE;.BAT;.CMD' } : {};
-  const dirs = [bin, path.dirname(process.execPath), ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot, 'System32')] : [])];
+  // node comes from a folder of its own, since a warifuri installed beside it would
+  // otherwise be found on PATH (Windows uses node's folder, as copying node is heavy).
+  let nodeDir = path.dirname(process.execPath);
+  if (process.platform !== 'win32') {
+    nodeDir = path.join(root, 'node');
+    fs.mkdirSync(nodeDir);
+    fs.symlinkSync(process.execPath, path.join(nodeDir, 'node'));
+  }
+  const dirs = [bin, nodeDir, ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot, 'System32')] : [])];
   const env = { ...sys, PATH: dirs.join(path.delimiter), HOME: user, USERPROFILE: user, WARIFURI_HOME: data, FAKE_LOG: log };
   const calls = () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   return { root, user, data, bin, env, log, calls };
