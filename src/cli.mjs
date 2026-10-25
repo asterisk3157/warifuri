@@ -15,6 +15,8 @@
 //   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
 //                    [--no-hook] [--no-skills] [--force] [--dry-run]
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
+//   warifuri secretary enable|disable
+//   warifuri secretary run <nightly|morning|inbox>
 //   warifuri --version               (also -v; the version of this package)
 //
 // Every command takes --home <dir> (the data directory) and --db <ledger.sqlite>. The flags
@@ -38,6 +40,9 @@ import { loadConfig, flagOptions, describeConfig, initHome } from './config.mjs'
 import { PROFILES_DIR } from './knowledge/profiles.mjs';
 import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
+import * as secretary from './secretary/secretary.mjs';
+import { createScheduler } from './secretary/scheduler.mjs';
+import { JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -56,6 +61,8 @@ const USAGE = [
   '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
   '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
   '       warifuri hook gate',
+  '       warifuri secretary enable|disable',
+  '       warifuri secretary run <nightly|morning|inbox>',
   '       warifuri --version',
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
@@ -82,6 +89,10 @@ const USAGE = [
   'machine), wires the start gate hook and copies the skills. --dry-run only shows the plan.',
   'hook gate is that hook: it reads the harness JSON on stdin and stops an edit in a place',
   'where this device holds no task. It lets the edit through whenever it cannot ask.',
+  '',
+  'secretary enable, on the server machine, gives the secretary (claude -p, logged in by you)',
+  'its key and MCP config and turns its schedule on (WARIFURI_SECRETARY=on); serve then wakes',
+  'it at the set times. disable turns it off and revokes its key. run starts one job now.',
 ].join('\n');
 
 function usage(message) {
@@ -369,6 +380,7 @@ function runServe(args) {
     ledger.close();
     process.exitCode = 1;
   });
+  const sched = startSecretary(cfg);
   server.listen(Number(values.WARIFURI_PORT), values.WARIFURI_HOST, () => {
     const addr = server.address();
     const host = addr.family === 'IPv6' ? `[${addr.address}]` : addr.address;
@@ -390,6 +402,7 @@ function runServe(args) {
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    sched?.stop();
     server.close(() => {
       ledger.close();
       process.stdout.write('warifuri: stopped\n');
@@ -399,6 +412,75 @@ function runServe(args) {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
   return undefined;
+}
+
+// The secretary's clock in serve, when WARIFURI_SECRETARY is on: { stop } or null. Only one
+// line per run start and end is printed; claude's output goes to its log file.
+function startSecretary(cfg) {
+  if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
+  const ready = secretary.readyToSchedule(cfg);
+  if (ready.problem) {
+    process.stderr.write(`warifuri: secretary off: ${ready.problem}\n`);
+    return null;
+  }
+  const abort = new AbortController();
+  const log = (line) => process.stdout.write(`warifuri: ${line}\n`);
+  const scheduler = createScheduler({
+    jobs: ready.schedule.jobs,
+    log,
+    run: (job) => secretary.runJob(job, cfg, { signal: abort.signal }),
+  });
+  scheduler.start();
+  log(`secretary on: ${secretary.describeSchedule(ready.schedule)}; logs in ${secretary.paths(cfg.home).logs}`);
+  return {
+    stop() {
+      scheduler.stop();
+      abort.abort();
+    },
+  };
+}
+
+// warifuri secretary enable|disable|run <job>: see src/secretary/secretary.mjs.
+async function runSecretary(args) {
+  const [sub, ...rest] = args;
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: flagOptions('secretary') });
+  } catch (err) {
+    return usage(err.message);
+  }
+  const { values, positionals } = parsed;
+  if (!['enable', 'disable', 'run'].includes(sub)) return usage('secretary takes enable, disable or run');
+  if (sub === 'run' && (positionals.length !== 1 || !JOBS.includes(positionals[0]))) return usage(`secretary run takes one job: ${JOBS.join(', ')}`);
+  if (sub !== 'run' && positionals.length !== 0) return usage(`secretary ${sub} takes no argument`);
+  const cfg = settingsFor('secretary', values);
+  if (cfg === 2) return 2;
+  warn(cfg);
+  if (sub === 'run') {
+    const job = positionals[0];
+    process.stdout.write(`secretary: ${job} started\n`);
+    const out = await secretary.runJob(job, cfg);
+    if (out.busy) {
+      process.stderr.write('warifuri: another secretary run is still going; try again when it ends\n');
+      return 1;
+    }
+    if (out.error) {
+      process.stderr.write(`warifuri: secretary ${job} did not start: ${redact(out.error)}\n`);
+      return 1;
+    }
+    const how = out.timedOut ? 'stopped: it ran past the time limit' : `finished (exit ${out.code ?? out.signal})`;
+    process.stdout.write(`secretary: ${job} ${how}; output in ${out.logFile}\n`);
+    return out.code === 0 && !out.timedOut ? 0 : 1;
+  }
+  let out;
+  try {
+    out = sub === 'enable' ? secretary.enable(cfg) : secretary.disable(cfg);
+  } catch (err) {
+    return fail(err, `secretary ${sub} failed`);
+  }
+  if (out.lines.length) process.stdout.write(`${out.lines.map(redact).join('\n')}\n`);
+  for (const p of out.problems) process.stderr.write(`warifuri: ${redact(p)}\n`);
+  return out.problems.length ? 1 : 0;
 }
 
 // warifuri connect: see src/client/connect.mjs.
@@ -481,6 +563,12 @@ function main(argv) {
   if (command === 'backup') return runBackup(rest);
   if (command === 'serve') return runServe(rest);
   if (command === 'connect') return runConnect(rest);
+  if (command === 'secretary') {
+    runSecretary(rest).then((code) => {
+      process.exitCode = code;
+    });
+    return undefined;
+  }
   if (command === 'hook') {
     if (rest[0] !== 'gate') return usage('hook takes gate');
     runHook(rest);

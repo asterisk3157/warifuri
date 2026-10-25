@@ -14,11 +14,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
+import { parseWhen, parseNight } from './secretary/schedule.mjs';
 
 export const SETTINGS_FILE = 'warifuri.env';
 export const SECRETS_FILE = 'secrets.env';
 
-const LEDGER = ['import', 'key', 'backup', 'oauth', 'serve', 'connect'];
+const LEDGER = ['import', 'key', 'backup', 'oauth', 'serve', 'connect', 'secretary'];
+const SECRETARY = ['serve', 'secretary'];
 const CLIENT = ['connect', 'hook'];
 
 const httpUrl = (v) => {
@@ -36,7 +38,8 @@ const httpUrl = (v) => {
 // string), and defText how the documentation shows it. secret: kept in secrets.env and masked.
 // path: a file path; a relative one in a settings file is read from the data directory.
 // commands: the commands that read it. check: returns what is wrong with a value, or null.
-// section: 'client' for the settings of a machine that uses a server (connect and the hook).
+// section: 'client' for the settings of a machine that uses a server (connect and the hook),
+// 'secretary' for the secretary's schedule.
 export const SETTINGS = [
   {
     name: 'WARIFURI_HOME',
@@ -61,14 +64,14 @@ export const SETTINGS = [
     flag: 'host',
     about: '待ち受けるアドレス。この機械の外から受けるときだけ変える',
     def: '127.0.0.1',
-    commands: ['serve'],
+    commands: SECRETARY,
   },
   {
     name: 'WARIFURI_PORT',
     flag: 'port',
     about: '待ち受けるポート',
     def: '8787',
-    commands: ['serve', 'connect'],
+    commands: ['serve', 'connect', 'secretary'],
     check: (v) => (/^\d+$/.test(v) && Number(v) <= 65535 ? null : 'must be a number from 0 to 65535'),
   },
   {
@@ -133,6 +136,69 @@ export const SETTINGS = [
     about: '着手ゲート。off にすると、作業中のタスクがなくても編集を止めない',
     def: 'on',
     commands: ['hook'],
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
+    name: 'WARIFURI_SECRETARY',
+    section: 'secretary',
+    about: '秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く',
+    def: 'off',
+    commands: SECRETARY,
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
+    name: 'WARIFURI_SECRETARY_NIGHTLY',
+    section: 'secretary',
+    about: '毎晩の見張りと組み直しの時刻。HH:MM で毎日、曜日を前に付けると(mon,thu 23:00)その曜日だけ。off で止める',
+    def: '23:00',
+    commands: SECRETARY,
+    check: (v) => parseWhen(v).error ?? null,
+  },
+  {
+    name: 'WARIFURI_SECRETARY_MORNING',
+    section: 'secretary',
+    about: '朝の報告の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ',
+    def: '07:00',
+    commands: SECRETARY,
+    check: (v) => parseWhen(v).error ?? null,
+  },
+  {
+    name: 'WARIFURI_SECRETARY_INBOX',
+    section: 'secretary',
+    about: '受信箱の整理の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。毎晩の仕事と同じ時刻なら、その終わりを待って動く',
+    def: 'sun 23:00',
+    commands: SECRETARY,
+    check: (v) => parseWhen(v).error ?? null,
+  },
+  {
+    name: 'WARIFURI_SECRETARY_NIGHT',
+    section: 'secretary',
+    about: '夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く',
+    def: '23:00-07:00',
+    commands: SECRETARY,
+    check: (v) => parseNight(v).error ?? null,
+  },
+  {
+    name: 'WARIFURI_SECRETARY_TIMEOUT',
+    section: 'secretary',
+    about: '秘書の1回の仕事の上限(分)。超えたら止める',
+    def: '20',
+    commands: SECRETARY,
+    check: (v) => (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 240 ? null : 'must be a number of minutes from 1 to 240'),
+  },
+  {
+    name: 'WARIFURI_SECRETARY_CALENDAR_TOOLS',
+    section: 'secretary',
+    about: '秘書に渡すカレンダーの MCP のツール(mcp__<サーバーの名前> の形、カンマ区切り)。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる。空なら warifuri だけ',
+    commands: SECRETARY,
+    check: (v) => (v.split(',').every((t) => /^mcp__[A-Za-z0-9_.-]+(__[A-Za-z0-9_.*-]+)?$/.test(t.trim())) ? null : 'must be MCP tool names such as mcp__calendar, comma-separated'),
+  },
+  {
+    name: 'WARIFURI_SECRETARY_CONNECTORS',
+    section: 'secretary',
+    about: 'claude.ai のコネクタ(Gmail、カレンダーなど)を秘書にも使わせるか。既定の off では、claude を ENABLE_CLAUDEAI_MCP_SERVERS=false で起こす。カレンダーを渡すときだけ、考えたうえで on にする',
+    def: 'off',
+    commands: SECRETARY,
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
 ];
@@ -320,6 +386,11 @@ export function describeConfig(cfg) {
   return lines.join('\n');
 }
 
+const SECTION_HEADS = {
+  client: '# ---- 使う機械の設定。warifuri connect と着手ゲートのフックが読む ----',
+  secretary: '# ---- 秘書の定時の仕事。warifuri serve と warifuri secretary が読む ----',
+};
+
 // The text of a new warifuri.env: every setting but the data directory and the secrets,
 // commented out, with its default.
 export function settingsTemplate() {
@@ -332,9 +403,7 @@ export function settingsTemplate() {
   let section;
   for (const s of SETTINGS) {
     if (s.name === 'WARIFURI_HOME' || s.secret) continue;
-    if (s.section === 'client' && section !== 'client') {
-      out.push('', '# ---- 使う機械の設定。warifuri connect と着手ゲートのフックが読む ----');
-    }
+    if (s.section && s.section !== section) out.push('', SECTION_HEADS[s.section]);
     section = s.section;
     out.push('', `# ${s.about}${s.defText ? `。既定は ${s.defText}` : ''}`);
     out.push(`# ${s.name}=${typeof s.def === 'string' ? s.def : ''}`);

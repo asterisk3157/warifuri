@@ -87,6 +87,10 @@ test('readContext reads only files listed in knowledge/ and procedures/', (t) =>
   assert.equal(ctx.exists, true);
   assert.equal(ctx.people.text, '- 指導教員: 山田さん\n');
   assert.equal(ctx.knowledge, null);
+  assert.equal(ctx.inbox, null);
+  fs.writeFileSync(path.join(dir, 'inbox.md'), '- 2026-10-24 気づき (laptop)\n');
+  assert.equal(readContext(home, '研究').inbox.text, '- 2026-10-24 気づき (laptop)\n');
+  assert.throws(() => readContext(home, '研究', { name: 'inbox.md' }), /ありません/);
   assert.deepEqual(ctx.files, { knowledge: ['knowledge/装置.md'], procedures: ['procedures/提出.md'] });
 
   assert.equal(readContext(home, '研究', { name: 'knowledge/装置.md' }).text, '装置の決まり\n');

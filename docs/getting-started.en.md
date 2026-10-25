@@ -131,6 +131,27 @@ The package carries a light secretary skill, `warifuri-secretary` (`harness/skil
 
 The skill is written in Japanese. Ask Claude Code or Codex things like "what should I do today", "book time for this", "anything stuck?" or "what's next" and it is used.
 
+## Running the secretary
+
+On the server machine, the secretary can do its work at set times: every day at 23:00 it checks whether each goal can meet its due date and rebooks task time, at 07:00 it writes a morning report, and on Sunday at 23:00 it tidies the inboxes. Its brain is Claude Code on that machine (`claude -p`). No cron job or Task Scheduler entry is needed; `warifuri serve` keeps the clock and wakes it.
+
+1. Install Claude Code on the server machine, start `claude` once and log in yourself. warifuri never reads that login.
+2. Turn the secretary on.
+
+   ```bash
+   warifuri secretary enable
+   ```
+
+3. Restart `warifuri serve`. On start it prints `secretary on:` with the times of the jobs.
+
+To try a job right away, keep `warifuri serve` running and run the command below. claude's output is kept in `secretary/logs/` in the data directory.
+
+```bash
+warifuri secretary run morning
+```
+
+To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times and the night hours are [settings](configuration.md). The secretary can use warifuri's tools only; the claude.ai connectors (mail, calendar) are off for it by default. Give it a calendar only on purpose; how, and how it works, is in the secretary plug-in section of the [architecture](architecture.md) (Japanese).
+
 ## Using it from another machine (GitHub login)
 
 To use it from other machines, or from Claude on the web or in the app, put the server where they can reach it and set up the GitHub login. How to make the GitHub OAuth App, the settings the server needs, and running `warifuri connect --url https://<server> --device <device name>` on each machine are in the sections つなぎ方 (connecting) and 着手ゲート (the start gate) of [Architecture](architecture.md) (in Japanese). Put HTTPS in front when the server is reachable from outside.

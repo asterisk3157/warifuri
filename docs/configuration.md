@@ -38,15 +38,21 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 `WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と着手ゲートのフック(`warifuri hook gate`)が読みます。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
+## 秘書の設定
+
+`WARIFURI_SECRETARY` で始まる項目は、秘書の定時の仕事の設定です。`warifuri serve` と `warifuri secretary` が読みます。`WARIFURI_SECRETARY` は `warifuri secretary enable` と `disable` が書くので、手で書く必要はありません。時刻はサーバーの機械の時刻で読みます。変えたら `warifuri serve` を動かし直します。
+
+秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` に書いたツールだけで、メールなどのほかのコネクタは使えません。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+
 ## 項目
 
 <!-- settings:start -->
 | 名前 | 内容 | 既定 | 引数 | 秘密 | 使うコマンド |
 |---|---|---|---|---|---|
 | `WARIFURI_HOME` | データのフォルダ。設定ファイルとデータベースを置く。設定ファイルの中では書けない | `~/.warifuri` | `--home` |  | すべて |
-| `WARIFURI_DB` | データベースの SQLite のファイル | `WARIFURI_HOME/ledger.sqlite` | `--db` |  | import、key、backup、oauth、serve、connect |
-| `WARIFURI_HOST` | 待ち受けるアドレス。この機械の外から受けるときだけ変える | `127.0.0.1` | `--host` |  | serve |
-| `WARIFURI_PORT` | 待ち受けるポート | `8787` | `--port` |  | serve、connect |
+| `WARIFURI_DB` | データベースの SQLite のファイル | `WARIFURI_HOME/ledger.sqlite` | `--db` |  | import、key、backup、oauth、serve、connect、secretary |
+| `WARIFURI_HOST` | 待ち受けるアドレス。この機械の外から受けるときだけ変える | `127.0.0.1` | `--host` |  | serve、secretary |
+| `WARIFURI_PORT` | 待ち受けるポート | `8787` | `--port` |  | serve、connect、secretary |
 | `WARIFURI_PUBLIC_URL` | ハーネスから見えるサーバーの URL。https で始まり、道を含まない。GitHub のログインに要る | なし | `--public-url` |  | serve |
 | `WARIFURI_GITHUB_USER` | ログインしてよい人の GitHub のユーザー名。GitHub のログインに要る | なし | `--github-user` |  | serve |
 | `WARIFURI_GITHUB_ID` | ログインしてよい人の GitHub の数値の ID。空なら最初のログインで覚える | なし |  |  | serve |
@@ -57,6 +63,14 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む | なし | `--url` |  | connect、hook |
 | `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
 | `WARIFURI_GATE` | 着手ゲート。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
+| `WARIFURI_SECRETARY` | 秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く | `off` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_NIGHTLY` | 毎晩の見張りと組み直しの時刻。HH:MM で毎日、曜日を前に付けると(mon,thu 23:00)その曜日だけ。off で止める | `23:00` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_MORNING` | 朝の報告の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ | `07:00` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_INBOX` | 受信箱の整理の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。毎晩の仕事と同じ時刻なら、その終わりを待って動く | `sun 23:00` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_NIGHT` | 夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く | `23:00-07:00` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_TIMEOUT` | 秘書の1回の仕事の上限(分)。超えたら止める | `20` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_CALENDAR_TOOLS` | 秘書に渡すカレンダーの MCP のツール(mcp__<サーバーの名前> の形、カンマ区切り)。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる。空なら warifuri だけ | なし |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_CONNECTORS` | claude.ai のコネクタ(Gmail、カレンダーなど)を秘書にも使わせるか。既定の off では、claude を ENABLE_CLAUDEAI_MCP_SERVERS=false で起こす。カレンダーを渡すときだけ、考えたうえで on にする | `off` |  |  | serve、secretary |
 <!-- settings:end -->
 
 一覧はコードの中の1つの表から作っています。項目を足したり変えたりしたら、`node scripts/settings-table.mjs --write` でこの表を書き直します。食い違ったままだとテストが落ちます。
