@@ -1,14 +1,12 @@
 # はじめかた
 
-warifuri を自分の PC に入れて、Claude Code や Codex からつなぐまでの手順です。
+## 前提条件
 
-## 必要なもの
-
-- Node.js 22.13 以上(データベースに Node の `node:sqlite` を使うため)
-- Claude Code か Codex、またはその両方。`claude` か `codex` のコマンドが PATH から見えていること
-- Codex を使うときは、`codex mcp add` とフック(`/hooks`)がある新しめの Codex。たとえば 0.164 以降なら動きます。0.23 のようなとても古い版には `codex mcp add` がありません
-
-Windows、macOS、Linux で動きます。
+| 項目 | 条件 |
+|---|---|
+| OS | Windows・macOS・Linux |
+| Node.js | 22.13 以上 |
+| AI エージェント | Claude Code(v2.1.310 以上)、Codex(v0.164 以上)。どちらか一方でも、両方でも使えます |
 
 ## インストール
 
@@ -16,163 +14,257 @@ Windows、macOS、Linux で動きます。
 npm install -g warifuri
 ```
 
-`warifuri --help` で使えるコマンドの一覧が、`warifuri --version` で入っている版が出ます。
+<details>
+<summary>Windows の PowerShell で動かないとき</summary>
 
-Windows の PowerShell では、PC によってはそのまま `warifuri` で動きます。「このシステムではスクリプトの実行が無効になっている」と断られたときだけ、`warifuri` の代わりに `warifuri.cmd` と打ってください。npm が置く `warifuri.ps1` が、PowerShell の実行ポリシーで止められているためです。`connect` が書く着手ゲートのフックは、Windows でははじめから `warifuri.cmd` を呼ぶので、実行ポリシーの影響を受けません。
+「このシステムではスクリプトの実行が無効になっています」と表示された場合は、`warifuri` の代わりに `warifuri.cmd` と入力してください。
 
-## はじめる
+</details>
 
-### 1. データのフォルダを作る
+<details>
+<summary>macOS・Linux で動かないとき</summary>
+
+`npm install -g` で「EACCES」と表示された場合は、`sudo` を付けずに、nvm などで自分のユーザーに Node.js をインストールし直してください。
+
+「command not found: warifuri」と表示された場合は、`npm prefix -g` で表示されるフォルダの `bin` を PATH に追加してください。
+
+</details>
+
+## 使い方
+
+| 使い方 | 内容 | 参照箇所 |
+|---|---|---|
+| 1台で使う | 自分の PC だけで使う | 下の 1〜3 |
+| ホストする | VM や常に起動している PC にサーバーを置き、ほかの PC からも使う | 下の 1・2 と[ホストする場合](#ホストする場合) |
+| クライアントとして使う | ホストされたサーバーに、別の PC から接続する | [クライアントとして使う場合](#クライアントとして使う場合) |
+
+### 1. データフォルダの作成
 
 ```bash
 warifuri init
 ```
 
-データのフォルダ `~/.warifuri/`(Windows では `%USERPROFILE%\.warifuri`)に、設定ファイル `warifuri.env` のひな形、空の `secrets.env`、空の `profiles/` を作ります。すでにあるファイルは書き換えません。
+`~/.warifuri/`(Windows では `%USERPROFILE%\.warifuri`)に、設定ファイル `warifuri.env` のひな形などを作ります。すでにあるファイルは書き換えません。
 
-### 2. サーバーを動かす
+### 2. サーバーの起動
 
 ```bash
 warifuri serve
 ```
 
-起動すると、次のような行が出ます。
+`warifuri: serving http://127.0.0.1:8787/mcp` と表示されれば起動しています。データベース(`~/.warifuri/ledger.sqlite`)は最初の起動で作られ、この PC の中(`127.0.0.1`)からの接続だけを受け付けます。
 
-```
-warifuri: serving http://127.0.0.1:8787/mcp
-warifuri: GitHub login off (missing …); only device keys work
-warifuri: web screens at http://127.0.0.1:8787/calendar (open from this machine, no login)
-```
+<details>
+<summary>「GitHub login off」について</summary>
 
-1行目が出れば動いています。2行目は、GitHub のログインを設定していないので、シークレットだけでつなぐという知らせです。1台の PC だけで使うときはいつもこう出るので、そのままでかまいません。GitHub のログインは、別の機械から使うときにだけ設定します(下の「別の機械から使う」の節)。3行目は Web 画面の URL です。
+GitHub ログインを設定していないため、シークレットだけで接続するという意味です。1台で使う場合は、このままで問題ありません。ほかの PC から使う場合は、[ホストする場合](#ホストする場合)を見てください。
 
-データベース(`~/.warifuri/ledger.sqlite`)は、最初の起動のときにできます。サーバーはこの PC の中(`127.0.0.1`)からしか受けません。
+</details>
 
-使うあいだは、このターミナルを開いたままにします。止めるときは Ctrl+C を押します。ターミナルを閉じても動き続けるようにする方法は、この文書では扱いません。Windows なら、タスク スケジューラにログオン時の起動として登録する手があります。
+<details>
+<summary>ポートを変更する(8787 番以外を使う)</summary>
 
-#### ポートを変える
+8787 番をほかのアプリが使っている場合は、`warifuri.env` に `WARIFURI_PORT=8788` のように書きます。`serve` と `connect` の両方がこの値を読みます。`connect` を実行したあとで変えた場合は、`warifuri.env` の `WARIFURI_SERVER_URL` の行を削除してから、`connect` をもう一度実行してください。
 
-8787 番のポートをほかのアプリが使っていて起動できないときは、`warifuri.env` に `WARIFURI_PORT=8788` のように書きます。`serve` と `connect` の両方がこの値を読むので、このあとの `connect` もそのポートでつなぎます。一度だけ試すなら `warifuri serve --port 8788` でもかまいませんが、そのときは `connect` にも同じ `--port 8788` を付けます。ポートを変えたら、この文書の URL に出てくる `8787` を、その番号に読み替えてください。
+</details>
 
-すでに `connect` を実行したあとでポートを変えたときは、`connect` が `warifuri.env` に書いた `WARIFURI_SERVER_URL` の行を消してから、`connect` をもう一度実行します。
+### 3. Claude Code と Codex への接続
 
-### 3. Claude Code と Codex につなぐ
-
-別のターミナルを開いて、次を実行します。サーバーを一度起動してデータベースができてから実行してください。
+サーバーを一度起動したら、別のターミナルで次を実行します。
 
 ```bash
 warifuri connect
 ```
 
-`connect` は、この PC で次のことをします。
+<details>
+<summary>connect の詳細</summary>
 
-- このデバイス(機械)のシークレット(warifuri サーバーに入るための、`wf_` で始まる文字列)を発行して、`~/.warifuri/device.key` に本人だけが読める形で置きます。macOS と Linux では、ファイルの権限を本人だけにします(600)。Windows では、ユーザーのフォルダの権限(ACL)で守られ、ほかのユーザーからは読めません。ただし、その PC の管理者は読めます。デバイスの名前は、既定では PC のホスト名です。`--device <名前>` で変えられます。
-- PATH にある `claude` と `codex` に、MCP サーバーを `warifuri` の名前で登録します。
-- 着手ゲートのフックを、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に足します。
-- 軽い秘書のスキルを写します(下の節)。
+- この PC 用のシークレット(`wf_` で始まる文字列)を発行し、あなただけが読めるファイル `~/.warifuri/device.key` に保存します。デバイス名は PC のホスト名で、`--device <名前>` で変更できます。
+- `claude` と `codex` に、MCP サーバーを `warifuri` という名前で登録します。
+- タスク確認を、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に追加します。
+- 秘書のスキルをコピーします。
 
-すでにある設定ファイルを書き換えるときは、その前に元のファイルを `<ファイル>.bak-warifuri-<日時>` として隣に写します。新しく作るファイルや、書き換えるところのないファイルでは、写しを作りません。ほかのフックや設定はそのまま残ります。何度実行しても同じ形になります。何をするかだけを見たいときは `warifuri connect --dry-run`、片方だけにつなぐときは `--harness claude` か `--harness codex` を付けます。
+書き換える設定ファイルは、先に `<ファイル>.bak-warifuri-<日時>` としてバックアップします。何度実行しても同じ結果になります。
 
-Codex への登録で `connect` が失敗したときは、Codex が古いことがあります。Codex を新しい版にしてから、`warifuri connect --harness codex` をもう一度実行してください。
+| オプション | 内容 |
+|---|---|
+| `--dry-run` | 何をするかだけ表示する |
+| `--harness claude`・`--harness codex` | 片方だけに接続する |
+| `--no-hook` | タスク確認を設定しない |
+| `--no-skills` | 秘書のスキルをコピーしない |
+| `--force` | スキルを新しい版に入れ替える |
 
-#### Claude Code
+</details>
 
-`connect` のあとに Claude Code を起動すれば使えます。登録されたかは次で確かめられます。
+> 🟧 **Claude Code**
+>
+> 起動後、`/mcp`(またはターミナルの `claude mcp list`)で `warifuri` が `Connected` になっていれば、そのまま使えます。
 
-```bash
-claude mcp list
-```
+> ⬛ **Codex**
+>
+> `connect` が作ったシークレットのファイル(`~/.warifuri/device.key`)の中身を、環境変数 `WARIFURI_DEVICE_KEY` に設定してから `codex` を起動します。起動したら、Codex の中で `/hooks` を開き、タスク確認を一度信頼してください。
+>
+> macOS・Linux の場合:
+>
+> ```bash
+> export WARIFURI_DEVICE_KEY="$(cat ~/.warifuri/device.key)"
+> ```
+>
+> Windows(PowerShell)の場合:
+>
+> ```powershell
+> $env:WARIFURI_DEVICE_KEY = (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim()
+> ```
+>
+> <details>
+> <summary>毎回設定しないで済ませる(Windows)</summary>
+>
+> ```powershell
+> [Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim(), 'User')
+> ```
+>
+> </details>
+>
+> 接続できたかは、Codex に「warifuri の board を見せて」と頼んで確かめられます。
 
-`warifuri` の行が出て、`Connected` となっていれば、つながっています。`warifuri serve` が止まっていると `Failed` と出るので、サーバーを動かしてから確かめ直してください。Claude Code の中では `/mcp` でも見られます。
+### ホストする場合
 
-#### Codex
+GitHub ログインを用いることで、VM や常に起動している PC に置いたサーバーに、ほかの PC や Claude の Web・アプリから接続できます。
 
-Codex は、シークレットを環境変数 `WARIFURI_DEVICE_KEY` から読みます。Codex を起動するターミナルで、シークレットのファイルの中身をこの変数に入れてから `codex` を起動します。
+<details>
+<summary>手順(公開 URL を https://warifuri.example.com にする例)</summary>
 
-macOS と Linux:
+1. 上の 1・2 のとおり、サーバーの PC で `warifuri init` と `warifuri serve` を実行します。
+2. サーバーの前に HTTPS を置き、外から接続できる URL(公開 URL)を用意します。たとえば、同じ PC で Caddy を使う場合は、次の設定で HTTPS の証明書も自動で用意されます。
 
-```bash
-export WARIFURI_DEVICE_KEY="$(cat ~/.warifuri/device.key)"
-```
-
-Windows の PowerShell:
-
-```powershell
-$env:WARIFURI_DEVICE_KEY = (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim()
-```
-
-毎回入れるのが手間なら、macOS と Linux ではシェルの設定ファイル(`~/.zshrc` など)に同じ行を書きます。Windows では、ユーザーの環境変数に入れておけます。入れたあとに開いたターミナルから使えます。
-
-```powershell
-[Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim(), 'User')
-```
-
-最後に、Codex の中で `/hooks` を開き、足した着手ゲートのフックを一度信頼します。Codex は、信頼したフックだけを動かします。
-
-`codex mcp list` では、`warifuri` が登録されているかを確かめられます。ただし、ここに出るのは登録だけで、いまサーバーにつながるかどうかは出ません。つながるかは、Codex の中で「warifuri の board を見せて」のように頼み、warifuri のツールが使えるかで確かめます。
-
-### 着手ゲート
-
-着手ゲートは、エージェントがファイルを編集する前に走るフックです。登録した作業フォルダの中で、このデバイスが持っているタスクがないと、編集を止めて、先にタスクを探すか作って `start` するようエージェントに返します。サーバーに届かないときは止めません。
-
-着手ゲートが働くのは、作業フォルダとして登録したフォルダの中だけです。登録していないフォルダでは、何も止めません。作業フォルダを登録するときは、そのフォルダで Claude Code か Codex を起動して、「このフォルダを作業フォルダに登録して」のように頼みます。エージェントが MCP の `place` のツールで登録します。プロフィール(仕事、研究など)も、そのときに一緒に付けられます。
-
-止めたくないときは、`warifuri.env` に `WARIFURI_GATE=off` と書きます。最初から入れないときは、`warifuri connect --no-hook` でつなぎます。
-
-## Web 画面
-
-`warifuri serve` が動いているあいだは、ブラウザで http://127.0.0.1:8787/ を開くと、カレンダーの画面(`/calendar`)に移り、ゴールとタスクと予定を見られます。`serve` が起動のときに出す URL は、この移った先の `/calendar` です。
-
-## 軽い秘書のスキル
-
-パッケージには、軽い秘書のスキル `warifuri-secretary` が入っています(`harness/skills/warifuri-secretary/`)。常駐はせず、呼ばれたときだけデータベースを読み、今日やることの整理、予定への時間の確保、止まっているものの片づけ、次の一手の提案をします。書き込むのは、本人が了承したものだけです。
-
-`warifuri connect` が、このスキルを `~/.claude/skills/warifuri-secretary/` と `~/.codex/skills/warifuri-secretary/` に写します。Codex のほうは、`~/.codex/skills/` があるときだけ写します。Codex にも入れたいときは、このフォルダを作ってから `warifuri connect --force` を実行します。すでにあるファイルは残すので、新しい版のスキルに入れ替えるときも `warifuri connect --force` を実行します。スキルを入れないときは `--no-skills` を付けます。
-
-Claude Code や Codex に「今日なにやる」「時間を取っておいて」「止まってるものある?」「次なにする」のように話しかけると、このスキルが使われます。
-
-## 秘書を動かす
-
-サーバーの機械では、秘書に決まった時刻の仕事をさせられます。毎日 23:00 にゴールが期日に間に合うかを見て予定を組み直し、07:00 に会話で朝のあいさつをして決めてほしいことを聞き、日曜の 23:00 に受信箱を整理します。秘書の頭は、その機械の Claude Code(`claude -p`)です。cron やタスク スケジューラは要らず、`warifuri serve` が時刻を見て起こします。
-
-1. サーバーの機械に Claude Code を入れ、一度 `claude` を起動して、自分でログインします。warifuri はこのログインを読みません。
-2. 秘書を入れます。
-
-   ```bash
-   warifuri secretary enable
+   ```
+   warifuri.example.com {
+     reverse_proxy 127.0.0.1:8787
+   }
    ```
 
-3. `warifuri serve` を動かし直します。起動のときに `secretary on:` と、仕事の時刻が出ます。
+   HTTPS を置く PC がサーバーの PC と別の場合は、`warifuri.env` の `WARIFURI_HOST` も変更します。
+3. GitHub の Settings → Developer settings → OAuth Apps で、次のように OAuth App を作ります。
 
-すぐに1つ動かして確かめるときは、`warifuri serve` を動かしたまま、次を実行します。`claude` の出力は、データのフォルダの `secretary/logs/` に残ります。
+   | 項目 | 例 |
+   |---|---|
+   | Application name | `warifuri` |
+   | Homepage URL | `https://warifuri.example.com` |
+   | Authorization callback URL | `https://warifuri.example.com/oauth/github/callback` |
+
+4. データフォルダの2つのファイルに次を書き、`warifuri serve` を再起動します。
+
+   `warifuri.env`:
+
+   ```
+   WARIFURI_PUBLIC_URL=https://warifuri.example.com
+   WARIFURI_GITHUB_USER=<あなたの GitHub のユーザー名>
+   WARIFURI_GITHUB_CLIENT_ID=<OAuth App の Client ID>
+   ```
+
+   `secrets.env`:
+
+   ```
+   WARIFURI_GITHUB_CLIENT_SECRET=<OAuth App の Client Secret>
+   ```
+
+</details>
+
+起動時に「GitHub login off」が表示されなければ、GitHub ログインが使えます。足りない項目は `warifuri config` で確認できます。
+
+### クライアントとして使う場合
+
+ホストされたサーバーに、別の PC から接続します。この PC にも warifuri をインストールしてから、次を実行します。
 
 ```bash
-warifuri secretary run morning
+warifuri connect --url https://<サーバー> --device <デバイス名>
 ```
 
-秘書とは、Web 画面の「秘書」(`/secretary`)で話せます。下の欄に書いて送ると、秘書が台帳を確かめ、返事が書かれるそばから流れて出ます。クリップのボタンや貼り付けで、画像やファイルも添えられます。秘書が選んで答えられることを聞くときは質問のカードが1問ずつ出るので、選んで「答える」を押します(「あとで」も選べます)。どの発言からでも「スレッドで話す」で右にスレッドを開け、そこで話したことの要点はメインの会話の秘書にも届きます。朝の 07:00 の分は、この会話に「定期実行」の印つきで届きます。
+最初に使うときにブラウザが開くので、GitHub でログインし、この PC のデバイス名を選びます。
 
-止めるときは `warifuri secretary disable` を実行し、`warifuri serve` を動かし直します。時刻や夜の時間帯は[設定](configuration.md)で変えられます。秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを渡すかどうかは、考えて決めてください。渡し方と仕組みは、[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+<details>
+<summary>接続の許可の画面</summary>
 
-## 別の機械から使う(GitHub のログイン)
+GitHub でログインすると、次の画面が開きます。
 
-ほかの機械や、Claude の Web やアプリから使うときは、サーバーを外から届く場所に置き、GitHub のログインを設定します。GitHub の OAuth App の作り方、サーバーに渡す設定、使う機械での `warifuri connect --url https://<サーバー> --device <デバイスの名前>` の流れは、[構成](architecture.md)の「つなぎ方」と「着手ゲート」の節にあります。外に出すときは、前に HTTPS を置いてください。
+![接続の許可の画面](images/consent.png)
+
+- 上の枠:接続しようとしているアプリの名前と戻り先です。名前はアプリが自分で名乗るものなので、戻り先(`claude.ai` など)が合っているかで確かめてください。
+- このデバイスを登録:同じ PC のほかのエージェントですでに名前を付けている場合は、ここから選びます。
+- 新しいデバイス:初めて接続する PC の場合は、名前を英数字と `.` `_` `-` で入力します。
+- 「許可する」を押すと、エージェントからデータベースを読み書きできるようになります。
+
+</details>
+
+タスク確認を使うには、この PC のシークレットも必要です。サーバーの PC で次を実行し、表示されたシークレットを、この PC の `~/.warifuri/device.key` に1行で書きます。
+
+```bash
+warifuri key add <デバイス名>
+```
+
+## タスク確認
+
+タスク確認は、エージェントがファイルを編集する直前に、担当中のタスクがあるかを確かめる仕組みです。ない場合は編集を止め、先にタスクを探すか作成して担当する(`start`)ようエージェントに伝えます。サーバーに接続できないときは止めません。
+
+タスク確認が動くのは、作業フォルダとして登録したフォルダの中だけです。登録するには、そのフォルダでエージェントに「このフォルダを作業フォルダに登録して」と頼みます。止めたい場合は、`warifuri.env` に `WARIFURI_GATE=off` と書きます。
+
+## Web UI
+
+サーバーの起動中に http://127.0.0.1:8787/ を開くと、ゴール・タスク・予定を確認できます。ホストしている場合は、公開 URL を開いて GitHub でログインします。
+
+## 秘書のスキル
+
+Claude Code や Codex に「今日なにやる」「止まってるものある?」「次なにする」のように話しかけると、秘書のスキル `warifuri-secretary` が使われます。今日やることの整理、予定の確保、止まっているタスクの片づけ、次の一手の提案をします。データを変えるのは、あなたが了承したものだけです。
+
+## 秘書
+
+秘書は、タスク管理と予定調整を定期実行する AI エージェントです。既定ではオフです。
+
+| 時刻 | 仕事 |
+|---|---|
+| 毎日 23:00 | ゴールが期日に間に合うかを確かめ、予定を組み直す |
+| 毎日 07:00 | 朝のあいさつをして、決めてほしいことを聞く |
+| 日曜 23:00 | 受信箱を整理する |
+
+秘書の本体は、サーバーの PC の Claude Code(`claude -p`)で、`warifuri serve` が決まった時刻に起動します。
+
+### 有効にする
+
+サーバーの PC で Claude Code にログインしてから、次を実行し、`warifuri serve` を再起動します。
+
+```bash
+warifuri secretary enable
+```
+
+止める場合は `warifuri secretary disable` を実行し、`warifuri serve` を再起動します。時刻は[設定](configuration.md)で変更できます。
+
+### 秘書と話す
+
+Web UI の「秘書」(`/secretary`)で話せます。画像やファイルの添付、選択肢で答える質問、発言ごとのスレッドが使えます。07:00 の分は、この会話に「定期実行」の印つきで届きます。
+
+<details>
+<summary>秘書が使えるもの</summary>
+
+秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを使わせるかは、よく考えて決めてください。設定方法と仕組みは、[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+
+</details>
 
 ## 設定
 
-設定は、データのフォルダの `warifuri.env` に `名前=値` の形で書きます。秘密は `secrets.env` に分けます。項目の一覧と読む順は[設定](configuration.md)にあります。いまの値と、それをどこから読んだかは、次で確かめられます。
+設定は、データフォルダの `warifuri.env` に `名前=値` の形で書きます。秘密の値は `secrets.env` に分けます。項目の一覧は[設定](configuration.md)に、設定の例は [examples/](../examples/README.md) にあります。今の値は `warifuri config` で確認できます。
 
-```bash
-warifuri config
-```
+<details>
+<summary>文字コードの注意(Windows)</summary>
 
-架空の人の設定を、写して書き換えれば使える例として [examples/](../examples/README.md) に置いています。プロフィールのファイル(`profiles/`)の書き方も、そこで見られます。
+`warifuri.env` は UTF-8 で保存してください。Windows PowerShell 5.1 の `>>` で行を書き足すと、その部分だけ UTF-16 になり、読めなくなります。
 
-`warifuri.env` は、メモ帳などのエディターで開いて書き換えます。保存するときは、文字コードに UTF-8 を選んでください。Windows PowerShell 5.1 の `>>` で行を書き足すのは避けてください。書き足した部分が UTF-16 になり、1つのファイルの中で文字コードが混ざって読めなくなります。warifuri は、BOM の付いた UTF-8 のファイルや、ファイル全体が UTF-16 のファイルも読み、UTF-16 のときは UTF-8 で保存し直すよう注意を出します。それでも、UTF-8 で保存しておくのがおすすめです。
+</details>
 
-## 更新と削除
+## 更新・バックアップ・アンインストール
 
-更新するときは、サーバーを止めてから入れ直し、スキルを新しい版に入れ替えます。
+### 更新
+
+サーバーを停止してから、次を実行します。
 
 ```bash
 npm install -g warifuri@latest
@@ -182,28 +274,23 @@ npm install -g warifuri@latest
 warifuri connect --force
 ```
 
-データベースは、日付つきのファイルに写しておけます。新しいほうから `--keep` の数(既定は7)だけ残し、古いものは消します。`warifuri serve` を動かしたままでも写せます。
+### バックアップ
+
+データベースを日付つきのファイルにバックアップします。サーバーの起動中でも実行でき、新しいものから7つ(`--keep` で変更可)を残します。
 
 ```bash
-warifuri backup --dir <写す先のフォルダ>
+warifuri backup --dir <バックアップ先のフォルダ>
 ```
 
-削除するときは、次の順に進めます。
+### アンインストール
 
-1. `warifuri serve` を動かしているターミナルで Ctrl+C を押し、サーバーを止めます。
-2. 着手ゲートのフックとスキルを外します。Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` を開き、`hooks` の `PreToolUse` から、`warifuri hook gate`(Windows では `warifuri.cmd hook gate`)を呼ぶ項目を手で消します。Claude Code では、次のような形の項目です。
+<details>
+<summary>手順</summary>
 
-   ```json
-   {
-     "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-     "hooks": [
-       { "type": "command", "command": "warifuri hook gate", "timeout": 10 }
-     ]
-   }
-   ```
-
-   Codex では、`matcher` が `apply_patch|Edit|Write` で、`statusMessage` も付いています。ほかのフックと同じ `hooks` の中に並んでいるときは、warifuri の1件だけを消します。スキルは、`~/.claude/skills/warifuri-secretary/` と `~/.codex/skills/warifuri-secretary/` のフォルダを消します。
-3. `connect` が登録した MCP サーバーを外します。
+1. サーバーを停止します。
+2. Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` の `hooks` の `PreToolUse` から、`warifuri hook gate`(Windows では `warifuri.cmd hook gate`)を呼ぶ項目を削除します。ほかのフックは残してください。
+3. スキルのフォルダ `~/.claude/skills/warifuri-secretary/` と `~/.codex/skills/warifuri-secretary/` を削除します。
+4. MCP サーバーの登録を削除します。
 
    ```bash
    claude mcp remove --scope user warifuri
@@ -213,16 +300,13 @@ warifuri backup --dir <写す先のフォルダ>
    codex mcp remove warifuri
    ```
 
-4. Codex のために入れたシークレットの環境変数を消します。Windows では、ユーザーの環境変数から外します。macOS と Linux では、シェルの設定ファイルに書いた `export WARIFURI_DEVICE_KEY=…` の行を消します。
-
-   ```powershell
-   [Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', $null, 'User')
-   ```
-
-5. パッケージを外します。
+5. 環境変数 `WARIFURI_DEVICE_KEY` を設定していた場合は、削除します。
+6. パッケージをアンインストールします。
 
    ```bash
    npm uninstall -g warifuri
    ```
 
-6. 最後に、データのフォルダ `~/.warifuri/` を消します。データベースと設定とシークレットが入っているので、要らなくなったときだけ消してください。
+7. 不要になった場合は、データフォルダ `~/.warifuri/` を削除します。データベース・設定・シークレットが入っています。
+
+</details>
