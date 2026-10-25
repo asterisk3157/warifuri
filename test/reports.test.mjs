@@ -57,7 +57,7 @@ test('schema: a version 6 file gains reports and keeps its records; reports are 
   assert.throws(() => ins.run('2026-10-02T00:00:00.000Z', 'human', null, 'report', 'r1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 7);
+  assert.equal(SCHEMA_VERSION, 8);
   const L = openLedger(file, { now: handClock().now });
   assert.deepEqual(L.records('profile').map((r) => [r.id, r.entity]), [[1, 'settings']]);
   const r = L.writeReport({ kind: 'nightly', title: 'Tonight', body: 'All on track.' }, SECRETARY);
@@ -66,7 +66,7 @@ test('schema: a version 6 file gains reports and keeps its records; reports are 
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '7');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, String(SCHEMA_VERSION));
   assert.equal(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'records_v6'").get(), undefined);
   assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE name = 'reports_created'").get());
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);

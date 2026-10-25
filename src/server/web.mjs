@@ -1,7 +1,8 @@
 // The Web screens: カレンダー, タスク, サーバー, 秘書 and 設定, for the person to read the ledger in a
 // browser. The pages are static files in src/web/ (no build step), fed by read-only JSON under
-// /web/api/. The one write is the person's profile (name, bio, colour), kept in the settings
-// table and recorded.
+// /web/api/. The writes are the person's profile (name, bio, colour), kept in the settings
+// table, and the conversation with the secretary on 秘書: a message, and an answer to a
+// proposal. Each is recorded.
 //
 // Who may look:
 // - Open: when the server listens only on this machine (a loopback host), no public URL is
@@ -24,7 +25,8 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
-import { LedgerError } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD } from '../ledger/ledger.mjs';
+import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { listBackups } from '../ledger/backup.mjs';
 import { profileDir } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
@@ -43,8 +45,9 @@ const MAX_LOGINS = 10;
 const MAX_SESSIONS = 100;
 const RECENT_DONE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RANGE_MS = 42 * 24 * 60 * 60 * 1000;
-// How many of the secretary's reports the 秘書 screen shows.
+// How many of the secretary's reports and messages the 秘書 screen shows.
 const SECRETARY_REPORTS = 30;
+const SECRETARY_MESSAGES = 100;
 
 // The profile's colours to choose from, and its limits.
 export const PROFILE_COLORS = ['#8cc4ea', '#8fd3b2', '#a9a3ec', '#e7a9d8', '#f1c47e', '#c9ced6'];
@@ -283,7 +286,8 @@ function notice(res, status, title, text, link) {
 // public URL, or null. trustProxy: express's trust proxy value, when one is set. githubUser:
 // the GitHub login of the person, when the GitHub login is on. limit: the rate limit per
 // address. githubLogin: whether the login page offers GitHub (the router of oauth.mjs then
-// calls finishLogin). now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
+// calls finishLogin). chat: the conversation runner (src/secretary/chat.mjs), or null when the
+// secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
 export function createWeb({
   ledger,
   home = null,
@@ -292,6 +296,7 @@ export function createWeb({
   trustProxy,
   githubUser = null,
   githubLogin = false,
+  chat = null,
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
@@ -336,6 +341,8 @@ export function createWeb({
     next();
   };
   const smallJson = express.json({ limit: '8kb', strict: true });
+  // A message may be MESSAGE_MAX characters of three bytes each.
+  const messageJson = express.json({ limit: '32kb', strict: true });
 
   // The one-time login. The page reads the token after the #, posts it here and goes on to the
   // calendar, so that the next request is same-site and the Strict cookie goes.
@@ -512,10 +519,71 @@ export function createWeb({
     });
   });
 
-  // The secretary's latest reports, newest first.
-  api.get('/secretary', (req, res) => {
+  // 秘書: one timeline of the secretary's reports and the conversation's messages and
+  // proposals, oldest first (the newest at the bottom), with whether the secretary can answer.
+  const secretaryOut = () => {
     const { reports } = ledger.listReports({ limit: SECRETARY_REPORTS });
-    res.json({ now: nowIso(), reports: reports.map((r) => ({ id: r.id, kind: r.kind, title: r.title, body: r.body, created_at: r.created_at })) });
+    const thread = ledger.getThread(SECRETARY_THREAD.kind);
+    const messages = thread ? ledger.listMessages(thread.id, { limit: SECRETARY_MESSAGES }) : [];
+    const items = [
+      ...reports.map((r) => ({ type: 'report', id: r.id, kind: r.kind, title: r.title, body: r.body, created_at: r.created_at })),
+      ...messages.map((m) =>
+        m.kind === 'proposal'
+          ? {
+            type: 'proposal', id: m.id, autonomy_kind: m.autonomy_kind, label: AUTONOMY_KINDS.find((k) => k.kind === m.autonomy_kind)?.label ?? null, title: m.title, body: m.body, about: m.about, state: m.state,
+            answer: m.answer, answered_at: m.answered_at, done_at: m.done_at, done_note: m.done_note, created_at: m.created_at,
+          }
+          : { type: 'message', id: m.id, role: m.role, body: m.body, created_at: m.created_at }),
+    ].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+    const status = chat ? chat.status() : { on: false, replying: false, waiting: 0 };
+    return { now: nowIso(), secretary: { on: status.on, replying: status.replying }, items };
+  };
+  api.get('/secretary', (req, res) => res.json(secretaryOut()));
+
+  // A message to the secretary: { text }. The reply comes later; the screen reads it again.
+  api.post('/secretary/messages', sameOrigin, messageJson, (req, res) => {
+    const body = req.body;
+    const unknown = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body).filter((k) => k !== 'text') : ['body'];
+    if (unknown.length || typeof body.text !== 'string') {
+      res.status(400).json({ error: 'refused', problems: [`送る形は { "text": "…" } です(${MESSAGE_MAX} 文字まで)`] });
+      return;
+    }
+    if (!chat?.on) {
+      res.status(409).json({ error: 'secretary off', problems: ['秘書が止まっているので、送れません'] });
+      return;
+    }
+    try {
+      const m = chat.send(body.text, { actor: 'web', device: null });
+      res.status(202).json({ id: m.id, ...secretaryOut() });
+    } catch (err) {
+      if (err instanceof LedgerError) return res.status(400).json({ error: 'refused', problems: err.problems });
+      throw err;
+    }
+    return undefined;
+  });
+
+  // The person's answer to an open proposal: { answer: approved | changed | refused, text }.
+  // It works with the secretary off too; the secretary carries it out on its next run.
+  api.post('/secretary/proposals/:id', sameOrigin, smallJson, (req, res) => {
+    const body = req.body;
+    const ok = body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).every((k) => ['answer', 'text'].includes(k));
+    if (!ok || !PROPOSAL_ANSWERS.includes(body.answer) || (body.text !== undefined && typeof body.text !== 'string')) {
+      res.status(400).json({ error: 'refused', problems: [`送る形は { "answer": "${PROPOSAL_ANSWERS.join('|')}", "text": "…" } です(${ANSWER_MAX} 文字まで)`] });
+      return;
+    }
+    const target = ledger.getMessage(req.params.id);
+    if (!target || target.kind !== 'proposal') {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    try {
+      const out = ledger.answerProposal(target.id, { answer: body.answer, said: body.text }, { actor: 'web', device: null });
+      res.json({ announce: out.outcome.announce, ...secretaryOut() });
+    } catch (err) {
+      if (err instanceof LedgerError) return res.status(400).json({ error: 'refused', problems: err.problems });
+      throw err;
+    }
+    return undefined;
   });
 
   api.get('/settings', (req, res) => {
@@ -544,7 +612,7 @@ export function createWeb({
 
   api.get('/profile', (req, res) => res.json(profileOut()));
 
-  // The one write to the ledger.
+  // The person's profile.
   api.post('/profile', sameOrigin, smallJson, (req, res) => {
     const checked = checkProfile(req.body);
     if (checked.problems) {

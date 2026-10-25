@@ -39,6 +39,17 @@ export const BOOKING_MAX_MS = 24 * 60 * 60 * 1000;
 export const REPORT_KINDS = ['nightly', 'morning', 'inbox'];
 export const REPORT_TITLE_MAX = 200;
 export const REPORT_BODY_MAX = 20000;
+// 会話: a thread's runner, who wrote a message, and the states of a proposal. The person's
+// message is kept short enough to read back; the secretary's reply may be as long as a report.
+export const THREAD_KINDS = ['secretary'];
+export const THREAD_RUNNERS = ['resume', 'resident'];
+export const MESSAGE_ROLES = ['user', 'secretary', 'system'];
+export const MESSAGE_MAX = 4000;
+export const PROPOSAL_STATES = ['open', 'approved', 'changed', 'refused'];
+// The answers the person gives to a proposal, as autonomy outcomes (revoked comes later, after
+// the fact, through autonomy_outcome).
+export const PROPOSAL_ANSWERS = ['approved', 'changed', 'refused'];
+export const ANSWER_MAX = 1000;
 
 // Fields that belong to a state. Leaving the state clears them.
 export const STATE_FIELDS = {
@@ -316,6 +327,31 @@ export function checkReport(row) {
   else if (charLength(row.body) > REPORT_BODY_MAX) p.push(`本文(body)は ${REPORT_BODY_MAX} 文字までです。長いものは分けます`);
   // eslint-disable-next-line no-control-regex
   else if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(row.body)) p.push('本文(body)には、改行とタブのほかの制御文字を入れられません');
+  return p;
+}
+
+// A message as it is about to be stored: body has its line ends as \n already. The person's
+// messages are at most MESSAGE_MAX characters; the others at most REPORT_BODY_MAX.
+export function checkMessage(row) {
+  const p = [];
+  if (!MESSAGE_ROLES.includes(row.role)) p.push(`だれのメッセージか(role)は ${MESSAGE_ROLES.join(', ')} のどれかです`);
+  const max = row.role === 'user' ? MESSAGE_MAX : REPORT_BODY_MAX;
+  if (typeof row.body !== 'string' || row.body.trim() === '') p.push('本文(body)が要ります');
+  else if (charLength(row.body) > max) p.push(`本文(body)は ${max} 文字までです`);
+  // eslint-disable-next-line no-control-regex
+  else if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(row.body)) p.push('本文(body)には、改行とタブのほかの制御文字を入れられません');
+  return p;
+}
+
+// A proposal: a message of the secretary with an autonomy kind and a one-line title.
+export function checkProposal(row) {
+  const p = checkMessage(row);
+  if (!AUTONOMY_KINDS.some((k) => k.kind === row.autonomy_kind)) {
+    p.push(`案の種類(kind)は ${AUTONOMY_KINDS.map((k) => k.kind).join(', ')} のどれかです(原則13)`);
+  }
+  if (typeof row.title !== 'string' || row.title.trim() === '') p.push('案には題名(title)が要ります');
+  else if (/[\r\n]/.test(row.title)) p.push('題名(title)は1行で書きます');
+  else if (charLength(row.title) > REPORT_TITLE_MAX) p.push(`題名(title)は ${REPORT_TITLE_MAX} 文字までです`);
   return p;
 }
 

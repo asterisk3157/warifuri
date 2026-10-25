@@ -150,6 +150,8 @@ Claude Code や Codex に「今日なにやる」「時間を取っておいて�
 warifuri secretary run morning
 ```
 
+秘書とは、Web 画面の「秘書」(`/secretary`)で話せます。下の欄に書いて送ると、秘書が台帳を確かめて返事をし、報告と案も同じ画面に並びます。案には「了承」「直して了承」「断る」で答え、了承した案は秘書が次に動いたときに行います。
+
 止めるときは `warifuri secretary disable` を実行し、`warifuri serve` を動かし直します。時刻や夜の時間帯は[設定](configuration.md)で変えられます。秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを渡すかどうかは、考えて決めてください。渡し方と仕組みは、[構成](architecture.md)の「秘書のプラグイン」の節にあります。
 
 ## 別の機械から使う(GitHub のログイン)

@@ -7,6 +7,8 @@
 //   <home>/secretary/run.lock        the pid of the run going on, so serve and
 //                                    `warifuri secretary run` never run two at once
 //   <home>/secretary/logs/<job>.log  claude's output of the last run (<job>.prev.log before it)
+//   <home>/secretary/chat/           the working directory of the conversation (chat.mjs), so
+//                                    that claude finds its sessions there again after a restart
 //
 // claude may use only warifuri's tools: --allowedTools names the server, the built-in tools
 // (shell, files, web) are disallowed, and --strict-mcp-config leaves out the person's other
@@ -39,10 +41,10 @@ export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', mornin
 
 export const paths = (home) => {
   const dir = path.join(home, DIR);
-  return { dir, mcp: path.join(dir, 'mcp.json'), lock: path.join(dir, 'run.lock'), logs: path.join(dir, 'logs') };
+  return { dir, mcp: path.join(dir, 'mcp.json'), lock: path.join(dir, 'run.lock'), logs: path.join(dir, 'logs'), chat: path.join(dir, 'chat') };
 };
 
-const ownerOnlyDir = (dir, platform) => {
+export const ownerOnlyDir = (dir, platform) => {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (platform !== 'win32') fs.chmodSync(dir, 0o700);
 };
@@ -75,7 +77,7 @@ export function scheduleFrom(values) {
 
 export const describeSchedule = (s) =>
   `${JOBS.map((j) => `${j} ${showWhen(s.jobs[j])}`).join(', ')} (night ${fmtNight(s.night)})`;
-const fmtNight = (n) => {
+export const fmtNight = (n) => {
   const t = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   return `${t(n.start)}-${t(n.end)}`;
 };
@@ -187,23 +189,29 @@ export function disable(cfg) {
   return { lines, problems: [] };
 }
 
-// The prompt: the facts of this run, the common rules, the job's instructions.
-export function buildPrompt(job, { now = new Date(), schedule, instructionsDir = INSTRUCTIONS_DIR } = {}) {
-  const read = (name) => fs.readFileSync(path.join(instructionsDir, name), 'utf8').trim();
+// The lines that open every prompt: the work, the time, the night and the calendar.
+export function factLines(title, name, { now, schedule }) {
   const calendar = schedule.calendarTools.length
     ? `カレンダーの MCP として ${schedule.calendarTools.map((t) => `\`${t}\``).join('、')} を使えます。`
     : schedule.connectors
       ? 'claude.ai のコネクタが有効です。カレンダーのコネクタがあれば、カレンダーとして使えます。'
       : 'カレンダーの MCP はつながっていません。カレンダーの手順は飛ばします。';
-  const head = [
+  return [
     '# この実行について',
     '',
-    `- 仕事: ${JOB_TITLES[job]}(\`${job}\`)`,
+    `- 仕事: ${title}(\`${name}\`)`,
     `- いまの日時: ${localIso(now)}(サーバーの機械の時刻)`,
     `- 夜の時間帯: ${fmtNight(schedule.night).replace('-', '〜')}`,
     `- ${calendar}`,
-  ].join('\n');
-  return `${head}\n\n${read('common.md')}\n\n${read(`${job}.md`)}\n`;
+  ];
+}
+
+export const readInstructions = (name, instructionsDir = INSTRUCTIONS_DIR) => fs.readFileSync(path.join(instructionsDir, name), 'utf8').trim();
+
+// The prompt: the facts of this run, the common rules, the job's instructions.
+export function buildPrompt(job, { now = new Date(), schedule, instructionsDir = INSTRUCTIONS_DIR } = {}) {
+  const head = factLines(JOB_TITLES[job], job, { now, schedule }).join('\n');
+  return `${head}\n\n${readInstructions('common.md', instructionsDir)}\n\n${readInstructions(`${job}.md`, instructionsDir)}\n`;
 }
 
 // The command line of one run. The key is not in it: claude reads it from mcp.json.
@@ -252,7 +260,7 @@ function lock(file) {
 }
 
 // The log file of this run; the one before is kept as <job>.prev.log.
-function openLog(dir, job, platform) {
+export function openLog(dir, job, platform) {
   ownerOnlyDir(dir, platform);
   const file = path.join(dir, `${job}.log`);
   if (fs.existsSync(file)) fs.renameSync(file, path.join(dir, `${job}.prev.log`));
@@ -262,7 +270,7 @@ function openLog(dir, job, platform) {
 }
 
 // Starts claude. A .cmd or .bat on Windows (npm's shim) needs the shell, with quoted arguments.
-function defaultSpawn(file, args, options) {
+export function defaultSpawn(file, args, options) {
   if (options.platform === 'win32' && /\.(cmd|bat)$/i.test(file)) {
     const q = (a) => `"${String(a).replace(/"/g, '""')}"`;
     return spawn(q(file), args.map(q), { ...options, shell: true });
@@ -270,7 +278,7 @@ function defaultSpawn(file, args, options) {
   return spawn(file, args, options);
 }
 
-function kill(child, platform) {
+export function kill(child, platform) {
   if (platform === 'win32' && child.pid) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F']);
   else child.kill('SIGTERM');
 }
