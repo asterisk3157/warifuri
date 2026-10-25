@@ -476,7 +476,8 @@ export function createChat(ledger, cfg, ctx = {}) {
     if (!on) return Promise.resolve();
     const id = threadId ?? mainThread()?.id;
     if (!id) return Promise.resolve();
-    if (running.has(id)) return running.get(id);
+    // A loop that is ending may already have looked for new messages: look again after it.
+    if (running.has(id)) return running.get(id).then(() => kick(id));
     const p = loop(id)
       .catch((err) => log(`secretary chat: failed: ${err.message}`))
       .finally(() => running.delete(id));
