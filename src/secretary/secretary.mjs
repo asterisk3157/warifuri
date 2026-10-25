@@ -26,6 +26,8 @@ import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME } from '../client/con
 import { JOBS, parseWhen, parseNight, localIso, showWhen } from './schedule.mjs';
 
 export const DEVICE = 'secretary';
+// The device the secretary writes as: WARIFURI_SECRETARY_DEVICE, or DEVICE.
+export const deviceOf = (values) => values?.WARIFURI_SECRETARY_DEVICE || DEVICE;
 export const DIR = 'secretary';
 export const INSTRUCTIONS_DIR = path.join(PACKAGE_ROOT, 'harness', 'secretary');
 // Claude Code names an MCP server's tools mcp__<server>__<tool>; the bare mcp__<server> rule
@@ -131,23 +133,30 @@ export function enable(cfg, ctx = {}) {
     };
   }
   const values = cfg.values;
+  const name = deviceOf(values);
   const url = serverUrl(values);
   let key = readSecretaryKey(cfg.home);
   let ledger;
   try {
     fs.mkdirSync(cfg.home, { recursive: true, mode: 0o700 });
     ledger = openLedger(values.WARIFURI_DB);
-    if (key && ledger.deviceForKey(key)?.name === DEVICE) {
-      lines.push(`kept the key of device ${DEVICE}`);
+    if (key && ledger.deviceForKey(key)?.name === name) {
+      lines.push(`kept the key of device ${name}`);
     } else {
-      const device = ledger.listDevices().find((d) => d.name === DEVICE);
-      if (device?.has_key) {
-        // Its key lived only in mcp.json, which is gone or holds another key: replace it.
-        ledger.revokeKey(DEVICE, { actor: 'cli' });
-        lines.push(`revoked the old key of device ${DEVICE}, whose config was lost`);
+      // A device of that name with a live key that is not ours may be in use elsewhere (another
+      // secretary, a machine): never revoke it from here.
+      const device = ledger.listDevices().find((d) => d.name === name);
+      if (device?.has_key && device.revoked_at === null) {
+        return {
+          lines,
+          problems: [
+            `デバイス ${name} には、もう使えるシークレットがあります。ほかで使っているかもしれないので、取り消しません。` +
+              `秘書には別の名前を WARIFURI_SECRETARY_DEVICE に書くか、使っていないと確かめてから warifuri key revoke ${name} で取り消してください`,
+          ],
+        };
       }
-      key = ledger.issueKey(DEVICE, { actor: 'cli' }).key;
-      lines.push(`issued a key for device ${DEVICE}`);
+      key = ledger.issueKey(name, { actor: 'cli' }).key;
+      lines.push(`issued a key for device ${name}`);
     }
   } catch (err) {
     return { lines, problems: [`cannot issue the secretary's key: ${err.problems ? err.problems.join('; ') : err.message}`] };
@@ -176,10 +185,11 @@ export function disable(cfg) {
     let ledger;
     try {
       ledger = openLedger(cfg.values.WARIFURI_DB);
-      const device = ledger.listDevices().find((d) => d.name === DEVICE);
+      const name = deviceOf(cfg.values);
+      const device = ledger.listDevices().find((d) => d.name === name);
       if (device?.has_key) {
-        ledger.revokeKey(DEVICE, { actor: 'cli' });
-        lines.push(`revoked the key of device ${DEVICE}; warifuri secretary enable issues a new one`);
+        ledger.revokeKey(name, { actor: 'cli' });
+        lines.push(`revoked the key of device ${name}; warifuri secretary enable issues a new one`);
       }
     } finally {
       ledger?.close();

@@ -25,7 +25,7 @@ import { REPORT_BODY_MAX, charLength } from '../ledger/rules.mjs';
 import { findOnPath } from '../client/connect.mjs';
 import { localIso } from './schedule.mjs';
 import {
-  DEVICE, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
+  deviceOf, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
   claudeEnv, factLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR,
 } from './secretary.mjs';
 
@@ -35,7 +35,6 @@ const RECENT_CHARS = 600;
 // Output kept from one run, at most.
 const OUTPUT_MAX = 2 * 1024 * 1024;
 // Who writes the replies and the runner's own notes in the thread.
-export const WRITER = { actor: 'secretary-chat', device: DEVICE };
 
 const WHO = { user: '本人', secretary: '秘書', system: 'お知らせ' };
 const STATE_WORDS = { open: '答え待ち', approved: '了承', changed: '直して了承', refused: '断る' };
@@ -101,6 +100,7 @@ const GONE = /no conversation found|session .*not found/i;
 // ledger: the open ledger. cfg: loadConfig()'s result. ctx (tests stand in here): { env,
 // platform, now, spawn, timeoutMs, instructionsDir, log }.
 export function createChat(ledger, cfg, ctx = {}) {
+  const WRITER = { actor: 'secretary-chat', device: deviceOf(cfg.values) };
   const env = ctx.env ?? process.env;
   const platform = ctx.platform ?? process.platform;
   const now = ctx.now ?? (() => new Date());

@@ -194,6 +194,14 @@ export const SETTINGS = [
     check: (v) => (v.split(',').every((t) => /^mcp__[A-Za-z0-9_.-]+(__[A-Za-z0-9_.*-]+)?$/.test(t.trim())) ? null : 'must be MCP tool names such as mcp__calendar, comma-separated'),
   },
   {
+    name: 'WARIFURI_SECRETARY_DEVICE',
+    section: 'secretary',
+    about: '秘書が書くときのデバイスの名前。同じ名前のデバイスがほかで使われているときに変える',
+    def: 'secretary',
+    commands: SECRETARY,
+    check: (v) => (/^[A-Za-z0-9._-]{1,64}$/.test(v) ? null : 'must be 1-64 letters, digits, . _ -'),
+  },
+  {
     name: 'WARIFURI_SECRETARY_CONNECTORS',
     section: 'secretary',
     about: 'claude.ai のコネクタ(Gmail、カレンダーなど)を秘書にも使わせるか。既定の off では、claude を ENABLE_CLAUDEAI_MCP_SERVERS=false で起こす。カレンダーを渡すときだけ、考えたうえで on にする',
