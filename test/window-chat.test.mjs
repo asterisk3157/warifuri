@@ -417,3 +417,40 @@ test('files: a picture goes as image content through stream-json input, a text f
   assert.match(last.input, /画像 2枚目\.png は、この claude には渡せませんでした/);
   assert.equal(w.ledger.listMessages(w.main().id).at(-1).body, 'はい');
 });
+
+test('an agent\'s request: it starts a turn with the request and its conditions, and the agent gets the reply', async (t) => {
+  const w = world(t);
+  const LAPTOP = { actor: 'device-key', device: 'laptop' };
+  const out = await w.chat.request({ from: 'laptop', text: '資料作りに時間を取ってください', task_id: 't_1', minutes: 120, by: '2026-10-30', prefer: '午前' }, LAPTOP);
+  assert.equal(out.timedOut, undefined);
+  assert.equal(out.reply.body, '返事1');
+  assert.equal(out.request.role, 'system');
+  assert.equal(out.request.data.request.from, 'laptop');
+  const input = w.claude.calls[0].input;
+  assert.match(input, /# エージェントからの依頼/);
+  assert.match(input, /laptop のエージェントからの依頼: 資料作りに時間を取ってください\nタスク: t_1\n長さ: 120分\n期限: 2026-10-30\n希望: 午前/);
+  // The person sees the request and the reply in the conversation.
+  const rows = w.ledger.listMessages(w.main().id);
+  assert.deepEqual(rows.map((m) => m.role), ['system', 'secretary']);
+});
+
+test('an agent\'s request: past the wait the agent is told it waits; the request stays and gets its reply', async (t) => {
+  const w = world(t);
+  let release;
+  w.claude.answerWith((call) => new Promise((resolve) => {
+    release = () => resolve({ stdout: streamed('金曜の10時に入れました', call.session) });
+  }));
+  const out = await w.chat.request({ from: 'laptop', text: '2時間ください' }, WEB, { waitMs: 5 });
+  assert.equal(out.timedOut, true);
+  assert.equal(w.chat.status().replying, true);
+  release();
+  await w.chat.idle();
+  assert.equal(w.ledger.listMessages(w.main().id).at(-1).body, '金曜の10時に入れました');
+});
+
+test('an agent\'s request: refused with the secretary off, and without words', async (t) => {
+  const w = world(t);
+  await assert.rejects(w.chat.request({ from: 'laptop', text: '  ' }, WEB), /頼むことを text に書きます/);
+  const off = world(t, { values: { WARIFURI_SECRETARY: 'off' } });
+  await assert.rejects(off.chat.request({ from: 'laptop', text: '2時間ください' }, WEB), /秘書が止まっているので、頼めません/);
+});

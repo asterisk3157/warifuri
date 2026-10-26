@@ -28,6 +28,11 @@
 //   Its output goes to logs/chat.log (chat.prev.log before it), owner-only; the key is only
 //   in the MCP config files, as for the jobs.
 //
+// - 依頼: an agent on another device asks the secretary for something (ask_secretary: most often
+//   time for a task). The request is a system row with data.request in the secretary's
+//   conversation; it starts a turn as the person's words do, the reply is the secretary's
+//   message as usual, and the asking agent may wait for it (request()).
+//
 // The thread's runner is 'resume'. A later runner ('resident', a long-running session) would
 // take the same thread with its messages and session id; this one leaves such a thread alone.
 
@@ -59,6 +64,24 @@ const TEXT_TYPES = /^(text\/|application\/(json|xml|x-yaml|yaml|csv|javascript|x
 const TEXT_NAMES = /\.(txt|md|markdown|csv|tsv|json|ya?ml|toml|xml|html?|css|js|mjs|ts|py|rb|go|rs|sh|ini|log|ics)$/i;
 // What a scheduled trigger says in the conversation; its instructions are harness/secretary/<job>.md.
 export const TRIGGERS = { morning: '朝の時間です' };
+
+// The longest an agent's request may be, and the longest it may wait for the reply.
+export const REQUEST_MAX = 2000;
+export const REQUEST_WAIT_MS = 120_000;
+
+// Whether a message is an agent's request (ask_secretary).
+export const isRequest = (m) => m.role === 'system' && m.kind === 'text' && Boolean(m.data?.request);
+
+// The words of a request in the conversation: who asks, what, and the conditions given.
+export function requestBody(r) {
+  const out = [`${r.from} のエージェントからの依頼: ${r.text}`];
+  if (r.task_id) out.push(`タスク: ${r.task_id}`);
+  if (r.minutes) out.push(`長さ: ${r.minutes}分`);
+  if (r.by) out.push(`期限: ${r.by}`);
+  if (r.prefer) out.push(`希望: ${r.prefer}`);
+  if (r.starts_at || r.ends_at) out.push(`本人が決めた日時: ${r.starts_at ?? '?'} 〜 ${r.ends_at ?? '?'}`);
+  return out.join('\n');
+}
 
 // Who writes the replies and the runner's own notes in the thread.
 const WHO = { user: '本人', secretary: '秘書', system: 'お知らせ' };
@@ -114,7 +137,7 @@ export function buildChatPrompt({
   const events = [
     ...reports.map((r) => ({ t: r.created_at, line: `${REPORT_WORDS[r.kind] ?? r.kind}「${r.title}」(${r.id})` })),
     ...feed
-      .filter((m) => m.role !== 'user' && !['trigger', 'digest'].includes(m.kind))
+      .filter((m) => m.role !== 'user' && !['trigger', 'digest'].includes(m.kind) && !isRequest(m))
       .map((m) => ({
         t: m.created_at,
         line: m.kind === 'proposal' ? `案「${m.title}」(${m.id}、${m.autonomy_kind}、${STATE_WORDS[m.state]})` : `${WHO[m.role]}: ${m.body.replace(/\n+/g, ' / ')}`,
@@ -135,8 +158,13 @@ export function buildChatPrompt({
     out.push('', `# 決まった時刻の仕事(${at(tr.created_at)})`, '', `warifuri が「${tr.body}」と知らせました。本人はこの場にいないかもしれません。`);
     if (job && Object.hasOwn(TRIGGERS, job)) out.push('', readInstructions(`${job}.md`, instructionsDir));
   }
+  const requests = feed.filter(isRequest);
+  if (requests.length) {
+    out.push('', '# エージェントからの依頼', '', readInstructions('request.md', instructionsDir));
+    for (const r of requests) out.push('', `(${at(r.created_at)}、${r.id})`, r.body);
+  }
   const spoken = feed.filter((m) => m.role === 'user');
-  if (!spoken.length && !triggers.length) {
+  if (!spoken.length && !triggers.length && !requests.length) {
     out.push('', '# この回について', '', 'この回は、上の要点を受け取るだけです。返事は本人に見えません。ツールは使わず「了解」とだけ返します。');
   }
   const texts = files.filter((f) => typeof f.text === 'string');
@@ -345,7 +373,7 @@ export function createChat(ledger, cfg, ctx = {}) {
   async function turn(thread, feed) {
     const lastId = feed.at(-1).id;
     const sub = thread.kind === 'sub' ? { parent: ledger.getMessage(thread.parent_id) } : null;
-    const visible = feed.some((m) => m.role === 'user' || m.kind === 'trigger');
+    const visible = feed.some((m) => m.role === 'user' || m.kind === 'trigger' || isRequest(m));
     const trigger = feed.find((m) => m.kind === 'trigger');
     // Reports written after the last message the session saw (the secretary's conversation only).
     const since = (thread.seen_until && ledger.getMessage(thread.seen_until)?.created_at) || thread.created_at;
@@ -442,7 +470,7 @@ export function createChat(ledger, cfg, ctx = {}) {
       seen_until: lastId, pending_options: null, ...(ok ? { session_id: out.result.sessionId ?? sessionId } : {}),
     }, WRITER);
     live.delete(thread.id);
-    emit({ type: 'done', thread: thread.id, message: reply?.id ?? null });
+    emit({ type: 'done', thread: thread.id, message: reply?.id ?? null, fed: feed.map((m) => m.id) });
     // What was said in a thread goes to the secretary's conversation as a digest.
     if (sub && visible) {
       const main = mainThread();
@@ -458,9 +486,9 @@ export function createChat(ledger, cfg, ctx = {}) {
     const list = thread.seen_until ? ledger.listMessages(thread.id, { after: thread.seen_until }) : ledger.listMessages(thread.id, { limit: 200 });
     return list.filter((m) => !(m.role === 'secretary' && ['text', 'ask'].includes(m.kind)));
   }
-  // Rows that call for a turn: the person's words and answers, a trigger, a digest.
-  const calls = (m) => m.role === 'user' || m.kind === 'trigger' || m.kind === 'digest';
-  const waiting = (thread) => unseen(thread).filter((m) => m.role === 'user' || m.kind === 'trigger').length;
+  // Rows that call for a turn: the person's words and answers, a trigger, a digest, a request.
+  const calls = (m) => m.role === 'user' || m.kind === 'trigger' || m.kind === 'digest' || isRequest(m);
+  const waiting = (thread) => unseen(thread).filter((m) => m.role === 'user' || m.kind === 'trigger' || isRequest(m)).length;
 
   async function loop(threadId) {
     for (;;) {
@@ -523,6 +551,39 @@ export function createChat(ledger, cfg, ctx = {}) {
       const out = ledger.answerAsk(askId, fields, writer);
       if (!ledger.openAsk(out.ask.thread_id)) kick(out.ask.thread_id);
       return out;
+    },
+    // An agent's request (ask_secretary) into the secretary's conversation: fields { from,
+    // text, task_id?, minutes?, by?, prefer?, starts_at?, ends_at? }. Starts a turn and waits
+    // up to waitMs for the turn that takes it: { request, reply } (reply: the secretary's
+    // message, or null when the turn made none) or { request, timedOut: true }; the request
+    // stays in the conversation either way.
+    async request(fields, writer, { waitMs = REQUEST_WAIT_MS } = {}) {
+      if (!on) throw new LedgerError(['秘書が止まっているので、頼めません']);
+      const text = typeof fields.text === 'string' ? fields.text.trim() : '';
+      if (!text) throw new LedgerError(['頼むことを text に書きます']);
+      if (charLength(text) > REQUEST_MAX) throw new LedgerError([`頼むことは${REQUEST_MAX}字までです`]);
+      const thread = ledger.ensureThread(SECRETARY_THREAD.kind, writer);
+      const request = Object.fromEntries(Object.entries({ ...fields, text }).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+      let resolve;
+      const done = new Promise((r) => {
+        resolve = r;
+      });
+      let id = null;
+      const fn = (e) => {
+        if (e.type === 'done' && id && e.fed?.includes(id)) resolve({ reply: e.message ? ledger.getMessage(e.message) : null });
+      };
+      // Listen before the turn can start, so a quick reply is not missed.
+      listeners.add(fn);
+      const timer = setTimeout(() => resolve({ timedOut: true }), Math.max(0, waitMs));
+      try {
+        const message = ledger.addMessage(thread.id, { role: 'system', body: requestBody(request), data: { request } }, writer);
+        id = message.id;
+        kick(thread.id);
+        return { request: message, ...(await done) };
+      } finally {
+        clearTimeout(timer);
+        listeners.delete(fn);
+      }
     },
     // warifuri's call into the conversation at a set time (job: morning). Not in the night,
     // unless force (the person asked for it). { sent: message } or { skipped: reason }.

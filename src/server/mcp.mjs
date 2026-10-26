@@ -63,6 +63,11 @@ const guarded = (fn) => async (args) => {
 // The tools only the secretary may call: its reports, proposals and questions to the person,
 // and the autonomy that says how far it may act alone. Other agents read them but do not write.
 const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'reply_options', 'autonomy_outcome', 'autonomy_set']);
+// The tools that put, move or remove bookings. While the secretary runs, only it decides the
+// time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
+const BOOKING_TOOLS = new Set(['book', 'unbook']);
+// The longest an agent may wait for the secretary's reply to ask_secretary, in seconds.
+const ASK_SECRETARY_WAIT_MAX = 120;
 
 // Only the arguments that were given, so the ledger sees what the caller meant to change.
 const given = (args) => Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
@@ -74,8 +79,9 @@ const clearable = z.string().nullable().optional();
 // secretary } for the profiles' files (see createApp), or null. thread: the thread the
 // request said it runs in (the secretary's thread header), or null for the secretary's
 // conversation. secretaryDevice: the device the secretary calls from, null when the secretary
-// is off, or undefined to let any device call the secretary's tools.
-function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined) {
+// is off, or undefined to let any device call the secretary's tools. chat: the conversation
+// with the secretary (for ask_secretary), or null.
+function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined, chat = null) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -111,7 +117,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
           review: review ?? false,
           includeClosed: include_closed ?? false,
         }),
-        ...(secretaryDevice === undefined ? {} : { secretary: secretaryDevice ? 'on' : 'off' }),
+        ...(secretaryDevice === undefined ? {} : { secretary: secretaryDevice && (chat ? chat.on : true) ? 'on' : 'off' }),
       }),
   );
 
@@ -289,7 +295,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       })),
   );
 
-  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice });
+  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat });
   return server;
 }
 
@@ -337,11 +343,20 @@ function resolvePlace(ledger, device, value, tool = 'start') {
   throw new LedgerError([`place には作業フォルダの id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
-function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice }) {
+function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat }) {
   const tool = (name, description, inputSchema, fn, annotations = write) =>
     server.registerTool(name, { description, inputSchema, annotations }, guarded(onlyFor(name, fn)));
+  // Whether the secretary runs: a secretary device is set and, when the conversation is
+  // given, it can answer. Bookings go through it only then, so nobody is left without a way.
+  const secretaryRuns = typeof secretaryDevice === 'string' && (chat ? chat.on : true);
   // The secretary's tools refuse other devices (and everyone while the secretary is off).
   const onlyFor = (name, fn) => {
+    if (BOOKING_TOOLS.has(name)) {
+      if (!secretaryRuns || device.name === secretaryDevice) return fn;
+      return async () => refusal([
+        `秘書が有効なので、予定は秘書が決めます(原則23)。${name} の代わりに ask_secretary で、何に、どれくらいの長さ、いつまでに、希望の時間帯(本人が日時を決めているならその日時)を渡して頼んでください`,
+      ]);
+    }
     if (!SECRETARY_TOOLS.has(name) || secretaryDevice === undefined || device.name === secretaryDevice) return fn;
     const why = secretaryDevice === null
       ? `秘書が有効になっていないので、${name} は使えません`
@@ -583,6 +598,43 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   );
 
   tool(
+    'ask_secretary',
+    'Ask the secretary for something, while the secretary runs (board shows secretary: on). Above all for time: ' +
+      'the secretary alone books, moves and removes bookings then (book and unbook refuse other devices). Do not ' +
+      'pick the time yourself: give what it is for (task_id), how long (minutes), by when (by), and what is ' +
+      'preferred (prefer, such as mornings); when the person already set the time, give starts_at and ends_at. ' +
+      'text says the rest in plain words. The request goes into the secretary\'s conversation, which the person ' +
+      `sees, and this waits up to wait_seconds (at most ${ASK_SECRETARY_WAIT_MAX}, the default) for the reply: ` +
+      'status answered gives the secretary\'s reply to pass on to the person; status waiting means the request ' +
+      'stays there and the secretary takes it when it can: tell the person it was asked and the answer will be ' +
+      'in the secretary\'s window. With the secretary off this refuses: use free_time and book instead.',
+    {
+      text: z.string(),
+      task_id: z.string().optional(),
+      minutes: z.number().int().positive().max(24 * 60).optional(),
+      by: z.string().optional(),
+      prefer: z.string().optional(),
+      starts_at: z.string().optional(),
+      ends_at: z.string().optional(),
+      wait_seconds: z.number().int().min(0).max(ASK_SECRETARY_WAIT_MAX).optional(),
+    },
+    async ({ wait_seconds, ...fields }) => {
+      if (!secretaryRuns || !chat) {
+        return refusal(['秘書が有効になっていないので、頼めません。free_time で空き時間を見て、本人の了承を得てから book で入れます']);
+      }
+      if (device.name === secretaryDevice) return refusal(['秘書は自分に頼めません']);
+      const out = await chat.request({ from: device.name, ...fields }, writer, { waitMs: (wait_seconds ?? ASK_SECRETARY_WAIT_MAX) * 1000 });
+      if (out.timedOut) {
+        return result({ status: 'waiting', request_id: out.request.id, say: '秘書に頼みました。決まったら秘書の画面に出ます' });
+      }
+      if (!out.reply) {
+        return result({ status: 'not_answered', request_id: out.request.id, say: '秘書が返事を作れませんでした。秘書の画面を見て、もう一度頼んでください' });
+      }
+      return result({ status: 'answered', request_id: out.request.id, reply: out.reply.body });
+    },
+  );
+
+  tool(
     'report',
     `Write a report for the person to read in the Web screens: kind nightly (the nightly check), morning (the morning ` +
       `summary) or inbox (the inbox tidy-up), a one-line title, and the body as plain text or light Markdown (at most ` +
@@ -801,8 +853,8 @@ function threadOf(ledger, req) {
   return ledger.getThread(id) ? id : null;
 }
 
-async function handleMcp(ledger, knowledge, req, res, secretaryDevice) {
-  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req), secretaryDevice);
+async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat) {
+  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req), secretaryDevice, chat);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -857,7 +909,9 @@ function apiRouter(ledger, limit) {
 // screens (web.mjs) open without a login. chat: the conversation with the secretary
 // (src/secretary/chat.mjs) for the 秘書 screen, or null. app.locals.web is { mode, issueLogin }.
 // secretaryDevice: the device the secretary calls from (only it may use the secretary's tools),
-// null when the secretary is off (nobody may), or left out to let any device.
+// null when the secretary is off (nobody may), or left out to let any device. While it is set
+// (and chat, when given, can answer), only that device may book and unbook; the others ask it
+// with ask_secretary.
 export function createApp({
   ledger,
   home = null,
@@ -887,7 +941,7 @@ export function createApp({
   }
   const knowledge = home ? { home, secretary } : null;
   const mcp = (req, res) =>
-    handleMcp(ledger, knowledge, req, res, secretaryDevice).catch((err) => {
+    handleMcp(ledger, knowledge, req, res, secretaryDevice, chat).catch((err) => {
       log(`warifuri: /mcp failed: ${err.message}`);
       if (!res.headersSent) {
         res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });
