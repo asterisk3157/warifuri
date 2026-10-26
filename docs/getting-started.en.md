@@ -81,7 +81,7 @@ warifuri connect
 
 - Issues a device key for this PC (a string starting with `wf_`) and saves it in `~/.warifuri/device.key`, readable only by you. The device name is the PC's host name; change it with `--device <name>`.
 - Registers the MCP server as `warifuri` in `claude` and `codex`.
-- Adds the task check to Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
+- Adds the task check, and the check that stops writing to a calendar directly while the secretary is on, to Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
 - Copies the warifuri skill. If the secretary skill of an earlier version (`warifuri-secretary`) is there, moves it out of the skills folder.
 
 Before changing a settings file, it backs it up as `<file>.bak-warifuri-<date>`. Running it again gives the same result.
@@ -90,7 +90,7 @@ Before changing a settings file, it backs it up as `<file>.bak-warifuri-<date>`.
 |---|---|
 | `--dry-run` | Only show what it would do |
 | `--harness claude` / `--harness codex` | Connect only one of them |
-| `--no-hook` | Don't set up the task check |
+| `--no-hook` | Don't set up the task check and the calendar check |
 | `--no-skills` | Don't copy the warifuri skill |
 | `--force` | Replace the skill with the new version |
 

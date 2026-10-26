@@ -26,6 +26,9 @@ export const CODEX_KEY_ENV = 'WARIFURI_DEVICE_KEY';
 export const CLAUDE_MATCHER = 'Edit|Write|MultiEdit|NotebookEdit';
 // In Codex, Edit and Write are matcher aliases of apply_patch.
 export const CODEX_MATCHER = 'apply_patch|Edit|Write';
+// The calendar hook runs before MCP tools whose name speaks of a calendar or events; the hook
+// itself tells writes from reads (calendar-hook.mjs).
+export const CALENDAR_MATCHER = 'mcp__.*([Cc]alendar|[Ee]vent)';
 const HOOK_TIMEOUT = 10;
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
@@ -132,29 +135,36 @@ function writeWithBackup(file, text, now) {
   return backup;
 }
 
-// Is this hook handler warifuri's start gate?
-export const isGateHook = (h) => !!h && typeof h.command === 'string' && /warifuri(?:\.mjs|\.cmd)?"?\s+hook\s+gate\b/.test(h.command);
+// Is this hook handler warifuri's start gate, or its calendar hook?
+const isHook = (which) => (h) => !!h && typeof h.command === 'string' && new RegExp(`warifuri(?:\\.mjs|\\.cmd)?"?\\s+hook\\s+${which}\\b`).test(h.command);
+export const isGateHook = isHook('gate');
+export const isCalendarHook = isHook('calendar');
 
 // The hooks JSON with exactly one start gate in PreToolUse: { changed, json }. Other hooks,
 // other events and other keys are kept as they are.
 export function mergeGateHook(json, { matcher, handler }) {
+  return mergeHook(json, { matcher, handler, isOurs: isGateHook });
+}
+
+// The same for any of warifuri's hooks: isOurs tells its handlers from the others.
+export function mergeHook(json, { matcher, handler, isOurs }) {
   const out = structuredClone(json ?? {});
   if (out.hooks !== undefined && (typeof out.hooks !== 'object' || Array.isArray(out.hooks))) throw new Error('"hooks" is not an object');
   out.hooks ??= {};
   const groups = out.hooks.PreToolUse ?? [];
   if (!Array.isArray(groups)) throw new Error('"hooks.PreToolUse" is not a list');
   const ours = [];
-  groups.forEach((g, gi) => (Array.isArray(g?.hooks) ? g.hooks : []).forEach((h, hi) => isGateHook(h) && ours.push({ g, gi, hi, h })));
+  groups.forEach((g, gi) => (Array.isArray(g?.hooks) ? g.hooks : []).forEach((h, hi) => isOurs(h) && ours.push({ g, gi, hi, h })));
   if (ours.length === 1 && ours[0].g.matcher === matcher && JSON.stringify(ours[0].h) === JSON.stringify(handler)) {
     return { changed: false, json };
   }
   const kept = [];
   for (const g of groups) {
-    if (!Array.isArray(g?.hooks) || !g.hooks.some(isGateHook)) {
+    if (!Array.isArray(g?.hooks) || !g.hooks.some(isOurs)) {
       kept.push(g);
       continue;
     }
-    const rest = g.hooks.filter((h) => !isGateHook(h));
+    const rest = g.hooks.filter((h) => !isOurs(h));
     if (rest.length) kept.push({ ...g, hooks: rest });
   }
   kept.push({ matcher, hooks: [handler] });
@@ -165,11 +175,11 @@ export function mergeGateHook(json, { matcher, handler }) {
 // The command line of the hook. `warifuri` when it is on PATH, or `warifuri.cmd` on Windows:
 // npm also puts a warifuri.ps1 there, which PowerShell may refuse to run under its execution
 // policy. Otherwise node and this package's bin.
-export function gateCommand({ env, platform, home, homeIsDefault }) {
+export function gateCommand({ env, platform, home, homeIsDefault, which = 'gate' }) {
   const q = (s) => `"${s}"`;
   const onPath = findOnPath('warifuri', env, platform) ? (platform === 'win32' ? 'warifuri.cmd' : 'warifuri') : null;
   const head = onPath ?? `${q(process.execPath)} ${q(BIN)}`;
-  return `${head} hook gate${homeIsDefault ? '' : ` --home ${q(home)}`}`;
+  return `${head} hook ${which}${homeIsDefault ? '' : ` --home ${q(home)}`}`;
 }
 
 // Sets NAME=value in a settings file's text: an uncommented line wins, then the commented
@@ -325,6 +335,7 @@ export function connect(cfg, opts, ctx = {}) {
   }
 
   const command = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true });
+  const calendarCommand = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: 'calendar' });
   const skills = opts.skills ? packageSkills(ctx.packageRoot) : [];
   const skillTargets = new Set();
 
@@ -340,29 +351,37 @@ export function connect(cfg, opts, ctx = {}) {
 
     const dir = h.name === 'claude' ? env.CLAUDE_CONFIG_DIR || path.join(home, '.claude') : env.CODEX_HOME || path.join(home, '.codex');
 
-    // The start gate.
+    // The start gate and the calendar hook, in one write of the file.
     if (opts.hook) {
       const file = h.name === 'claude' ? path.join(dir, 'settings.json') : path.join(dir, 'hooks.json');
-      const handler =
-        h.name === 'claude'
-          ? { type: 'command', command, timeout: HOOK_TIMEOUT }
-          : { type: 'command', command, timeout: HOOK_TIMEOUT, statusMessage: 'warifuri: checking the held task' };
-      const matcher = h.name === 'claude' ? CLAUDE_MATCHER : CODEX_MATCHER;
+      const handler = (cmd, status) =>
+        h.name === 'claude' ? { type: 'command', command: cmd, timeout: HOOK_TIMEOUT } : { type: 'command', command: cmd, timeout: HOOK_TIMEOUT, statusMessage: status };
+      const hooks = [
+        { what: 'the start gate', matcher: h.name === 'claude' ? CLAUDE_MATCHER : CODEX_MATCHER, handler: handler(command, 'warifuri: checking the held task'), isOurs: isGateHook },
+        { what: 'the calendar hook', matcher: CALENDAR_MATCHER, handler: handler(calendarCommand, 'warifuri: checking the secretary'), isOurs: isCalendarHook },
+      ];
       const read = readJson(file);
       if (read.error) {
         problems.push(`${h.name}: ${read.error}`);
       } else {
         try {
-          const { changed, json } = mergeGateHook(read.json ?? {}, { matcher, handler });
-          if (!changed) {
-            lines.push(`${h.name}: kept the start gate in ${file}`);
-          } else {
-            say(`${h.name}: put the start gate in ${file} (PreToolUse, ${matcher})${read.exists ? ', backing up the old file next to it' : ''}`);
+          let json = read.json ?? {};
+          let any = false;
+          for (const k of hooks) {
+            const out = mergeHook(json, k);
+            if (out.changed) {
+              json = out.json;
+              any = true;
+              say(`${h.name}: put ${k.what} in ${file} (PreToolUse, ${k.matcher})`);
+            } else lines.push(`${h.name}: kept ${k.what} in ${file}`);
+          }
+          if (any) {
+            if (read.exists) say(`${h.name}: back up the old ${path.basename(file)} next to it`);
             if (!dry) {
               const backup = writeWithBackup(file, `${JSON.stringify(json, null, 2)}\n`, now);
               if (backup) lines.push(`${h.name}: backup ${backup}`);
             }
-            if (h.name === 'codex') lines.push('codex: open /hooks in Codex once and trust the new hook; Codex runs a hook only after that');
+            if (h.name === 'codex') lines.push('codex: open /hooks in Codex once and trust the new hooks; Codex runs a hook only after that');
           }
         } catch (err) {
           problems.push(`${h.name}: ${file}: ${err.message}; left as it is`);

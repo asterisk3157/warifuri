@@ -9,7 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { CLI } from './cli.mjs';
 import { openLedger } from '../src/ledger/ledger.mjs';
-import { connect, mergeGateHook, setEnvLine, codexServer, gateCommand, CLAUDE_MATCHER } from '../src/client/connect.mjs';
+import { connect, mergeGateHook, setEnvLine, codexServer, gateCommand, CLAUDE_MATCHER, CALENDAR_MATCHER } from '../src/client/connect.mjs';
 import { loadConfig } from '../src/config.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-connect-'));
@@ -137,12 +137,15 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
 
   assert.match(fs.readFileSync(path.join(w.data, 'warifuri.env'), 'utf8'), /^WARIFURI_SERVER_URL=http:\/\/127\.0\.0\.1:8787$/m);
   const claude = readJson(path.join(w.user, '.claude', 'settings.json'));
-  assert.equal(claude.hooks.PreToolUse.length, 1);
+  assert.equal(claude.hooks.PreToolUse.length, 2);
   assert.equal(claude.hooks.PreToolUse[0].matcher, CLAUDE_MATCHER);
   assert.match(claude.hooks.PreToolUse[0].hooks[0].command, /warifuri\.mjs" hook gate --home "[^"]+"$/);
+  assert.equal(claude.hooks.PreToolUse[1].matcher, CALENDAR_MATCHER);
+  assert.match(claude.hooks.PreToolUse[1].hooks[0].command, /warifuri\.mjs" hook calendar --home "[^"]+"$/);
   const codex = readJson(path.join(w.user, '.codex', 'hooks.json'));
   assert.equal(codex.hooks.PreToolUse[0].matcher, 'apply_patch|Edit|Write');
-  assert.match(r.stdout, /trust the new hook/);
+  assert.equal(codex.hooks.PreToolUse[1].matcher, CALENDAR_MATCHER);
+  assert.match(r.stdout, /trust the new hooks/);
 
   const before = { user: listing(path.join(w.user, '.claude')), codex: listing(path.join(w.user, '.codex')), settings: fs.readFileSync(path.join(w.user, '.claude', 'settings.json'), 'utf8') };
   const again = run(w, ['--device', 'laptop']);
@@ -152,6 +155,7 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
   assert.match(again.stdout, /claude: kept the MCP server/);
   assert.match(again.stdout, /codex: kept the MCP server/);
   assert.match(again.stdout, /claude: kept the start gate/);
+  assert.match(again.stdout, /claude: kept the calendar hook/);
   assert.equal(w.calls().length, 2);
   assert.equal(fs.readFileSync(keyFile, 'utf8').trim(), key);
   assert.deepEqual(listing(path.join(w.user, '.claude')), before.user);
@@ -181,8 +185,9 @@ test('other hooks are kept, the old file is backed up, and an old gate is replac
   assert.deepEqual(now.hooks.Stop, original.hooks.Stop);
   assert.deepEqual(now.hooks.PreToolUse[0], original.hooks.PreToolUse[0]);
   assert.deepEqual(now.hooks.PreToolUse[1], { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'lint.sh' }] });
-  assert.equal(now.hooks.PreToolUse.length, 3);
+  assert.equal(now.hooks.PreToolUse.length, 4);
   assert.equal(now.hooks.PreToolUse.flatMap((g) => g.hooks).filter((h) => /hook gate/.test(h.command)).length, 1);
+  assert.equal(now.hooks.PreToolUse.flatMap((g) => g.hooks).filter((h) => /hook calendar/.test(h.command)).length, 1);
   const backups = listing(path.dirname(file)).filter((f) => f.startsWith('settings.json.bak-warifuri-'));
   assert.equal(backups.length, 1);
   assert.deepEqual(readJson(path.join(path.dirname(file), backups[0])), original);

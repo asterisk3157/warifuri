@@ -866,7 +866,7 @@ async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat) {
 
 // The HTTP API for scripts such as hooks. Machine keys only: OAuth tokens are issued for /mcp
 // alone (their resource), and a script on a machine has its key, not a login.
-function apiRouter(ledger, limit) {
+function apiRouter(ledger, limit, secretaryRuns = () => false) {
   const router = express.Router();
   router.use(rateLimit(limit));
   router.use((req, res, next) => {
@@ -891,6 +891,11 @@ function apiRouter(ledger, limit) {
     const place = ledger.placeFor(req.device, dir);
     const task = ledger.held({ device: req.device, placeId: place?.id ?? null });
     res.json({ task, place: place ? { id: place.id, name: place.name, profile: place.profile } : null });
+  });
+  // Whether the secretary runs (the same on as board's): the calendar hook stops an agent's
+  // own calendar writes while it does (原則23).
+  router.get('/secretary', (req, res) => {
+    res.json({ secretary: secretaryRuns() ? 'on' : 'off' });
   });
   return router;
 }
@@ -952,7 +957,7 @@ export function createApp({
   app.post('/mcp', auth, mcp);
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
-  app.use('/api', apiRouter(ledger, apiLimit));
+  app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true)));
   web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit });
   app.use(web.router);
   app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };

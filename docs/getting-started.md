@@ -81,7 +81,7 @@ warifuri connect
 
 - この PC 用のシークレット(`wf_` で始まる文字列)を発行し、ユーザーだけが読めるファイル `~/.warifuri/device.key` に保存します。デバイス名は PC のホスト名で、`--device <名前>` で変更できます。
 - `claude` と `codex` に、MCP サーバーを `warifuri` という名前で登録します。
-- タスク確認を、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に追加します。
+- タスク確認と、秘書が有効なときにカレンダーへ直接書くのを止める確認を、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に追加します。
 - warifuri のスキルをコピーします。前の版の秘書のスキル(`warifuri-secretary`)があれば、スキルのフォルダの外に移します。
 
 書き換える設定ファイルは、先に `<ファイル>.bak-warifuri-<日時>` としてバックアップします。何度実行しても同じ結果になります。
@@ -90,7 +90,7 @@ warifuri connect
 |---|---|
 | `--dry-run` | 何をするかだけ表示する |
 | `--harness claude`・`--harness codex` | 片方だけに接続する |
-| `--no-hook` | タスク確認を設定しない |
+| `--no-hook` | タスク確認とカレンダーの確認を設定しない |
 | `--no-skills` | warifuri のスキルをコピーしない |
 | `--force` | スキルを新しい版に入れ替える |
 
