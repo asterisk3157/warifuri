@@ -14,6 +14,7 @@
 // while this connection keeps reading, and each read sees the latest committed rows.
 
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -31,7 +32,8 @@ import { readSettings, writeSettings, LIMIT_DEFAULTS } from '../ledger/settings.
 import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
 import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
 
-const VERSION = '0.0.0';
+// The version the MCP server reports: the package's.
+const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
 // Results as pretty JSON text, and the same object as structuredContent.
 function result(value) {
