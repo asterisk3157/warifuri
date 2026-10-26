@@ -250,6 +250,23 @@ test('answers: the secretary is woken once every question of the card is answere
   assert.match(input, /質問「期日」\(期日はどうしますか？\)への答え: 延ばす/);
 });
 
+test('answers: while another card in the conversation is still waiting, answering one does not wake the secretary', async (t) => {
+  const w = world(t);
+  const Qs = (header) => ({ header, question: `${header}はどうしますか？`, options: [{ label: '残す' }, { label: '閉じる' }] });
+  // A card put off with あとで lets the next one come, so two can be waiting at once.
+  const a = w.ledger.ask({ questions: [Qs('期日')] }, SECRETARY);
+  w.ledger.answerAsk(a.id, { later: true }, WEB);
+  const b = w.ledger.ask({ questions: [Qs('やってみたい')] }, SECRETARY);
+  w.chat.answer(a.id, { index: 0, picked: ['残す'] }, WEB);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 0, 'the other card is still waiting');
+  w.chat.answer(b.id, { index: 0, picked: ['閉じる'] }, WEB);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 1);
+  assert.match(w.claude.calls[0].input, /質問「期日」\(期日はどうしますか？\)への答え: 残す/);
+  assert.match(w.claude.calls[0].input, /質問「やってみたい」\(やってみたいはどうしますか？\)への答え: 閉じる/);
+});
+
 test('the morning: a call into the same session, answered with the morning\'s instructions and marked as scheduled; not in the night', async (t) => {
   const w = world(t);
   w.chat.send('おはよう', WEB);

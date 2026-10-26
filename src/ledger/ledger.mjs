@@ -1370,6 +1370,10 @@ export function openLedger(path, options = {}) {
   }
   const getAttachment = (id) => attachmentRow(id);
 
+  // The oldest question in a thread still waiting for an answer ({ id }), or undefined.
+  const openAsk = (threadId) =>
+    one("SELECT id FROM messages WHERE thread_id = ? AND kind = 'ask' AND state = 'open' ORDER BY rowid LIMIT 1", threadId);
+
   // 質問(ask): the secretary's questions in a thread (the secretary's conversation unless
   // thread names another), open until the person answers each one.
   function ask(fields, opts) {
@@ -1392,7 +1396,7 @@ export function openLedger(path, options = {}) {
     return transaction(() => {
       if (threadId === null) threadId = ensureThread(SECRETARY_THREAD.kind, w).id;
       // One card at a time: the person answers all of it before the next one comes.
-      const waiting = one("SELECT id FROM messages WHERE thread_id = ? AND kind = 'ask' AND state = 'open'", threadId);
+      const waiting = openAsk(threadId);
       if (waiting) throw new LedgerError([`まだ答えを待っている質問があります(${waiting.id})。聞きたいことは1回の ask に${ASK_QUESTIONS_MAX}問までまとめ、答えが届いてから次を聞きます`]);
       const body = checked.questions.map((q) => `【${q.header}】${q.question}`).join('\n');
       const data = { questions: checked.questions, answers: checked.questions.map(() => null) };
@@ -2036,6 +2040,7 @@ export function openLedger(path, options = {}) {
     addAttachment,
     getAttachment,
     ask,
+    openAsk,
     answerAsk,
     getMessage,
     listMessages,
