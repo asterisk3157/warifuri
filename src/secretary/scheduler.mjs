@@ -19,7 +19,7 @@ import { JOBS, latestSlot, countSlots, localIso } from './schedule.mjs';
 export const TICK_MS = 30_000;
 export const GRACE_MS = 60 * 60 * 1000;
 
-// jobs: { nightly: when, morning: when, inbox: when } from parseWhen.
+// jobs: { nightly: when, morning: when, inbox: when, sync: when } from parseWhen.
 export function createScheduler({ jobs, run, onTick = () => {}, now = () => new Date(), log = () => {}, tickMs = TICK_MS, graceMs = GRACE_MS, timers = globalThis }) {
   let last = now();
   let busy = false;
@@ -39,7 +39,7 @@ export function createScheduler({ jobs, run, onTick = () => {}, now = () => new 
         }
         const secs = Math.round((now() - started) / 1000);
         if (out.sent) log(`secretary: ${job} sent into the conversation`);
-        else if (out.skipped) log(`secretary: ${job} not sent: ${out.skipped}`);
+        else if (out.skipped) log(`secretary: ${job} ${job === 'morning' ? 'not sent' : 'skipped'}: ${out.skipped}`);
         else if (out.busy) log(`secretary: ${job} skipped: another secretary run is still going`);
         else if (out.error) log(`secretary: ${job} did not start: ${out.error}`);
         else if (out.timedOut) log(`secretary: ${job} stopped after ${secs}s: it ran past the time limit`);

@@ -449,7 +449,7 @@ function startSecretary(cfg, chat) {
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
-    run: (job) => (job === 'morning' ? chat.trigger(job) : secretary.runJob(job, cfg, { signal: abort.signal })),
+    run: (job) => (job === 'morning' ? chat.trigger(job) : secretary.runJob(job, cfg, { signal: abort.signal, scheduled: true })),
     onTick: () => chat.kick(),
   });
   scheduler.start();

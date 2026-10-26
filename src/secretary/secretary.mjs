@@ -32,7 +32,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { openLedger } from '../ledger/ledger.mjs';
 import { initHome, decodeText } from '../config.mjs';
 import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME, BIN } from '../client/connect.mjs';
-import { JOBS, parseWhen, parseNight, localIso, showWhen } from './schedule.mjs';
+import { JOBS, parseWhen, parseNight, inNight, localIso, showWhen } from './schedule.mjs';
 
 export const DEVICE = 'secretary';
 // The device the secretary writes as: WARIFURI_SECRETARY_DEVICE, or DEVICE.
@@ -48,7 +48,7 @@ export const DISALLOWED = [
   'Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'NotebookRead', 'Read', 'Glob',
   'Grep', 'LS', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'TodoWrite', 'Skill', 'SlashCommand',
 ];
-export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', morning: '朝の報告', inbox: '受信箱の整理' };
+export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', morning: '朝の報告', inbox: '受信箱の整理', sync: 'カレンダーの同期' };
 
 export const paths = (home) => {
   const dir = path.join(home, DIR);
@@ -95,12 +95,15 @@ export function scheduleFrom(values) {
   };
   const night = parseNight(values.WARIFURI_SECRETARY_NIGHT ?? '23:00-07:00');
   const calendarTools = (values.WARIFURI_SECRETARY_CALENDAR_TOOLS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  // The calendar sync runs only when a calendar is given to the secretary.
+  const tools = toolsFrom(values);
+  jobs.sync = tools.some((t) => /calendar/i.test(t.name)) ? parseWhen(values.WARIFURI_SECRETARY_SYNC ?? 'every 60m') : { off: true };
   return {
     jobs,
     night,
     timeoutMs: Number(values.WARIFURI_SECRETARY_TIMEOUT ?? '20') * 60_000,
     calendarTools,
-    tools: toolsFrom(values),
+    tools,
     connectors: values.WARIFURI_SECRETARY_CONNECTORS === 'on',
   };
 }
@@ -363,6 +366,11 @@ export async function runJob(job, cfg, ctx = {}) {
   const env = ctx.env ?? process.env;
   const platform = ctx.platform ?? process.platform;
   const schedule = scheduleFrom(cfg.values);
+  // The sync is quiet work, but each run is a run of claude: not in the night when the clock
+  // starts it (warifuri secretary run sync still runs it).
+  if (job === 'sync' && ctx.scheduled && !schedule.night.error && inNight(schedule.night, (ctx.now ?? (() => new Date()))())) {
+    return { skipped: 'it is the night' };
+  }
   const claude = findOnPath('claude', env, platform);
   if (!claude) return { error: 'claude (Claude Code) is not on PATH' };
   const key = readSecretaryKey(cfg.home);
