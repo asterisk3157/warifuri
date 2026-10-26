@@ -192,7 +192,7 @@ test('enable issues the key once, writes an owner-only config and turns the sche
   assert.match(key, /^wf_/);
   assert.ok(!`${r.stdout}${r.stderr}`.includes(key));
   assert.match(r.stdout, /Log in to Claude Code once/);
-  assert.match(r.stdout, /schedule: nightly 23:00, morning 07:00, inbox sun 23:00 \(night 23:00-07:00\)/);
+  assert.match(r.stdout, /schedule: nightly 23:00, morning 07:00, inbox sun 23:00, sync off \(night 23:00-07:00\)/);
   const mcp = paths(w.home).mcp;
   assert.equal(JSON.parse(read(mcp)).mcpServers.warifuri.url, 'http://127.0.0.1:8787/mcp');
   if (process.platform !== 'win32') {
@@ -383,4 +383,44 @@ test('the read scope: reads go through, writes and tools that cannot be told are
   assert.equal(decideTools({ tool_name: 'mcp__claude_ai_Gmail_extra__send_message' }, reads), null);
   assert.equal(decideTools({ tool_name: 'mcp__warifuri__book' }, reads), null);
   assert.equal(decideTools(null, reads), null);
+});
+
+test('the calendar sync: every <n>m times, on only with a calendar given, and not in the night when the clock starts it', async () => {
+  assert.deepEqual(parseWhen('every 60m'), { every: 60 });
+  assert.deepEqual(parseWhen('every 2h'), { every: 120 });
+  assert.ok(parseWhen('every 5m').error);
+  assert.ok(parseWhen('every 25h').error);
+  const every = parseWhen('every 60m');
+  const at = (h, m = 0) => new Date(2026, 9, 26, h, m);
+  assert.deepEqual(latestSlot(every, at(9, 10), at(10, 20)), at(10));
+  assert.equal(latestSlot(every, at(10, 5), at(10, 20)), null);
+  assert.equal(countSlots(every, at(6, 30), at(10, 20)), 4);
+  assert.deepEqual(nextSlot(every, at(23, 30)), new Date(2026, 9, 27, 0, 0));
+
+  assert.deepEqual(scheduleFrom({}).jobs.sync, { off: true });
+  assert.deepEqual(scheduleFrom({ WARIFURI_SECRETARY_TOOLS: 'mcp__claude_ai_Gmail=read' }).jobs.sync, { off: true });
+  assert.deepEqual(scheduleFrom({ WARIFURI_SECRETARY_TOOLS: 'mcp__claude_ai_Google_Calendar=own' }).jobs.sync, { every: 60 });
+  assert.deepEqual(scheduleFrom({ WARIFURI_SECRETARY_CALENDAR_TOOLS: 'mcp__calendar', WARIFURI_SECRETARY_SYNC: 'every 30m' }).jobs.sync, { every: 30 });
+  const wrong = loadConfig({ env: { WARIFURI_HOME: tmp, WARIFURI_SECRETARY_SYNC: 'often' }, command: 'serve' });
+  assert.ok(wrong.problems.some((p) => /WARIFURI_SECRETARY_SYNC/.test(p)));
+
+  const w = world();
+  writeMcpConfig(w.home, { url: 'http://127.0.0.1:8787/mcp', key: 'wf_test-key' });
+  const cfg = loadConfig({ env: { WARIFURI_HOME: w.home, WARIFURI_SECRETARY_TOOLS: 'mcp__claude_ai_Google_Calendar=own' }, command: 'secretary' });
+  const spawned = [];
+  const spawn = (file, args) => {
+    const child = new EventEmitter();
+    let input = '';
+    child.stdin = new Writable({ write: (c, _e, cb) => ((input += c), cb()) });
+    spawned.push({ args, input: () => input });
+    setImmediate(() => child.emit('close', 0, null));
+    return child;
+  };
+  assert.deepEqual(await runJob('sync', cfg, { env: w.env, spawn, scheduled: true, now: () => at(2) }), { skipped: 'it is the night' });
+  assert.equal(spawned.length, 0);
+  assert.equal((await runJob('sync', cfg, { env: w.env, spawn, scheduled: true, now: () => at(10) })).code, 0);
+  assert.match(spawned[0].input(), /カレンダーの同期\(`sync`\)/);
+  assert.match(spawned[0].input(), /報告\(`report`\)は書かず/);
+  // By hand, it runs in the night too.
+  assert.equal((await runJob('sync', cfg, { env: w.env, spawn, now: () => at(2) })).code, 0);
 });

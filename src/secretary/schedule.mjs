@@ -2,22 +2,32 @@
 // time. No I/O and no timers; scheduler.mjs runs the clock.
 //
 // A time is written "HH:MM" (every day), "<days> HH:MM" with days as a comma list of
-// sun mon tue wed thu fri sat (such as "sun 23:00" or "mon,thu 07:30"), or "off". The night
-// is "HH:MM-HH:MM" and may cross midnight.
+// sun mon tue wed thu fri sat (such as "sun 23:00" or "mon,thu 07:30"), "every <n>m" or
+// "every <n>h" (from local midnight on, such as "every 60m": 00:00, 01:00, …), or "off". The
+// night is "HH:MM-HH:MM" and may cross midnight.
 
-export const JOBS = ['nightly', 'morning', 'inbox'];
+export const JOBS = ['nightly', 'morning', 'inbox', 'sync'];
+// The shortest and longest interval of an "every" time, in minutes.
+export const EVERY_MIN = 15;
+export const EVERY_MAX = 24 * 60;
 export const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-// { off: true }, or { days: [0..6] | null, hour, minute }, or { error }.
+// { off: true }, or { days: [0..6] | null, hour, minute }, or { every: minutes }, or { error }.
 export function parseWhen(text) {
   const v = String(text ?? '').trim().toLowerCase();
   if (v === 'off') return { off: true };
+  const e = /^every\s+(\d+)\s*(m|h)$/.exec(v);
+  if (e) {
+    const every = Number(e[1]) * (e[2] === 'h' ? 60 : 1);
+    if (every < EVERY_MIN || every > EVERY_MAX) return { error: `every must be from ${EVERY_MIN}m to 24h` };
+    return { every };
+  }
   const parts = v.split(/\s+/);
   const time = parts.pop();
   const m = TIME.exec(time ?? '');
-  if (!m || parts.length > 1) return { error: 'must be HH:MM, <days> HH:MM (days: sun,mon,…,sat) or off' };
+  if (!m || parts.length > 1) return { error: 'must be HH:MM, <days> HH:MM (days: sun,mon,…,sat), every <n>m or off' };
   let days = null;
   if (parts.length === 1) {
     days = [];
@@ -56,10 +66,24 @@ function slotOn(when, day) {
 
 const dayBefore = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - n);
 
+// The runs of an "every" time on the local day of `day`, earliest first.
+function everySlots(when, day) {
+  const out = [];
+  for (let m = 0; m < 24 * 60; m += when.every) out.push(new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, m));
+  return out;
+}
+
 // The latest run of `when` after `after` and at or before `upTo`, or null. A weekly time has
 // a run in every 8 days, so only the last 8 days before upTo are looked at.
 export function latestSlot(when, after, upTo) {
   if (!when || when.off || when.error) return null;
+  if (when.every) {
+    for (let n = 0; n <= 1; n++) {
+      const s = everySlots(when, dayBefore(upTo, n)).filter((x) => x <= upTo).pop();
+      if (s) return s > after ? s : null;
+    }
+    return null;
+  }
   for (let n = 0; n <= 8; n++) {
     const s = slotOn(when, dayBefore(upTo, n));
     if (!s || s > upTo) continue;
@@ -71,6 +95,15 @@ export function latestSlot(when, after, upTo) {
 // How many runs of `when` fall after `after` and at or before `upTo` (for the log line).
 export function countSlots(when, after, upTo, cap = 1000) {
   if (!when || when.off || when.error) return 0;
+  if (when.every) {
+    let count = 0;
+    for (let n = 0; count < cap; n++) {
+      const day = dayBefore(upTo, n);
+      if (dayBefore(day, -1) <= after) break;
+      count += everySlots(when, day).filter((s) => s <= upTo && s > after).length;
+    }
+    return Math.min(count, cap);
+  }
   let count = 0;
   for (let n = 0; count < cap; n++) {
     const day = dayBefore(upTo, n);
@@ -84,6 +117,13 @@ export function countSlots(when, after, upTo, cap = 1000) {
 // The next run of `when` after `after`, or null.
 export function nextSlot(when, after) {
   if (!when || when.off || when.error) return null;
+  if (when.every) {
+    for (let n = 0; n <= 1; n++) {
+      const s = everySlots(when, dayBefore(after, -n)).find((x) => x > after);
+      if (s) return s;
+    }
+    return null;
+  }
   for (let n = 0; n <= 8; n++) {
     const s = slotOn(when, dayBefore(after, -n));
     if (s && s > after) return s;
@@ -104,6 +144,7 @@ export function localIso(d) {
 // How a time is shown to the person: "23:00", "sun 23:00", "off".
 export function showWhen(when) {
   if (when.off) return 'off';
+  if (when.every) return when.every % 60 === 0 ? `every ${when.every / 60}h` : `every ${when.every}m`;
   const t = `${String(when.hour).padStart(2, '0')}:${String(when.minute).padStart(2, '0')}`;
   return when.days ? `${when.days.map((i) => DAYS[i]).join(',')} ${t}` : t;
 }

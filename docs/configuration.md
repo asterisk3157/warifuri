@@ -69,6 +69,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SECRETARY_NIGHTLY` | 毎晩の見張りと組み直しの時刻。HH:MM で毎日、曜日を前に付けると(mon,thu 23:00)その曜日だけ。off で止める | `23:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_MORNING` | 朝の時刻。秘書との会話に「朝の時間です」を送り、会話の秘書が朝の言葉を書いて質問する。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ | `07:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_INBOX` | 受信箱の整理の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。毎晩の仕事と同じ時刻なら、その終わりを待って動く | `sun 23:00` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_SYNC` | カレンダーの同期の間隔。every 60m のように書く(15m から 24h、0時から数える)。書き方は WARIFURI_SECRETARY_NIGHTLY の時刻でもよい。秘書にカレンダーを渡していないときは動かない。夜の時間帯には動かない | `every 60m` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_NIGHT` | 夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く | `23:00-07:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_TIMEOUT` | 秘書の1回の仕事の上限(分)。超えたら止める | `20` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_CALENDAR_TOOLS` | 秘書に渡すカレンダーの MCP のツール(mcp__<サーバーの名前> の形、カンマ区切り)。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる。空なら warifuri だけ | なし |  |  | serve、secretary |

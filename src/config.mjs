@@ -187,6 +187,14 @@ export const SETTINGS = [
     check: (v) => parseWhen(v).error ?? null,
   },
   {
+    name: 'WARIFURI_SECRETARY_SYNC',
+    section: 'secretary',
+    about: 'カレンダーの同期の間隔。every 60m のように書く(15m から 24h、0時から数える)。書き方は WARIFURI_SECRETARY_NIGHTLY の時刻でもよい。秘書にカレンダーを渡していないときは動かない。夜の時間帯には動かない',
+    def: 'every 60m',
+    commands: SECRETARY,
+    check: (v) => parseWhen(v).error ?? null,
+  },
+  {
     name: 'WARIFURI_SECRETARY_NIGHT',
     section: 'secretary',
     about: '夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く',
