@@ -198,6 +198,11 @@ export function codexServer(toml, name = SERVER_NAME) {
   return out;
 }
 
+// Skills an older warifuri copied under another name. connect moves them out of the skills
+// folder (into <skills>.bak-warifuri-<time>/), so the harness does not load both the old
+// one and the new one. Only a folder whose SKILL.md names itself so is moved.
+export const RETIRED_SKILLS = ['warifuri-secretary'];
+
 // The skills this package carries: [{ name, files: [relative paths] }].
 export function packageSkills(root = PACKAGE_ROOT) {
   const dir = path.join(root, 'harness', 'skills');
@@ -381,6 +386,7 @@ export function connect(cfg, opts, ctx = {}) {
           lines.push(`${h.name}: skills already copied to ${target}`);
         } else {
           skillTargets.add(real);
+          retireSkills({ name: h.name, target, now, dry, say, problems });
           copySkills({ name: h.name, skills, target, force: opts.force, dry, say, lines, problems });
         }
       }
@@ -456,6 +462,29 @@ function registerCodex({ h, env, home, mcpUrl, auth, run, dry, say, lines, probl
   if (current) runStep({ h: hh, args: ['mcp', 'remove', SERVER_NAME], shown: `codex mcp remove ${SERVER_NAME}`, problems: [], lines });
   if (runStep({ h: hh, args: add, shown, problems, lines }) && auth === 'login') {
     lines.push(`codex: run codex mcp login ${SERVER_NAME} to sign in with GitHub`);
+  }
+}
+
+function retireSkills({ name, target, now, dry, say, problems }) {
+  for (const old of RETIRED_SKILLS) {
+    const from = path.join(target, old);
+    let text;
+    try {
+      text = fs.readFileSync(path.join(from, 'SKILL.md'), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!new RegExp(`^name:\\s*${old}\\s*$`, 'm').test(text)) continue;
+    let dest = `${target}.bak-warifuri-${stamp(now)}`;
+    for (let i = 2; fs.existsSync(path.join(dest, old)); i++) dest = `${target}.bak-warifuri-${stamp(now)}-${i}`;
+    say(`${name}: move the old skill ${old} out of ${target} to ${path.join(dest, old)}`);
+    if (dry) continue;
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+      fs.renameSync(from, path.join(dest, old));
+    } catch (err) {
+      problems.push(`${name}: cannot move ${from}: ${err.message}`);
+    }
   }
 }
 

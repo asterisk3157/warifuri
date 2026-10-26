@@ -260,6 +260,39 @@ test('skills are copied, and files already there are kept unless --force', () =>
   assert.ok(c.lines.some((l) => /codex: no .* skills not copied/.test(l)));
 });
 
+test('a skill copied under its old name is moved out of the skills folder', () => {
+  const w = world({ harnesses: ['claude'] });
+  const pkg = path.join(w.root, 'pkg');
+  fs.mkdirSync(path.join(pkg, 'harness', 'skills', 'warifuri'), { recursive: true });
+  fs.writeFileSync(path.join(pkg, 'harness', 'skills', 'warifuri', 'SKILL.md'), '---\nname: warifuri\n---\n');
+  const skills = path.join(w.user, '.claude', 'skills');
+  fs.mkdirSync(path.join(skills, 'warifuri-secretary'), { recursive: true });
+  fs.writeFileSync(path.join(skills, 'warifuri-secretary', 'SKILL.md'), '---\nname: warifuri-secretary\n---\n');
+  fs.writeFileSync(path.join(skills, 'warifuri-secretary', 'examples.md'), 'old');
+  const cfg = loadConfig({ env: w.env, command: 'connect' });
+  const opts = { harness: 'claude', hook: false, skills: true, force: false };
+  const now = new Date('2026-10-26T08:00:00Z');
+  const ctx = { env: w.env, packageRoot: pkg, now, run: () => ({ status: 0, stdout: '', stderr: '' }) };
+
+  const dry = connect(cfg, { ...opts, dryRun: true }, ctx);
+  assert.ok(dry.lines.some((l) => /would claude: move the old skill warifuri-secretary/.test(l)), dry.lines.join('\n'));
+  assert.ok(fs.existsSync(path.join(skills, 'warifuri-secretary')));
+
+  const r = connect(cfg, opts, ctx);
+  assert.deepEqual(r.problems, []);
+  assert.ok(!fs.existsSync(path.join(skills, 'warifuri-secretary')));
+  const moved = path.join(`${skills}.bak-warifuri-20261026-080000`, 'warifuri-secretary');
+  assert.equal(fs.readFileSync(path.join(moved, 'examples.md'), 'utf8'), 'old');
+  assert.ok(fs.existsSync(path.join(skills, 'warifuri', 'SKILL.md')));
+
+  // A folder of that name that is someone else's skill stays.
+  fs.mkdirSync(path.join(skills, 'warifuri-secretary'), { recursive: true });
+  fs.writeFileSync(path.join(skills, 'warifuri-secretary', 'SKILL.md'), '---\nname: my-own\n---\n');
+  const again = connect(cfg, opts, ctx);
+  assert.ok(!again.lines.some((l) => /move the old skill/.test(l)));
+  assert.ok(fs.existsSync(path.join(skills, 'warifuri-secretary', 'SKILL.md')));
+});
+
 test('the small pieces: hook merge, env lines, the Codex table', () => {
   const handler = { type: 'command', command: 'warifuri hook gate', timeout: 10 };
   const once = mergeGateHook({}, { matcher: 'Edit', handler });
