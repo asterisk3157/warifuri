@@ -217,7 +217,7 @@ warifuri secretary enable
 <details>
 <summary>秘書が使えるもの</summary>
 
-秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを使わせる方法は[連携の例](integrations.md#秘書にカレンダーを使わせる)にあります。
+秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを使わせる方法は、[連携の例](integrations.md)に書く予定です。
 
 </details>
 
