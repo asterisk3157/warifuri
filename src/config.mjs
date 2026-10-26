@@ -117,14 +117,14 @@ export const SETTINGS = [
     name: 'WARIFURI_SERVER_URL',
     flag: 'url',
     section: 'client',
-    about: '使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む',
+    about: '使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、タスク確認のフックが読む',
     commands: CLIENT,
     check: httpUrl,
   },
   {
     name: 'WARIFURI_DEVICE_KEY_FILE',
     section: 'client',
-    about: 'このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む',
+    about: 'このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、タスク確認のフックが読む',
     def: (home) => path.join(home, 'device.key'),
     defText: 'WARIFURI_HOME/device.key',
     path: true,
@@ -133,7 +133,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_GATE',
     section: 'client',
-    about: '着手ゲート。off にすると、作業中のタスクがなくても編集を止めない',
+    about: 'タスク確認。off にすると、作業中のタスクがなくても編集を止めない',
     def: 'on',
     commands: ['hook'],
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
@@ -418,7 +418,7 @@ export function describeConfig(cfg) {
 }
 
 const SECTION_HEADS = {
-  client: '# ---- 使う機械の設定。warifuri connect と着手ゲートのフックが読む ----',
+  client: '# ---- 使う機械の設定。warifuri connect と、タスク確認とカレンダーのフックが読む ----',
   secretary: '# ---- 秘書の定時の仕事。warifuri serve と warifuri secretary が読む ----',
 };
 

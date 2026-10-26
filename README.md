@@ -72,7 +72,7 @@ If it says `command not found: warifuri`, add the `bin` folder under the path th
 
 | Version | Date | Changes |
 |---|---|---|
-| v0.2.0 | (planned) | Secretary, task order |
+| v0.2.0 | 2026-10-26 | Secretary (timed checks, the chat window, question cards), asking the secretary for time, outside tools, task order |
 | v0.1.0 | 2026-10-25 | Tasks, scheduling, Web UI, MCP, the task check |
 
 Details are [here](https://github.com/asterisk3157/warifuri/releases).

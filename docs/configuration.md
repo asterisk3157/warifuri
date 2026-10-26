@@ -36,7 +36,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 ## 使う機械の設定
 
-`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、着手ゲートとカレンダーのフック(`warifuri hook gate`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使えなくなります。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認とカレンダーのフック(`warifuri hook gate`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使えなくなります。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
 ## 秘書の設定
 
@@ -60,9 +60,9 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_GITHUB_CLIENT_SECRET` | GitHub の OAuth App の Client Secret。GitHub のログインに要る | なし |  | 秘密 | serve |
 | `WARIFURI_TRUST_PROXY` | 同じ機械のトンネルや逆プロキシを信じる範囲(loopback や段数)。回数の制限を呼び出し元ごとに数えるために使う | なし | `--trust-proxy` |  | serve |
 | `WARIFURI_REDIRECT_HOSTS` | ログインのあとに戻してよい https の先。claude.ai と claude.com に足す。カンマ区切り | なし |  |  | serve |
-| `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む | なし | `--url` |  | connect、hook |
-| `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
-| `WARIFURI_GATE` | 着手ゲート。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
+| `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、タスク確認のフックが読む | なし | `--url` |  | connect、hook |
+| `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、タスク確認のフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
+| `WARIFURI_GATE` | タスク確認。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
 | `WARIFURI_CALENDAR_CLAUDE` | この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_CALENDAR_CODEX` | この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_SECRETARY` | 秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く | `off` |  |  | serve、secretary |

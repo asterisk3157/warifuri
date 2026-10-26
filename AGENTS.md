@@ -83,6 +83,10 @@ Write the description in plain, ordinary Japanese (です・ます), the way pul
 
 Say things directly. Never name the maintainer's own tools, services or plans (they are in the private list); describe what warifuri itself does. Check the description with `scripts/check-private-terms.sh --file <file>` before opening or editing a pull request. No casual headings (なぜ, 見てほしいところ), no 「！」, and no sentence that only introduces the next one.
 
+## Versions
+
+Versions are `a.b.c`. Until 1.0, `a` stays 0. A release that adds a feature raises `b` and sets `c` to 0 (0.2.0); a release of fixes only raises `c` (0.2.1). Change `version` in package.json (and package-lock.json with `npm install --package-lock-only`), add the row to the version history of both READMEs, and tag the merge commit on main as `v<a.b.c>`. Releasing (the tag, the GitHub release, `npm publish`) is done after the maintainer approves.
+
 ## Writing
 
 Keep the README short, in this order: one sentence on what warifuri is, the main features as a table (feature and one-line description), install, troubleshooting folded per OS, links to the docs, version history, license. Explanations go in `docs/`, written as prose like a technical article; a table is fine for options, symptoms or times. Say what something does, without examples that stand in for an argument or claims about people in general. Write Japanese in です・ます.
