@@ -141,7 +141,8 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
   assert.equal(claude.hooks.PreToolUse[0].matcher, CLAUDE_MATCHER);
   assert.match(claude.hooks.PreToolUse[0].hooks[0].command, /warifuri\.mjs" hook gate --home "[^"]+"$/);
   assert.equal(claude.hooks.PreToolUse[1].matcher, CALENDAR_MATCHER);
-  assert.match(claude.hooks.PreToolUse[1].hooks[0].command, /warifuri\.mjs" hook calendar --home "[^"]+"$/);
+  assert.match(claude.hooks.PreToolUse[1].hooks[0].command, /warifuri\.mjs" hook calendar claude --home "[^"]+"$/);
+  assert.match(readJson(path.join(w.user, ".codex", "hooks.json")).hooks.PreToolUse[1].hooks[0].command, / hook calendar codex --home /);
   const codex = readJson(path.join(w.user, '.codex', 'hooks.json'));
   assert.equal(codex.hooks.PreToolUse[0].matcher, 'apply_patch|Edit|Write');
   assert.equal(codex.hooks.PreToolUse[1].matcher, CALENDAR_MATCHER);

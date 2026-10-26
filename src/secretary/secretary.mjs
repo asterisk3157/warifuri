@@ -18,7 +18,12 @@
 // (shell, files, web) are disallowed, and --strict-mcp-config leaves out the person's other
 // MCP servers unless WARIFURI_SECRETARY_CALENDAR_TOOLS names a calendar to allow. The
 // account's claude.ai connectors are turned off (ENABLE_CLAUDEAI_MCP_SERVERS=false) unless
-// WARIFURI_SECRETARY_CONNECTORS is on. The key is only in mcp.json: never on the command line,
+// WARIFURI_SECRETARY_CONNECTORS is on. WARIFURI_SECRETARY_TOOLS gives more outside tools, each
+// with a scope (read, own, write; a calendar of WARIFURI_SECRETARY_CALENDAR_TOOLS is own); a
+// tool given to read has its other tools stopped by a PreToolUse hook (warifuri hook tools)
+// in <home>/secretary/settings.json, which claude takes with --settings. That file also sets
+// ENABLE_CLAUDEAI_MCP_SERVERS, because the env of the person's own Claude Code settings
+// wins over the process environment. The key is only in mcp.json: never on the command line,
 // in the environment or in a log.
 
 import fs from 'node:fs';
@@ -26,7 +31,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { openLedger } from '../ledger/ledger.mjs';
 import { initHome, decodeText } from '../config.mjs';
-import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME } from '../client/connect.mjs';
+import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME, BIN } from '../client/connect.mjs';
 import { JOBS, parseWhen, parseNight, localIso, showWhen } from './schedule.mjs';
 
 export const DEVICE = 'secretary';
@@ -49,7 +54,7 @@ export const paths = (home) => {
   const dir = path.join(home, DIR);
   return {
     dir, mcp: path.join(dir, 'mcp.json'), lock: path.join(dir, 'run.lock'), logs: path.join(dir, 'logs'), chat: path.join(dir, 'chat'),
-    uploads: path.join(dir, 'uploads'), threadMcp: (id) => path.join(dir, `mcp-${id}.json`),
+    uploads: path.join(dir, 'uploads'), threadMcp: (id) => path.join(dir, `mcp-${id}.json`), settings: path.join(dir, 'settings.json'),
   };
 };
 
@@ -66,7 +71,22 @@ export function serverUrl(values) {
   return `http://${local.includes(':') ? `[${local}]` : local}:${values.WARIFURI_PORT ?? '8787'}/mcp`;
 }
 
-// The schedule from the settings: { jobs, night, timeoutMs, calendarTools, connectors }.
+// The outside tools of WARIFURI_SECRETARY_TOOLS and WARIFURI_SECRETARY_CALENDAR_TOOLS (scope
+// own): [{ name, scope }], one per name (the first wins).
+export function toolsFrom(values) {
+  const out = [];
+  const add = (name, scope) => {
+    if (name && !out.some((t) => t.name === name)) out.push({ name, scope });
+  };
+  for (const item of (values.WARIFURI_SECRETARY_TOOLS ?? '').split(',')) {
+    const [name, scope] = item.trim().split('=');
+    add(name, scope);
+  }
+  for (const name of (values.WARIFURI_SECRETARY_CALENDAR_TOOLS ?? '').split(',')) add(name.trim(), 'own');
+  return out;
+}
+
+// The schedule from the settings: { jobs, night, timeoutMs, calendarTools, tools, connectors }.
 export function scheduleFrom(values) {
   const jobs = {
     nightly: parseWhen(values.WARIFURI_SECRETARY_NIGHTLY ?? '23:00'),
@@ -80,6 +100,7 @@ export function scheduleFrom(values) {
     night,
     timeoutMs: Number(values.WARIFURI_SECRETARY_TIMEOUT ?? '20') * 60_000,
     calendarTools,
+    tools: toolsFrom(values),
     connectors: values.WARIFURI_SECRETARY_CONNECTORS === 'on',
   };
 }
@@ -219,6 +240,8 @@ export function factLines(title, name, { now, schedule }) {
     : schedule.connectors
       ? 'claude.ai のコネクタが有効です。カレンダーのコネクタがあれば、カレンダーとして使えます。'
       : 'カレンダーの MCP はつながっていません。カレンダーの手順は飛ばします。';
+  const scopes = { read: '読むだけ', own: '読む、warifuri が作ったものだけ書く', write: '読む、書く(外に出すときは毎回本人に聞く)' };
+  const tools = (schedule.tools ?? []).map((t) => `\`${t.name}\`(${scopes[t.scope]})`);
   return [
     '# この実行について',
     '',
@@ -226,6 +249,7 @@ export function factLines(title, name, { now, schedule }) {
     `- いまの日時: ${localIso(now)}(サーバーの機械の時刻)`,
     `- 夜の時間帯: ${fmtNight(schedule.night).replace('-', '〜')}`,
     `- ${calendar}`,
+    ...(tools.length ? [`- 使える外の道具: ${tools.join('、')}。この範囲の外のことはしません。`] : []),
   ];
 }
 
@@ -238,15 +262,39 @@ export function buildPrompt(job, { now = new Date(), schedule, instructionsDir =
 }
 
 // The command line of one run. The key is not in it: claude reads it from mcp.json.
-export function claudeArgs({ mcpFile, schedule }) {
-  const allowed = [ALLOWED, ...schedule.calendarTools];
+// settingsFile: the file of writeClaudeSettings, or null.
+export function claudeArgs({ mcpFile, schedule, settingsFile = null }) {
+  const tools = schedule.tools ?? schedule.calendarTools.map((name) => ({ name, scope: 'own' }));
+  const allowed = [ALLOWED, ...tools.map((t) => t.name)];
   return [
     '-p',
     '--mcp-config', mcpFile,
-    ...(schedule.calendarTools.length ? [] : ['--strict-mcp-config']),
+    ...(tools.length ? [] : ['--strict-mcp-config']),
     '--allowedTools', allowed.join(','),
     '--disallowedTools', DISALLOWED.join(','),
+    ...(settingsFile ? ['--settings', settingsFile] : []),
   ];
+}
+
+// The Claude Code settings of a run, when it needs any: the connectors' switch (the env of
+// the person's own settings would win over the process environment) and the hook that keeps
+// the tools given to read to their reads. Owner-only. Returns the file, or null when nothing
+// is to be set (a file left from before is then not given to claude).
+export function writeClaudeSettings(home, schedule, { platform = process.platform, node = process.execPath, bin = BIN } = {}) {
+  const p = paths(home);
+  const reads = (schedule.tools ?? []).filter((t) => t.scope === 'read').map((t) => t.name);
+  if (!schedule.connectors && !reads.length) return null;
+  const json = { env: { ENABLE_CLAUDEAI_MCP_SERVERS: schedule.connectors ? 'true' : 'false' } };
+  if (reads.length) {
+    const command = [`"${node}"`, `"${bin}"`, 'hook', 'tools', ...reads].join(' ');
+    json.hooks = { PreToolUse: [{ matcher: 'mcp__.*', hooks: [{ type: 'command', command, timeout: 10 }] }] };
+  }
+  ownerOnlyDir(p.dir, platform);
+  const tmp = `${p.settings}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(json, null, 2)}\n`, { mode: 0o600 });
+  if (platform !== 'win32') fs.chmodSync(tmp, 0o600);
+  fs.renameSync(tmp, p.settings);
+  return p.settings;
 }
 
 // The environment of claude: the server's, without warifuri's own settings and secrets, and
@@ -327,7 +375,8 @@ export async function runJob(job, cfg, ctx = {}) {
   try {
     const prompt = buildPrompt(job, { now: (ctx.now ?? (() => new Date()))(), schedule, instructionsDir: ctx.instructionsDir });
     log = openLog(p.logs, job, platform);
-    const child = (ctx.spawn ?? defaultSpawn)(claude, claudeArgs({ mcpFile: p.mcp, schedule }), {
+    const settingsFile = writeClaudeSettings(cfg.home, schedule, { platform });
+    const child = (ctx.spawn ?? defaultSpawn)(claude, claudeArgs({ mcpFile: p.mcp, schedule, settingsFile }), {
       env: claudeEnv(env, schedule),
       stdio: ['pipe', log.fd, log.fd],
       platform,

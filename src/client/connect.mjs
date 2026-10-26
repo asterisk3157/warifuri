@@ -176,6 +176,7 @@ export function mergeHook(json, { matcher, handler, isOurs }) {
 // npm also puts a warifuri.ps1 there, which PowerShell may refuse to run under its execution
 // policy. Otherwise node and this package's bin.
 export function gateCommand({ env, platform, home, homeIsDefault, which = 'gate' }) {
+  // which: 'gate', or 'calendar <harness>'.
   const q = (s) => `"${s}"`;
   const onPath = findOnPath('warifuri', env, platform) ? (platform === 'win32' ? 'warifuri.cmd' : 'warifuri') : null;
   const head = onPath ?? `${q(process.execPath)} ${q(BIN)}`;
@@ -335,7 +336,7 @@ export function connect(cfg, opts, ctx = {}) {
   }
 
   const command = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true });
-  const calendarCommand = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: 'calendar' });
+  const calendarCommand = (harness) => gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: `calendar ${harness}` });
   const skills = opts.skills ? packageSkills(ctx.packageRoot) : [];
   const skillTargets = new Set();
 
@@ -358,7 +359,7 @@ export function connect(cfg, opts, ctx = {}) {
         h.name === 'claude' ? { type: 'command', command: cmd, timeout: HOOK_TIMEOUT } : { type: 'command', command: cmd, timeout: HOOK_TIMEOUT, statusMessage: status };
       const hooks = [
         { what: 'the start gate', matcher: h.name === 'claude' ? CLAUDE_MATCHER : CODEX_MATCHER, handler: handler(command, 'warifuri: checking the held task'), isOurs: isGateHook },
-        { what: 'the calendar hook', matcher: CALENDAR_MATCHER, handler: handler(calendarCommand, 'warifuri: checking the secretary'), isOurs: isCalendarHook },
+        { what: 'the calendar hook', matcher: CALENDAR_MATCHER, handler: handler(calendarCommand(h.name), 'warifuri: checking the calendar'), isOurs: isCalendarHook },
       ];
       const read = readJson(file);
       if (read.error) {

@@ -139,6 +139,22 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_CALENDAR_CLAUDE',
+    section: 'client',
+    about: 'この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
+    def: 'connector',
+    commands: CLIENT,
+    check: (v) => (v === 'connector' || v === 'gcp' ? null : 'must be connector or gcp'),
+  },
+  {
+    name: 'WARIFURI_CALENDAR_CODEX',
+    section: 'client',
+    about: 'この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
+    def: 'connector',
+    commands: CLIENT,
+    check: (v) => (v === 'connector' || v === 'gcp' ? null : 'must be connector or gcp'),
+  },
+  {
     name: 'WARIFURI_SECRETARY',
     section: 'secretary',
     about: '秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く',
@@ -192,6 +208,13 @@ export const SETTINGS = [
     about: '秘書に渡すカレンダーの MCP のツール(mcp__<サーバーの名前> の形、カンマ区切り)。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる。空なら warifuri だけ',
     commands: SECRETARY,
     check: (v) => (v.split(',').every((t) => /^mcp__[A-Za-z0-9_.-]+(__[A-Za-z0-9_.*-]+)?$/.test(t.trim())) ? null : 'must be MCP tool names such as mcp__calendar, comma-separated'),
+  },
+  {
+    name: 'WARIFURI_SECRETARY_TOOLS',
+    section: 'secretary',
+    about: '秘書に渡す外の道具と、その範囲(mcp__<サーバーの名前>=範囲 の形、カンマ区切り)。範囲は read(読むツールだけ。書くツールはフックで止める)、own(warifuri が作ったものだけ書く)、write(書ける。外に出すときは毎回聞く)。own と write の違いは手引きで守る。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる',
+    commands: SECRETARY,
+    check: (v) => (v.split(',').every((t) => /^mcp__[A-Za-z0-9_.-]+(__[A-Za-z0-9_.*-]+)?=(read|own|write)$/.test(t.trim())) ? null : 'must be MCP tool names with a scope, such as mcp__gmail=read, comma-separated'),
   },
   {
     name: 'WARIFURI_SECRETARY_DEVICE',

@@ -36,13 +36,13 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 ## 使う機械の設定
 
-`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と着手ゲートのフック(`warifuri hook gate`)が読みます。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、着手ゲートとカレンダーのフック(`warifuri hook gate`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使えなくなります。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
 ## 秘書の設定
 
 `WARIFURI_SECRETARY` で始まる項目は、秘書の定時の仕事の設定です。`warifuri serve` と `warifuri secretary` が読みます。`WARIFURI_SECRETARY` は `warifuri secretary enable` と `disable` が書くので、手で書く必要はありません。時刻はサーバーの機械の時刻で読みます。変えたら `warifuri serve` を動かし直します。
 
-秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` に書いたツールだけで、メールなどのほかのコネクタは使えません。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` と `WARIFURI_SECRETARY_TOOLS` に書いたツールだけです。メールや Notion などを渡すときは、`WARIFURI_SECRETARY_TOOLS` に `mcp__claude_ai_Gmail=read` のように、道具と範囲(`read`、`own`、`write`)を書きます。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
 
 ## 項目
 
@@ -63,6 +63,8 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む | なし | `--url` |  | connect、hook |
 | `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
 | `WARIFURI_GATE` | 着手ゲート。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
+| `WARIFURI_CALENDAR_CLAUDE` | この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
+| `WARIFURI_CALENDAR_CODEX` | この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_SECRETARY` | 秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く | `off` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_NIGHTLY` | 毎晩の見張りと組み直しの時刻。HH:MM で毎日、曜日を前に付けると(mon,thu 23:00)その曜日だけ。off で止める | `23:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_MORNING` | 朝の時刻。秘書との会話に「朝の時間です」を送り、会話の秘書が朝の言葉を書いて質問する。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ | `07:00` |  |  | serve、secretary |
@@ -70,6 +72,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SECRETARY_NIGHT` | 夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く | `23:00-07:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_TIMEOUT` | 秘書の1回の仕事の上限(分)。超えたら止める | `20` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_CALENDAR_TOOLS` | 秘書に渡すカレンダーの MCP のツール(mcp__<サーバーの名前> の形、カンマ区切り)。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる。空なら warifuri だけ | なし |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_TOOLS` | 秘書に渡す外の道具と、その範囲(mcp__<サーバーの名前>=範囲 の形、カンマ区切り)。範囲は read(読むツールだけ。書くツールはフックで止める)、own(warifuri が作ったものだけ書く)、write(書ける。外に出すときは毎回聞く)。own と write の違いは手引きで守る。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる | なし |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_DEVICE` | 秘書が書くときのデバイスの名前。同じ名前のデバイスがほかで使われているときに変える | `secretary` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_CONNECTORS` | claude.ai のコネクタ(Gmail、カレンダーなど)を秘書にも使わせるか。既定の off では、claude を ENABLE_CLAUDEAI_MCP_SERVERS=false で起こす。カレンダーを渡すときだけ、考えたうえで on にする | `off` |  |  | serve、secretary |
 <!-- settings:end -->

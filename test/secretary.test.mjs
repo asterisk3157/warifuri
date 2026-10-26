@@ -17,7 +17,8 @@ import { openLedger } from '../src/ledger/ledger.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { parseWhen, parseNight, inNight, latestSlot, nextSlot, countSlots, localIso } from '../src/secretary/schedule.mjs';
 import { createScheduler } from '../src/secretary/scheduler.mjs';
-import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, readSecretaryKey, paths } from '../src/secretary/secretary.mjs';
+import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, writeClaudeSettings, readSecretaryKey, paths } from '../src/secretary/secretary.mjs';
+import { decideTools, isReadTool } from '../src/secretary/tool-hook.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-secretary-'));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -311,6 +312,9 @@ test('the runner: connectors on leaves the variable out, a busy lock skips, a ru
   const on = await runJob('inbox', cfgFor({ WARIFURI_SECRETARY_CONNECTORS: 'on' }), { env: w.env, spawn: fake() });
   assert.equal(on.code, 0);
   assert.equal(seen[0].options.env.ENABLE_CLAUDEAI_MCP_SERVERS, undefined);
+  // The settings file turns them on even when the person's own Claude Code settings turn them off.
+  const settings = seen[0].args[seen[0].args.indexOf('--settings') + 1];
+  assert.equal(JSON.parse(fs.readFileSync(settings, 'utf8')).env.ENABLE_CLAUDEAI_MCP_SERVERS, 'true');
   assert.ok(!JSON.stringify(seen[0].args).includes('wf_test-key'));
   assert.ok(!JSON.stringify(seen[0].options.env).includes('wf_test-key'));
   const off = await runJob('inbox', cfgFor({}), { env: w.env, spawn: fake() });
@@ -335,4 +339,48 @@ test('the runner: connectors on leaves the variable out, a busy lock skips, a ru
   const out = await stopped;
   assert.equal(out.signal, 'SIGTERM');
   assert.equal(out.timedOut, false);
+});
+
+test('outside tools are given with a scope: allowed by name, described in the prompt, and a read scope keeps them to reads', () => {
+  const s = scheduleFrom({
+    WARIFURI_SECRETARY_TOOLS: 'mcp__claude_ai_Gmail=read, mcp__notion=write',
+    WARIFURI_SECRETARY_CALENDAR_TOOLS: 'mcp__claude_ai_Google_Calendar',
+    WARIFURI_SECRETARY_CONNECTORS: 'on',
+  });
+  assert.deepEqual(s.tools, [
+    { name: 'mcp__claude_ai_Gmail', scope: 'read' },
+    { name: 'mcp__notion', scope: 'write' },
+    { name: 'mcp__claude_ai_Google_Calendar', scope: 'own' },
+  ]);
+  const home = fs.mkdtempSync(path.join(tmp, 'tools-'));
+  const file = writeClaudeSettings(home, s, { node: '/n/node', bin: '/w/warifuri.mjs' });
+  assert.equal(file, paths(home).settings);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // The person's own settings may turn the connectors off; this wins for the secretary.
+  assert.equal(json.env.ENABLE_CLAUDEAI_MCP_SERVERS, 'true');
+  assert.deepEqual(json.hooks.PreToolUse, [{ matcher: 'mcp__.*', hooks: [{ type: 'command', command: '"/n/node" "/w/warifuri.mjs" hook tools mcp__claude_ai_Gmail', timeout: 10 }] }]);
+  const args = claudeArgs({ mcpFile: '/x/mcp.json', schedule: s, settingsFile: file });
+  assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__warifuri,mcp__claude_ai_Gmail,mcp__notion,mcp__claude_ai_Google_Calendar');
+  assert.equal(args[args.indexOf('--settings') + 1], file);
+  assert.ok(!args.includes('--strict-mcp-config'));
+  assert.match(buildPrompt('nightly', { schedule: s }), /使える外の道具: `mcp__claude_ai_Gmail`\(読むだけ\)、`mcp__notion`\(読む、書く\(外に出すときは毎回本人に聞く\)\)/);
+  // Nothing to set: no file is given.
+  assert.equal(writeClaudeSettings(home, scheduleFrom({})), null);
+  assert.ok(!claudeArgs({ mcpFile: '/x/mcp.json', schedule: scheduleFrom({}) }).includes('--settings'));
+  const wrong = loadConfig({ env: { WARIFURI_HOME: tmp, WARIFURI_SECRETARY_TOOLS: 'mcp__gmail=all' }, command: 'serve' });
+  assert.ok(wrong.problems.some((p) => /WARIFURI_SECRETARY_TOOLS must be MCP tool names with a scope/.test(p)));
+});
+
+test('the read scope: reads go through, writes and tools that cannot be told are stopped, other tools are not its business', () => {
+  for (const t of ['list_events', 'get_thread', 'search_threads', 'notion-fetch', 'notion-get-users', 'suggest_time', 'list_labels']) assert.equal(isReadTool(t), true, t);
+  for (const t of ['send_message', 'create_draft', 'trash_thread', 'notion-update-page', 'label_message', 'download_attachment', 'forward']) assert.equal(isReadTool(t), false, t);
+  const reads = ['mcp__claude_ai_Gmail'];
+  assert.equal(decideTools({ tool_name: 'mcp__claude_ai_Gmail__search_threads' }, reads), null);
+  const out = JSON.parse(decideTools({ tool_name: 'mcp__claude_ai_Gmail__send_message' }, reads));
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /読むだけの範囲/);
+  assert.equal(decideTools({ tool_name: 'mcp__claude_ai_Gmail_extra__send_message' }, reads), null);
+  assert.equal(decideTools({ tool_name: 'mcp__warifuri__book' }, reads), null);
+  assert.equal(decideTools(null, reads), null);
 });
