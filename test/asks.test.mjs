@@ -427,4 +427,17 @@ test('while the secretary runs, only it books; the others ask it with ask_secret
     assert.match((await c.callTool({ name: 'ask_secretary', arguments: { text: '2時間' } })).content[0].text, /秘書が有効になっていないので、頼めません/);
     assert.equal((await c.callTool({ name: 'board', arguments: {} })).structuredContent.secretary, 'off');
   }
+
+  // GET /api/secretary says the same, to the calendar hook, with a device key only.
+  const api = async (options, key = keys.laptop) => {
+    const server = createServer({ ledger, ...options });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    servers.push(server);
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/secretary`, { headers: { Authorization: `Bearer ${key}` } });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+  assert.deepEqual(await api({ secretaryDevice: 'secretary', chat: chat(true) }), { status: 200, body: { secretary: 'on' } });
+  assert.deepEqual(await api({ secretaryDevice: 'secretary', chat: chat(false) }), { status: 200, body: { secretary: 'off' } });
+  assert.deepEqual(await api({ secretaryDevice: null }), { status: 200, body: { secretary: 'off' } });
+  assert.equal((await api({ secretaryDevice: 'secretary' }, 'wf_wrong')).status, 401);
 });

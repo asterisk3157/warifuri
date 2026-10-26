@@ -15,6 +15,7 @@
 //   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
 //                    [--no-hook] [--no-skills] [--force] [--dry-run]
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
+//   warifuri hook calendar           (stops calendar writes while the secretary runs; the same)
 //   warifuri secretary enable|disable
 //   warifuri secretary run <nightly|morning|inbox>
 //   warifuri --version               (also -v; the version of this package)
@@ -40,6 +41,7 @@ import { loadConfig, flagOptions, describeConfig, initHome } from './config.mjs'
 import { PROFILES_DIR } from './knowledge/profiles.mjs';
 import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
+import { decideCalendar } from './client/calendar-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger } from './secretary/chat.mjs';
@@ -62,6 +64,7 @@ const USAGE = [
   '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
   '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
   '       warifuri hook gate',
+  '       warifuri hook calendar',
   '       warifuri secretary enable|disable',
   '       warifuri secretary run <nightly|morning|inbox>',
   '       warifuri --version',
@@ -87,9 +90,11 @@ const USAGE = [
   'connect sets up this machine to use a server (--url, or WARIFURI_SERVER_URL; a server on',
   'this machine when neither is given): it registers the MCP server in Claude Code and Codex,',
   'puts the device key in WARIFURI_DEVICE_KEY_FILE (issued here when the ledger is on this',
-  'machine), wires the start gate hook and copies the skills. --dry-run only shows the plan.',
-  'hook gate is that hook: it reads the harness JSON on stdin and stops an edit in a place',
-  'where this device holds no task. It lets the edit through whenever it cannot ask.',
+  'machine), wires the start gate and calendar hooks and copies the skills. --dry-run only',
+  'shows the plan. hook gate is the start gate: it reads the harness JSON on stdin and stops',
+  'an edit in a place where this device holds no task. hook calendar stops a write to a',
+  'calendar through the agent\'s own MCP while the secretary runs. Both let the call through',
+  'whenever they cannot ask.',
   '',
   'secretary enable, on the server machine, gives the secretary (claude -p, logged in by you)',
   'its key and MCP config and turns its schedule on (WARIFURI_SECRETARY=on); serve then wakes',
@@ -555,9 +560,10 @@ function runConnect(args) {
   return out.problems.length ? 1 : 0;
 }
 
-// warifuri hook gate: the start gate. It always exits 0; a refusal is the JSON it prints.
-// Anything it cannot read or reach lets the edit through.
+// warifuri hook gate: the start gate; warifuri hook calendar: the calendar hook. Each always
+// exits 0; a refusal is the JSON it prints. Anything it cannot read or reach lets the call through.
 async function runHook(args) {
+  const which = args[0] === 'calendar' ? decideCalendar : decide;
   const rest = args.slice(1);
   let output = null;
   try {
@@ -571,7 +577,7 @@ async function runHook(args) {
     }
     if (payload && cfg.problems.length === 0) {
       const v = cfg.values;
-      output = await decide(payload, { url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE });
+      output = await which(payload, { url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE });
     }
   } catch {
     output = null;
@@ -598,7 +604,7 @@ function main(argv) {
     return undefined;
   }
   if (command === 'hook') {
-    if (rest[0] !== 'gate') return usage('hook takes gate');
+    if (rest[0] !== 'gate' && rest[0] !== 'calendar') return usage('hook takes gate or calendar');
     runHook(rest);
     return undefined;
   }
