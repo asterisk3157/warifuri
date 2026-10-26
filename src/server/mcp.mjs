@@ -60,6 +60,10 @@ const guarded = (fn) => async (args) => {
   }
 };
 
+// The tools only the secretary may call: its reports, proposals and questions to the person,
+// and the autonomy that says how far it may act alone. Other agents read them but do not write.
+const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'reply_options', 'autonomy_outcome', 'autonomy_set']);
+
 // Only the arguments that were given, so the ledger sees what the caller meant to change.
 const given = (args) => Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
 
@@ -69,8 +73,9 @@ const clearable = z.string().nullable().optional();
 // One McpServer for one request from `device` ({ name, actor }). knowledge: { home,
 // secretary } for the profiles' files (see createApp), or null. thread: the thread the
 // request said it runs in (the secretary's thread header), or null for the secretary's
-// conversation.
-function buildServer(ledger, device, knowledge, thread = null) {
+// conversation. secretaryDevice: the device the secretary calls from, null when the secretary
+// is off, or undefined to let any device call the secretary's tools.
+function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -96,8 +101,8 @@ function buildServer(ledger, device, knowledge, thread = null) {
       annotations: readOnly,
     },
     async ({ place, profile, state, mode, review, include_closed }) =>
-      result(
-        ledger.board({
+      result({
+        ...ledger.board({
           dir: place,
           device: device.name,
           profile,
@@ -106,7 +111,8 @@ function buildServer(ledger, device, knowledge, thread = null) {
           review: review ?? false,
           includeClosed: include_closed ?? false,
         }),
-      ),
+        ...(secretaryDevice === undefined ? {} : { secretary: secretaryDevice ? 'on' : 'off' }),
+      }),
   );
 
   server.registerTool(
@@ -283,7 +289,7 @@ function buildServer(ledger, device, knowledge, thread = null) {
       })),
   );
 
-  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread });
+  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice });
   return server;
 }
 
@@ -331,9 +337,17 @@ function resolvePlace(ledger, device, value, tool = 'start') {
   throw new LedgerError([`place には作業フォルダの id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
-function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread }) {
+function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice }) {
   const tool = (name, description, inputSchema, fn, annotations = write) =>
-    server.registerTool(name, { description, inputSchema, annotations }, guarded(fn));
+    server.registerTool(name, { description, inputSchema, annotations }, guarded(onlyFor(name, fn)));
+  // The secretary's tools refuse other devices (and everyone while the secretary is off).
+  const onlyFor = (name, fn) => {
+    if (!SECRETARY_TOOLS.has(name) || secretaryDevice === undefined || device.name === secretaryDevice) return fn;
+    const why = secretaryDevice === null
+      ? `秘書が有効になっていないので、${name} は使えません`
+      : `${name} は秘書だけが使えるツールです。ユーザーには、秘書の画面で頼むよう伝えてください`;
+    return async () => refusal([why]);
+  };
 
   tool(
     'create_goal',
@@ -787,8 +801,8 @@ function threadOf(ledger, req) {
   return ledger.getThread(id) ? id : null;
 }
 
-async function handleMcp(ledger, knowledge, req, res) {
-  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req));
+async function handleMcp(ledger, knowledge, req, res, secretaryDevice) {
+  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req), secretaryDevice);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -842,6 +856,8 @@ function apiRouter(ledger, limit) {
 // also when the GitHub login is off): together with trustProxy they decide whether the Web
 // screens (web.mjs) open without a login. chat: the conversation with the secretary
 // (src/secretary/chat.mjs) for the 秘書 screen, or null. app.locals.web is { mode, issueLogin }.
+// secretaryDevice: the device the secretary calls from (only it may use the secretary's tools),
+// null when the secretary is off (nobody may), or left out to let any device.
 export function createApp({
   ledger,
   home = null,
@@ -854,6 +870,7 @@ export function createApp({
   publicUrl = oauth?.publicUrl ?? null,
   webLimit = apiLimit,
   chat = null,
+  secretaryDevice,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -870,7 +887,7 @@ export function createApp({
   }
   const knowledge = home ? { home, secretary } : null;
   const mcp = (req, res) =>
-    handleMcp(ledger, knowledge, req, res).catch((err) => {
+    handleMcp(ledger, knowledge, req, res, secretaryDevice).catch((err) => {
       log(`warifuri: /mcp failed: ${err.message}`);
       if (!res.headersSent) {
         res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });

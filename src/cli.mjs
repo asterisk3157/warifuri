@@ -373,6 +373,8 @@ function runServe(args) {
     server = createServer({
       ledger, home: cfg.home, oauth: oauth.config, trustProxy: values.WARIFURI_TRUST_PROXY,
       host: values.WARIFURI_HOST, publicUrl: values.WARIFURI_PUBLIC_URL ?? null, chat,
+      // Only the secretary's device may use the secretary's tools; nobody while it is off.
+      secretaryDevice: secretary.readSecretaryKey(cfg.home) ? secretary.deviceOf(values) : null,
     });
   } catch (err) {
     chat.stop();

@@ -317,3 +317,49 @@ test('the ask and reply_options tools write as the calling device, in the thread
   await stray.callTool({ name: 'reply_options', arguments: { options: ['はい'] } });
   assert.equal(ledger.getThread(main.id).pending_options, '["はい"]');
 });
+
+test('the secretary\'s tools answer only the secretary\'s device, and nobody while the secretary is off; board says which', async (t) => {
+  const ledger = openLedger(':memory:', { now: ticking() });
+  const keys = { secretary: ledger.issueKey('secretary', { actor: 'cli' }).key, laptop: ledger.issueKey('laptop', { actor: 'cli' }).key };
+  const clients = [];
+  const servers = [];
+  t.after(async () => {
+    for (const c of clients) await c.close();
+    for (const s of servers) {
+      s.closeAllConnections();
+      await new Promise((r) => s.close(r));
+    }
+    ledger.close();
+  });
+  const start = async (secretaryDevice) => {
+    const server = createServer({ ledger, secretaryDevice });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    servers.push(server);
+    return async (device) => {
+      const client = new Client({ name: 'test', version: '0' });
+      const url = new URL(`http://127.0.0.1:${server.address().port}/mcp`);
+      await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${keys[device]}` } } }));
+      clients.push(client);
+      return client;
+    };
+  };
+  const on = await start('secretary');
+  const laptop = await on('laptop');
+  const refused = await laptop.callTool({ name: 'ask', arguments: { questions: [Q()] } });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /ask は秘書だけが使えるツールです/);
+  for (const name of ['report', 'propose', 'proposal_done', 'reply_options', 'autonomy_outcome', 'autonomy_set']) {
+    const out = await laptop.callTool({ name, arguments: {} });
+    assert.equal(out.isError, true, name);
+  }
+  assert.equal((await laptop.callTool({ name: 'board', arguments: {} })).structuredContent.secretary, 'on');
+  // Reading what the secretary wrote stays open to every device.
+  assert.equal((await laptop.callTool({ name: 'reports', arguments: {} })).isError, undefined);
+  const secretary = await on('secretary');
+  assert.equal((await secretary.callTool({ name: 'ask', arguments: { questions: [Q()] } })).isError, undefined);
+
+  const off = await start(null);
+  const anyone = await off('secretary');
+  assert.match((await anyone.callTool({ name: 'reply_options', arguments: { options: ['はい'] } })).content[0].text, /秘書が有効になっていないので/);
+  assert.equal((await anyone.callTool({ name: 'board', arguments: {} })).structuredContent.secretary, 'off');
+});
