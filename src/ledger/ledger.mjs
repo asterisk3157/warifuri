@@ -46,6 +46,7 @@ import {
   checkMessage,
   checkProposal,
   checkAsk,
+  ASK_QUESTIONS_MAX,
   checkReplyOptions,
   checkAutonomy,
   checkStateExtra,
@@ -1390,6 +1391,9 @@ export function openLedger(path, options = {}) {
     if (problems.length) throw new LedgerError(problems);
     return transaction(() => {
       if (threadId === null) threadId = ensureThread(SECRETARY_THREAD.kind, w).id;
+      // One card at a time: the person answers all of it before the next one comes.
+      const waiting = one("SELECT id FROM messages WHERE thread_id = ? AND kind = 'ask' AND state = 'open'", threadId);
+      if (waiting) throw new LedgerError([`まだ答えを待っている質問があります(${waiting.id})。聞きたいことは1回の ask に${ASK_QUESTIONS_MAX}問までまとめ、答えが届いてから次を聞きます`]);
       const body = checked.questions.map((q) => `【${q.header}】${q.question}`).join('\n');
       const data = { questions: checked.questions, answers: checked.questions.map(() => null) };
       return insertMessage({ thread_id: threadId, role: 'secretary', kind: 'ask', body, state: 'open', data }, w);

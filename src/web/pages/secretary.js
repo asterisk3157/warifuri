@@ -474,7 +474,10 @@ function timeline(items, where, { threads, liveId, replying }) {
   const l = view.live.get(liveId);
   if (l) out.push(liveMessage(l));
   else if (replying) out.push(liveMessage({ thread: liveId, phase: 'thinking', text: '', steps: [] }));
-  for (const a of items.filter((x) => x.type === 'ask' && (x.state === 'open' || view.reopened.has(x.id)))) {
+  // One card at a time: an answer being changed first, else the oldest open question.
+  const asks = items.filter((x) => x.type === 'ask');
+  const a = asks.find((x) => view.reopened.has(x.id)) ?? asks.find((x) => x.state === 'open');
+  if (a) {
     a.where = where;
     out.push(askCard(a, where));
   }
