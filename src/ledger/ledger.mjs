@@ -169,6 +169,23 @@ function diff(before, after, columns) {
   return changes;
 }
 
+// The kinds of activity(): which records of goals and tasks count as something that moved.
+export const ACTIVITY_KINDS = ['created', 'started', 'released', 'waiting', 'deferred', 'resumed', 'done', 'discarded', 'reopened'];
+export const ACTIVITY_MAX_DAYS = 31;
+export const ACTIVITY_ITEMS_MAX = 50;
+
+function activityKind(entity, action, changes) {
+  if (action === 'create') return 'created';
+  if (action === 'reopen') return 'reopened';
+  if (entity === 'task' && action === 'start') return 'started';
+  if (entity === 'task' && action === 'release') return 'released';
+  if (action !== 'state' || !changes.state) return null;
+  const { before, after } = changes.state;
+  if (after === 'ready') return ['waiting', 'deferred'].includes(before) ? 'resumed' : null;
+  if (after === 'running') return entity === 'task' ? 'started' : null;
+  return ACTIVITY_KINDS.includes(after) ? after : null;
+}
+
 function unknownFields(fields, allowed) {
   return Object.keys(fields)
     .filter((k) => !allowed.includes(k))
@@ -928,6 +945,77 @@ export function openLedger(path, options = {}) {
       profile: profile ?? null,
     }));
     return { from: fromIso, to: toIso, bookings };
+  }
+
+  // What moved in [from, to), read from the records of goals and tasks (原則12): created,
+  // started, let go (with its next line), waiting, deferred, resumed, done (with its result),
+  // discarded (with its reason) and reopened. Other records (edits, order, moves between
+  // places) are left out. from defaults to yesterday's midnight (the server's local day), to to
+  // now (a record written at this very moment counts); at most ACTIVITY_MAX_DAYS days. Returns the counts of every kind, the goals that moved
+  // (with how many items) and up to ACTIVITY_ITEMS_MAX items, newest first; more: how many
+  // were cut. Titles, goals and profiles are as they are now.
+  function activity({ from, to } = {}) {
+    const problems = [];
+    let fromMs;
+    if (from === undefined) {
+      const d = now();
+      fromMs = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1).getTime();
+    } else fromMs = parseBound(from, 'from', problems);
+    const toMs = to === undefined ? now().getTime() : parseBound(to, 'to', problems);
+    if (!problems.length && toMs <= fromMs) problems.push('to は from より後にします');
+    if (!problems.length) {
+      const limit = new Date(fromMs);
+      limit.setDate(limit.getDate() + ACTIVITY_MAX_DAYS);
+      if (toMs > limit.getTime()) problems.push(`一度に読める期間は ${ACTIVITY_MAX_DAYS} 日までです`);
+    }
+    if (problems.length) throw new LedgerError(problems);
+    const fromIso = new Date(fromMs).toISOString();
+    const toIso = new Date(toMs).toISOString();
+    const rows = all(
+      'SELECT r.id AS rid, r.at, r.actor, r.device, r.entity, r.entity_id, r.action, r.changes, ' +
+        't.title AS t_title, tg.id AS tg_id, tg.title AS tg_title, COALESCE(tg.profile, p.profile) AS t_profile, ' +
+        'g.title AS g_title, g.profile AS g_profile FROM records r ' +
+        "LEFT JOIN tasks t ON r.entity = 'task' AND t.id = r.entity_id LEFT JOIN goals tg ON tg.id = t.goal_id " +
+        "LEFT JOIN places p ON p.id = t.place_id LEFT JOIN goals g ON r.entity = 'goal' AND g.id = r.entity_id " +
+        `WHERE r.entity IN ('goal', 'task') AND r.at >= ? AND r.at ${to === undefined ? '<=' : '<'} ? ORDER BY r.at DESC, r.id DESC`,
+      fromIso,
+      toIso,
+    );
+    const counts = Object.fromEntries(ACTIVITY_KINDS.map((k) => [k, 0]));
+    const goals = new Map();
+    const items = [];
+    let more = 0;
+    for (const r of rows) {
+      const changes = JSON.parse(r.changes);
+      const after = (f) => changes[f]?.after ?? null;
+      const kind = activityKind(r.entity, r.action, changes);
+      if (!kind) continue;
+      counts[kind] += 1;
+      const isTask = r.entity === 'task';
+      const goal = isTask ? (r.tg_id ? { id: r.tg_id, title: r.tg_title } : null) : { id: r.entity_id, title: r.g_title };
+      if (goal) {
+        const g = goals.get(goal.id) ?? { ...goal, items: 0 };
+        g.items += 1;
+        goals.set(goal.id, g);
+      }
+      if (items.length >= ACTIVITY_ITEMS_MAX) {
+        more += 1;
+        continue;
+      }
+      const item = { at: r.at, kind, entity: r.entity, id: r.entity_id, title: isTask ? r.t_title : r.g_title };
+      item.device = r.device ?? null;
+      item.actor = r.actor;
+      if (isTask) item.goal = goal;
+      item.profile = (isTask ? r.t_profile : r.g_profile) ?? null;
+      if (kind === 'done') item.result = after('result');
+      if (kind === 'discarded') item.reason = after('reason');
+      if (kind === 'waiting') Object.assign(item, { waiting_on: after('waiting_on'), waiting_for: after('waiting_for') });
+      if (kind === 'deferred') item.defer_until = after('defer_until');
+      if (isTask && changes.next) item.next = after('next');
+      items.push(item);
+    }
+    const moved = [...goals.values()].sort((a, b) => b.items - a.items || a.id.localeCompare(b.id));
+    return { from: fromIso, to: toIso, counts, goals: moved, items, more };
   }
 
   function getAutonomy(kind) {
@@ -2060,6 +2148,7 @@ export function openLedger(path, options = {}) {
     book,
     unbook,
     schedule,
+    activity,
     oauth,
     // A flag of its own: DatabaseSync#isOpen is newer than the Node versions warifuri runs on.
     close: () => {

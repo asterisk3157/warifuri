@@ -22,6 +22,7 @@ const TOOL_STEPS = {
   context: ['read', 'ナレッジを読みました'],
   stale: ['read', '止まっているものを探しました'],
   schedule: ['read', '予定を読みました'],
+  activity: ['read', '進み具合を読みました'],
   free_time: ['search', '空き時間を探しました'],
   search: ['search', '探しました'],
   autonomy: ['read', '自律度を読みました'],
