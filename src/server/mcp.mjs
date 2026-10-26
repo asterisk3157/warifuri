@@ -23,7 +23,7 @@ import {
   STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
   ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION,
 } from '../ledger/rules.mjs';
-import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
@@ -228,6 +228,23 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       annotations: readOnly,
     },
     guarded(async ({ from, to }) => result(ledger.schedule({ from, to }))),
+  );
+
+  server.registerTool(
+    'activity',
+    {
+      description:
+        "What moved in [from, to), from the ledger's own records of goals and tasks: created, started, released " +
+        '(let go, with its next line), waiting, deferred, resumed, done (with result), discarded (with reason), ' +
+        'reopened. from and to as in schedule; from defaults to yesterday 00:00, to to now; at most ' +
+        `${ACTIVITY_MAX_DAYS} days. Returns { from, to, counts: { <kind>: n }, goals: [{ id, title, items }] (the goals ` +
+        `that moved, most first), items: [{ at, kind, entity, id, title, device, actor, goal, profile, and result, ` +
+        `reason, next, waiting_on, waiting_for or defer_until where they apply }] (newest first, at most ` +
+        `${ACTIVITY_ITEMS_MAX}), more (items cut) }. Commits and merges are not in the ledger and do not appear.`,
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+      annotations: readOnly,
+    },
+    guarded(async ({ from, to }) => result(ledger.activity({ from, to }))),
   );
 
   server.registerTool(
