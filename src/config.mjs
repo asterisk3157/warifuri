@@ -139,6 +139,22 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_CALENDAR_CLAUDE',
+    section: 'client',
+    about: 'この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
+    def: 'connector',
+    commands: CLIENT,
+    check: (v) => (v === 'connector' || v === 'gcp' ? null : 'must be connector or gcp'),
+  },
+  {
+    name: 'WARIFURI_CALENDAR_CODEX',
+    section: 'client',
+    about: 'この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
+    def: 'connector',
+    commands: CLIENT,
+    check: (v) => (v === 'connector' || v === 'gcp' ? null : 'must be connector or gcp'),
+  },
+  {
     name: 'WARIFURI_SECRETARY',
     section: 'secretary',
     about: '秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く',

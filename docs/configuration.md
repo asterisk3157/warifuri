@@ -63,6 +63,8 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、着手ゲートのフックが読む | なし | `--url` |  | connect、hook |
 | `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、着手ゲートのフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
 | `WARIFURI_GATE` | 着手ゲート。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
+| `WARIFURI_CALENDAR_CLAUDE` | この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
+| `WARIFURI_CALENDAR_CODEX` | この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_SECRETARY` | 秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く | `off` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_NIGHTLY` | 毎晩の見張りと組み直しの時刻。HH:MM で毎日、曜日を前に付けると(mon,thu 23:00)その曜日だけ。off で止める | `23:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_MORNING` | 朝の時刻。秘書との会話に「朝の時間です」を送り、会話の秘書が朝の言葉を書いて質問する。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ | `07:00` |  |  | serve、secretary |

@@ -15,7 +15,8 @@
 //   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
 //                    [--no-hook] [--no-skills] [--force] [--dry-run]
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
-//   warifuri hook calendar           (stops calendar writes while the secretary runs; the same)
+//   warifuri hook calendar [claude|codex]  (stops calendar writes while the secretary runs, and
+//                                    every calendar tool of a harness on the gcp route)
 //   warifuri secretary enable|disable
 //   warifuri secretary run <nightly|morning|inbox>
 //   warifuri --version               (also -v; the version of this package)
@@ -64,7 +65,7 @@ const USAGE = [
   '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
   '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
   '       warifuri hook gate',
-  '       warifuri hook calendar',
+  '       warifuri hook calendar [claude|codex]',
   '       warifuri secretary enable|disable',
   '       warifuri secretary run <nightly|morning|inbox>',
   '       warifuri --version',
@@ -564,7 +565,9 @@ function runConnect(args) {
 // exits 0; a refusal is the JSON it prints. Anything it cannot read or reach lets the call through.
 async function runHook(args) {
   const which = args[0] === 'calendar' ? decideCalendar : decide;
-  const rest = args.slice(1);
+  // hook calendar names the harness it runs in (claude or codex), for its calendar route.
+  const harness = args[0] === 'calendar' && ['claude', 'codex'].includes(args[1]) ? args[1] : null;
+  const rest = args.slice(harness ? 2 : 1);
   let output = null;
   try {
     const { values } = parseArgs({ args: rest, options: flagOptions('hook') });
@@ -577,7 +580,11 @@ async function runHook(args) {
     }
     if (payload && cfg.problems.length === 0) {
       const v = cfg.values;
-      output = await which(payload, { url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE });
+      const setting = harness ? `WARIFURI_CALENDAR_${harness.toUpperCase()}` : null;
+      output = await which(payload, {
+        url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE,
+        ...(setting ? { route: v[setting], setting } : {}),
+      });
     }
   } catch {
     output = null;

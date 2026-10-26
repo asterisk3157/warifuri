@@ -63,3 +63,20 @@ test('the write goes through with the secretary off, for reads without asking, a
   assert.equal(await decideCalendar(write, settings, { fetchImpl: async () => { throw new Error('down'); } }), null);
   assert.equal(await decideCalendar(null, settings, { fetchImpl: server('on').fetchImpl }), null);
 });
+
+test('a harness on the gcp route touches no calendar tool, reads included, without asking the server', async () => {
+  const s = server('off');
+  const gcp = { ...settings, route: 'gcp', setting: 'WARIFURI_CALENDAR_CODEX' };
+  for (const name of ['mcp__claude_ai_Google_Calendar__list_events', 'mcp__calendar__create_event', 'mcp__codex_apps__google_calendar_search']) {
+    const out = await decideCalendar({ tool_name: name }, gcp, { fetchImpl: s.fetchImpl });
+    assert.match(JSON.parse(out).hookSpecificOutput.permissionDecisionReason, /WARIFURI_CALENDAR_CODEX=gcp.*schedule/, name);
+  }
+  assert.equal(s.asked.length, 0);
+  // Not a calendar's, or warifuri's own: let through. No key is needed to deny.
+  assert.equal(await decideCalendar({ tool_name: 'mcp__notion__notion-search' }, gcp, { fetchImpl: s.fetchImpl }), null);
+  assert.equal(await decideCalendar({ tool_name: 'mcp__warifuri__schedule' }, gcp, { fetchImpl: s.fetchImpl }), null);
+  assert.notEqual(await decideCalendar({ tool_name: 'mcp__calendar__list_events' }, { ...gcp, key: null, url: null }), null);
+  assert.equal(await decideCalendar({ tool_name: 'mcp__calendar__list_events' }, { ...gcp, gate: 'off' }), null);
+  // The connector route reads freely.
+  assert.equal(await decideCalendar({ tool_name: 'mcp__calendar__list_events' }, { ...settings, route: 'connector' }, { fetchImpl: server('on').fetchImpl }), null);
+});
