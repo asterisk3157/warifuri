@@ -85,4 +85,4 @@ Say things directly. Never name the maintainer's own tools, services or plans (t
 
 ## Writing
 
-Keep the README to what warifuri is, its status and links; explanations go in `docs/`, written as prose like a technical article. Say what something does, without examples that stand in for an argument or claims about people in general. Write Japanese in です・ます.
+Keep the README short, in this order: one sentence on what warifuri is, the main features as a table (feature and one-line description), install, troubleshooting folded per OS, links to the docs, version history, license. Explanations go in `docs/`, written as prose like a technical article; a table is fine for options, symptoms or times. Say what something does, without examples that stand in for an argument or claims about people in general. Write Japanese in です・ます.

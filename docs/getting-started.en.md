@@ -1,14 +1,12 @@
 # Getting started
 
-How to install warifuri on your own PC and connect Claude Code or Codex to it.
-
 ## Requirements
 
-- Node.js 22.13 or later (the database uses Node's `node:sqlite`)
-- Claude Code, Codex or both, with the `claude` or `codex` command on PATH
-- For Codex, a recent Codex that has `codex mcp add` and hooks (`/hooks`). For example, 0.164 or later works; very old versions such as 0.23 lack `codex mcp add`
-
-It runs on Windows, macOS and Linux.
+| Item | Requirement |
+|---|---|
+| OS | Windows, macOS, Linux |
+| Node.js | 22.13 or later |
+| AI agent | Claude Code (v2.1.310 or later), Codex (v0.164 or later). Either one, or both |
 
 ## Install
 
@@ -16,163 +14,229 @@ It runs on Windows, macOS and Linux.
 npm install -g warifuri
 ```
 
-`warifuri --help` lists the commands, and `warifuri --version` prints the installed version.
+<details>
+<summary>If it doesn't work in Windows PowerShell</summary>
 
-On some PCs, `warifuri` works directly in Windows PowerShell. Only if PowerShell refuses with "running scripts is disabled on this system", type `warifuri.cmd` instead of `warifuri`. The `warifuri.ps1` that npm puts there is being stopped by the PowerShell execution policy. The start gate hook that `connect` writes calls `warifuri.cmd` on Windows from the start, so the execution policy does not affect it.
+If it says running scripts is disabled on this system, type `warifuri.cmd` instead of `warifuri`.
 
-## Getting started
+</details>
 
-### 1. Make the data directory
+<details>
+<summary>If it doesn't work on macOS or Linux</summary>
+
+If `npm install -g` fails with EACCES, don't use `sudo`; install Node.js for your own user with nvm or similar.
+
+If it says `command not found: warifuri`, add the `bin` folder under the path that `npm prefix -g` prints to your PATH.
+
+</details>
+
+## Setup
+
+| Use | What it means | Where to read |
+|---|---|---|
+| On one PC | Use it only on your own PC | Steps 1 to 3 below |
+| Host it | Put the server on a VM or an always-on PC and use it from other PCs too | Steps 1 and 2 below, and [Hosting](#hosting) |
+| Use it as a client | Connect from another PC to a hosted server | [Using it as a client](#using-it-as-a-client) |
+
+### 1. Create the data folder
 
 ```bash
 warifuri init
 ```
 
-This makes the data directory `~/.warifuri/` (`%USERPROFILE%\.warifuri` on Windows) with a template settings file `warifuri.env`, an empty `secrets.env` and an empty `profiles/`. Files that are already there are left as they are.
+This creates a template of the settings file `warifuri.env` and a few other files in `~/.warifuri/` (`%USERPROFILE%\.warifuri` on Windows). Files that already exist are left as they are.
 
-### 2. Run the server
+### 2. Start the server
 
 ```bash
 warifuri serve
 ```
 
-When it starts, it prints lines like these:
+When it prints `warifuri: serving http://127.0.0.1:8787/mcp`, the server is running. The database (`~/.warifuri/ledger.sqlite`) is created on the first start, and the server only accepts connections from this PC (`127.0.0.1`).
 
-```
-warifuri: serving http://127.0.0.1:8787/mcp
-warifuri: GitHub login off (missing …); only device keys work
-warifuri: web screens at http://127.0.0.1:8787/calendar (open from this machine, no login)
-```
+<details>
+<summary>About "GitHub login off"</summary>
 
-The first line means it is running. The second says that the GitHub login is not set up, so harnesses connect with device keys only. It always appears when you use warifuri alone on one PC, and you can leave it so. The GitHub login is only needed for using warifuri from other machines (see "Using it from another machine" below). The third line is the address of the web screen.
+GitHub login isn't set up, so connections use only the device key. On one PC this is fine as it is. To use it from other PCs, see [Hosting](#hosting).
 
-The database (`~/.warifuri/ledger.sqlite`) is made on the first start. The server only accepts connections from this PC (`127.0.0.1`).
+</details>
 
-Keep this terminal open while you use it; press Ctrl+C to stop it. Keeping the server running after the terminal is closed is not covered here. On Windows, one way is to register it in Task Scheduler to start when you sign in.
+<details>
+<summary>Change the port (use something other than 8787)</summary>
 
-#### Changing the port
+If another app uses port 8787, write `WARIFURI_PORT=8788` (for example) in `warifuri.env`. Both `serve` and `connect` read it. If you change it after running `connect`, delete the `WARIFURI_SERVER_URL` line in `warifuri.env` and run `connect` again.
 
-If another application already uses port 8787 and the server cannot start, write a line such as `WARIFURI_PORT=8788` in `warifuri.env`. Both `serve` and `connect` read it, so the `connect` that follows uses that port too. For a single try, `warifuri serve --port 8788` also works; then give `connect` the same `--port 8788`. After changing the port, read `8787` in the URLs of this guide as your number.
-
-If you change the port after running `connect`, delete the `WARIFURI_SERVER_URL` line that `connect` wrote in `warifuri.env`, then run `connect` again.
+</details>
 
 ### 3. Connect Claude Code and Codex
 
-Open another terminal and run the command below. Run it after the server has started once, so that the database exists.
+Once the server has started, run this in another terminal.
 
 ```bash
 warifuri connect
 ```
 
-`connect` does the following on this PC:
+<details>
+<summary>Details of connect</summary>
 
-- Issues a key for this device (machine) and puts it in `~/.warifuri/device.key`, readable only by you. On macOS and Linux the file's mode is set to 600. On Windows it is protected by the permissions (ACL) of your user folder, so other users cannot read it, though administrators of the PC can. The device name is the PC's host name unless you give `--device <name>`.
-- Registers the MCP server as `warifuri` in the `claude` and `codex` it finds on PATH.
-- Adds the start gate hook to Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
-- Copies the light secretary skill (see below).
+- Issues a device key for this PC (a string starting with `wf_`) and saves it in `~/.warifuri/device.key`, readable only by you. The device name is the PC's host name; change it with `--device <name>`.
+- Registers the MCP server as `warifuri` in `claude` and `codex`.
+- Adds the task check to Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
+- Copies the secretary skill.
 
-Before it rewrites an existing settings file, it copies the old one next to it as `<file>.bak-warifuri-<time>`. No copy is made for a file it creates or a file it does not need to change. Other hooks and settings are kept. Running it again changes nothing. To only see what it would do, run `warifuri connect --dry-run`; to connect only one of them, add `--harness claude` or `--harness codex`.
+Before changing a settings file, it backs it up as `<file>.bak-warifuri-<date>`. Running it again gives the same result.
 
-If `connect` fails on Codex, your Codex may be too old. Update Codex, then run `warifuri connect --harness codex` again.
+| Option | What it does |
+|---|---|
+| `--dry-run` | Only show what it would do |
+| `--harness claude` / `--harness codex` | Connect only one of them |
+| `--no-hook` | Don't set up the task check |
+| `--no-skills` | Don't copy the secretary skill |
+| `--force` | Replace the skill with the new version |
 
-#### Claude Code
+</details>
 
-After `connect`, start Claude Code and it is ready. To check the registration:
+> 🟧 **Claude Code**
+>
+> After starting it, if `warifuri` shows `Connected` in `/mcp` (or `claude mcp list` in a terminal), you can use it right away.
 
-```bash
-claude mcp list
-```
+> ⬛ **Codex**
+>
+> Set the environment variable `WARIFURI_DEVICE_KEY` to the contents of the device key file that `connect` made (`~/.warifuri/device.key`), then start `codex`. Once it starts, open `/hooks` in Codex and trust the task check once.
+>
+> On macOS and Linux:
+>
+> ```bash
+> export WARIFURI_DEVICE_KEY="$(cat ~/.warifuri/device.key)"
+> ```
+>
+> On Windows (PowerShell):
+>
+> ```powershell
+> $env:WARIFURI_DEVICE_KEY = (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim()
+> ```
+>
+> <details>
+> <summary>Keep it set (Windows)</summary>
+>
+> ```powershell
+> [Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim(), 'User')
+> ```
+>
+> </details>
+>
+> To check the connection, ask Codex something like "show me the warifuri board".
 
-If `warifuri` is listed as `Connected`, it is connected. It shows `Failed` while `warifuri serve` is stopped; start the server and check again. Inside Claude Code, `/mcp` shows it too.
+### Hosting
 
-#### Codex
+With GitHub login, other PCs and Claude on the web or in the app can connect to a server on a VM or an always-on PC.
 
-Codex reads the key from the environment variable `WARIFURI_DEVICE_KEY`. In the terminal you start Codex from, put the contents of the key file in this variable, then start `codex`.
+<details>
+<summary>Steps (example with the public URL https://warifuri.example.com)</summary>
 
-macOS and Linux:
+1. On the server PC, run `warifuri init` and `warifuri serve` as in steps 1 and 2 above.
+2. Put HTTPS in front of the server and prepare a URL reachable from outside (the public URL). For example, with Caddy on the same PC, this setting also gets the HTTPS certificate automatically.
 
-```bash
-export WARIFURI_DEVICE_KEY="$(cat ~/.warifuri/device.key)"
-```
-
-Windows PowerShell:
-
-```powershell
-$env:WARIFURI_DEVICE_KEY = (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim()
-```
-
-To avoid doing this every time, on macOS and Linux put the same line in your shell's startup file (such as `~/.zshrc`). On Windows you can keep it in your user environment variables; terminals opened afterwards have it.
-
-```powershell
-[Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', (Get-Content "$env:USERPROFILE\.warifuri\device.key" -Raw).Trim(), 'User')
-```
-
-Finally, open `/hooks` inside Codex and trust the start gate hook once. Codex runs only hooks you have trusted.
-
-`codex mcp list` shows whether `warifuri` is registered. It shows only the registration, not whether Codex can reach the server. To check the connection, ask inside Codex for something like "show me the warifuri board" and see whether the warifuri tools work.
-
-### The start gate
-
-The start gate is a hook that runs before an agent edits a file. In a registered place (working directory), if this device holds no task there, it stops the edit and tells the agent to find or create a task and `start` it first. It does not stop edits when the server cannot be reached.
-
-The start gate acts only inside folders registered as places. In a folder that is not registered, it stops nothing. To register a folder, start Claude Code or Codex in it and ask something like "register this folder as a place". The agent registers it with the MCP tool `place`, and can give it a profile (work, research and so on) at the same time.
-
-To turn it off, write `WARIFURI_GATE=off` in `warifuri.env`. To connect without it, run `warifuri connect --no-hook`.
-
-## Web screen
-
-While `warifuri serve` is running, open http://127.0.0.1:8787/ in a browser. It moves to the calendar (`/calendar`), where you see your goals, tasks and schedule. The address `serve` prints when it starts is this `/calendar`.
-
-## The light secretary skill
-
-The package carries a light secretary skill, `warifuri-secretary` (`harness/skills/warifuri-secretary/`). It does not stay running: when you call it, it reads the database, sorts out what to do today, books time on the schedule, tidies up what is stuck and suggests the next step. It writes only what you have agreed to.
-
-`warifuri connect` copies the skill to `~/.claude/skills/warifuri-secretary/` and `~/.codex/skills/warifuri-secretary/`. For Codex it copies only when `~/.codex/skills/` exists; to add it to Codex, make that folder and run `warifuri connect --force`. Files that are already there are kept, so to replace them with a newer version of the skill, run `warifuri connect --force` as well. To leave the skill out, add `--no-skills`.
-
-The skill is written in Japanese. Ask Claude Code or Codex things like "what should I do today", "book time for this", "anything stuck?" or "what's next" and it is used.
-
-## Running the secretary
-
-On the server machine, the secretary can do its work at set times: every day at 23:00 it checks whether each goal can meet its due date and rebooks task time, at 07:00 it greets you in the conversation and asks what needs your decision, and on Sunday at 23:00 it tidies the inboxes. Its brain is Claude Code on that machine (`claude -p`). No cron job or Task Scheduler entry is needed; `warifuri serve` keeps the clock and wakes it.
-
-1. Install Claude Code on the server machine, start `claude` once and log in yourself. warifuri never reads that login.
-2. Turn the secretary on.
-
-   ```bash
-   warifuri secretary enable
+   ```
+   warifuri.example.com {
+     reverse_proxy 127.0.0.1:8787
+   }
    ```
 
-3. Restart `warifuri serve`. On start it prints `secretary on:` with the times of the jobs.
+   If HTTPS runs on a different PC from the server, also change `WARIFURI_HOST` in `warifuri.env`.
+3. In GitHub, go to Settings → Developer settings → OAuth Apps and create an OAuth App like this.
 
-To try a job right away, keep `warifuri serve` running and run the command below. claude's output is kept in `secretary/logs/` in the data directory.
+   | Field | Example |
+   |---|---|
+   | Application name | `warifuri` |
+   | Homepage URL | `https://warifuri.example.com` |
+   | Authorization callback URL | `https://warifuri.example.com/oauth/github/callback` |
+
+4. Write the following in the two files in the data folder and restart `warifuri serve`.
+
+   `warifuri.env`:
+
+   ```
+   WARIFURI_PUBLIC_URL=https://warifuri.example.com
+   WARIFURI_GITHUB_USER=<your GitHub user name>
+   WARIFURI_GITHUB_CLIENT_ID=<the OAuth App's Client ID>
+   ```
+
+   `secrets.env`:
+
+   ```
+   WARIFURI_GITHUB_CLIENT_SECRET=<the OAuth App's Client Secret>
+   ```
+
+</details>
+
+If "GitHub login off" no longer appears at startup, GitHub login works. `warifuri config` shows what is missing.
+
+### Using it as a client
+
+Connect from another PC to a hosted server. Install warifuri on this PC too, then run:
 
 ```bash
-warifuri secretary run morning
+warifuri connect --url https://<server> --device <device name>
 ```
 
-You can talk to the secretary on the 秘書 (secretary) page of the Web screen (`/secretary`). Write in the box at the bottom and send; the secretary checks the ledger, and its reply appears as it is written. Pictures and files go along through the clip button or by pasting. When the secretary has something for you to choose, a question card shows one question at a time: pick an option and press 答える (answer), or あとで (later). Any message can open a thread on the right with スレッドで話す (talk in a thread); what is said there reaches the secretary of the main conversation in short. The 07:00 morning arrives in this conversation, marked 定期実行 (scheduled).
+The first time you use it, a browser opens; log in with GitHub and choose this PC's device name.
 
-To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times and the night hours are [settings](configuration.md). The secretary can use warifuri's tools only; the claude.ai connectors (mail, calendar) are off for it by default. Give it a calendar only on purpose; how, and how it works, is in the secretary plug-in section of the [architecture](architecture.md) (Japanese).
+<details>
+<summary>The consent screen</summary>
 
-## Using it from another machine (GitHub login)
+After you log in with GitHub, this screen opens (the screen is in Japanese).
 
-To use it from other machines, or from Claude on the web or in the app, put the server where they can reach it and set up the GitHub login. How to make the GitHub OAuth App, the settings the server needs, and running `warifuri connect --url https://<server> --device <device name>` on each machine are in the sections つなぎ方 (connecting) and 着手ゲート (the start gate) of [Architecture](architecture.md) (in Japanese). Put HTTPS in front when the server is reachable from outside.
+![The consent screen](images/consent.png)
+
+- The top box: the name of the app that wants to connect, and where it returns to. The app gives its own name, so check that the return address (such as `claude.ai`) is right.
+- このデバイスを登録 (register this device): if another agent on this PC already gave it a name, choose it here.
+- 新しいデバイス (new device): for a PC connecting for the first time, type a name using letters, digits and `.` `_` `-`.
+- 許可する (allow): the agent can then read and write the database.
+
+</details>
+
+The task check also needs a device key on this PC. On the server PC, run the following and write the key it prints on one line in this PC's `~/.warifuri/device.key`.
+
+```bash
+warifuri key add <device name>
+```
+
+## Secretary
+
+The secretary is an AI agent that runs task management and scheduling on a timer. It is off by default. What it does is described in [Usage](usage.md#3-秘書) (in Japanese).
+
+On the server PC, log in to Claude Code, run the following and restart `warifuri serve`.
+
+```bash
+warifuri secretary enable
+```
+
+To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times can be changed in [Configuration](configuration.md) (in Japanese).
+
+<details>
+<summary>What the secretary can use</summary>
+
+The secretary can use only warifuri's tools; claude.ai connectors (mail, calendar) are off by default. How to let it use a calendar will be described in [Integrations](integrations.md).
+
+</details>
 
 ## Settings
 
-Settings go in `warifuri.env` in the data directory, one `NAME=value` per line; secrets go in `secrets.env`. The list of settings and the order they are read in are in [Configuration](configuration.md) (in Japanese). To see the current values and where each came from:
+Settings go in `warifuri.env` in the data folder as `NAME=value`. Secret values go in `secrets.env`. The list of settings is in [Configuration](configuration.md) (in Japanese) and examples are in [examples/](../examples/README.md). `warifuri config` shows the current values.
 
-```bash
-warifuri config
-```
+<details>
+<summary>File encoding (Windows)</summary>
 
-Example settings for a made-up person, ready to copy and edit, are in [examples/](../examples/README.md) (in Japanese). They also show how to write the profile files (`profiles/`).
+Save `warifuri.env` as UTF-8. Appending lines with `>>` in Windows PowerShell 5.1 writes that part as UTF-16, and the file can no longer be read.
 
-Edit `warifuri.env` in an editor such as Notepad, and save it as UTF-8. In Windows PowerShell 5.1, do not append lines with `>>`: the appended part is written in UTF-16, and a file that mixes two encodings cannot be read. warifuri also reads UTF-8 files with a BOM and files that are entirely UTF-16, and warns you to save a UTF-16 file as UTF-8 again. Saving as UTF-8 is still the recommended way.
+</details>
 
-## Updating and removing
+## Update, backup and uninstall
 
-To update, stop the server, install again, and replace the skill with the new version.
+### Update
+
+Stop the server, then run:
 
 ```bash
 npm install -g warifuri@latest
@@ -182,28 +246,23 @@ npm install -g warifuri@latest
 warifuri connect --force
 ```
 
-You can copy the database to a dated file. The newest `--keep` copies (7 by default) stay and older ones are removed. The copy can be taken while `warifuri serve` is running.
+### Backup
+
+Backs up the database to a dated file. It works while the server is running and keeps the newest 7 (change with `--keep`).
 
 ```bash
-warifuri backup --dir <folder to copy to>
+warifuri backup --dir <backup folder>
 ```
 
-To remove it, go in this order:
+### Uninstall
 
-1. Stop the server: press Ctrl+C in the terminal running `warifuri serve`.
-2. Remove the start gate hook and the skill. Open Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`, and in `hooks`, under `PreToolUse`, delete by hand the entry that runs `warifuri hook gate` (`warifuri.cmd hook gate` on Windows). In Claude Code, the entry looks like this:
+<details>
+<summary>Steps</summary>
 
-   ```json
-   {
-     "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-     "hooks": [
-       { "type": "command", "command": "warifuri hook gate", "timeout": 10 }
-     ]
-   }
-   ```
-
-   In Codex, the `matcher` is `apply_patch|Edit|Write` and there is a `statusMessage` as well. If it sits in the same `hooks` list as other hooks, delete only the warifuri one. For the skill, delete the folders `~/.claude/skills/warifuri-secretary/` and `~/.codex/skills/warifuri-secretary/`.
-3. Remove the MCP server that `connect` registered.
+1. Stop the server.
+2. In Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`, delete the entry under `hooks` → `PreToolUse` that calls `warifuri hook gate` (`warifuri.cmd hook gate` on Windows). Leave other hooks alone.
+3. Delete the skill folders `~/.claude/skills/warifuri-secretary/` and `~/.codex/skills/warifuri-secretary/`.
+4. Remove the MCP server registrations.
 
    ```bash
    claude mcp remove --scope user warifuri
@@ -213,16 +272,13 @@ To remove it, go in this order:
    codex mcp remove warifuri
    ```
 
-4. Remove the environment variable that holds the key for Codex. On Windows, remove it from your user environment variables. On macOS and Linux, delete the `export WARIFURI_DEVICE_KEY=…` line from your shell's startup file.
-
-   ```powershell
-   [Environment]::SetEnvironmentVariable('WARIFURI_DEVICE_KEY', $null, 'User')
-   ```
-
-5. Uninstall the package.
+5. If you set the environment variable `WARIFURI_DEVICE_KEY`, remove it.
+6. Uninstall the package.
 
    ```bash
    npm uninstall -g warifuri
    ```
 
-6. Last, delete the data directory `~/.warifuri/`. It holds the database, the settings and the key, so delete it only when you no longer need them.
+7. If you no longer need it, delete the data folder `~/.warifuri/`. It holds the database, settings and device key.
+
+</details>

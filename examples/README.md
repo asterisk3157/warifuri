@@ -11,4 +11,4 @@
 
 秘密の `secrets.env` は、例に入れていません。`init` が置いた空のファイルに、自分の値を書きます。
 
-各項目の意味は[設定](../docs/configuration.md)に、別の機械から使う手順は[はじめかた](../docs/getting-started.md)に、プロフィールのファイルの役目は[構成](../docs/architecture.md)の「プロフィール」の節にあります。
+各項目の意味は[設定](../docs/configuration.md)に、別の機械から使う手順は[導入方法](../docs/getting-started.md)に、プロフィールのファイルの役目は[構成](../docs/architecture.md)の「プロフィール」の節にあります。

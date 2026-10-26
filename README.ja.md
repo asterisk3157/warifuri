@@ -2,19 +2,28 @@
 
 [English](README.md)
 
-人と AI エージェントが、同じデータベースでゴールとタスクと予定を管理するためのツールです。自分の PC でサーバーを動かし、Claude Code や Codex から MCP で読み書きします。エージェントは作業の前にタスクを持ち、終わったら閉じます。
+[![npm](https://img.shields.io/npm/v/warifuri)](https://www.npmjs.com/package/warifuri)
+[![CI](https://github.com/asterisk3157/warifuri/actions/workflows/ci.yml/badge.svg)](https://github.com/asterisk3157/warifuri/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/warifuri)](LICENSE)
 
-いまは v0.1 で、まず自分の PC で1人で使う形を想定しています。考え方は[原則](docs/principles.md)、全体の形は[構成](docs/architecture.md)にあります。
+warifuri は、人と AI エージェント(Claude Code・Codex)が一緒に使うタスク管理ツールです。
 
-## インストール
+## 主な機能
 
-Node.js 22.13 以上で動きます。Windows、macOS、Linux のどれでも使えます。
+| 機能 | 説明 |
+|---|---|
+| タスク管理 | ゴールとタスクを設定する |
+| 予定調整 | タスクをカレンダーに割り振り、もとからある予定と重ならないように組む |
+| 確認画面(Web UI) | ゴール・タスク・予定をブラウザで確認する |
+| 秘書(v0.2) | タスク管理と予定調整を、AI エージェントが定期実行する |
+
+## インストール方法
+
+Node.js 22.13 以上で、Windows・macOS・Linux で動きます。
 
 ```bash
 npm install -g warifuri
 ```
-
-入れたら、データのフォルダを作り、サーバーを動かし、別のターミナルから Claude Code と Codex につなぎます。
 
 ```bash
 warifuri init
@@ -24,11 +33,49 @@ warifuri init
 warifuri serve
 ```
 
+サーバーを起動したら、別のターミナルで Claude Code と Codex に接続します。
+
 ```bash
 warifuri connect
 ```
 
-サーバーが動いているあいだは、ブラウザで http://127.0.0.1:8787/ を開くと、ゴールとタスクと予定を見られます。Codex へのシークレットの入れ方、着手ゲート、軽い秘書のスキル、別の機械から使う方法、更新と削除は[はじめかた](docs/getting-started.md)にあります。設定の項目は[設定](docs/configuration.md)にあります。
+起動中は、ブラウザで http://127.0.0.1:8787/ を開くと確認画面が見られます。
+
+## うまく動かないときは…
+
+<details>
+<summary>Windows の PowerShell で動かないとき</summary>
+
+「このシステムではスクリプトの実行が無効になっています」と表示された場合は、`warifuri` の代わりに `warifuri.cmd` と入力してください。
+
+</details>
+
+<details>
+<summary>macOS・Linux で動かないとき</summary>
+
+`npm install -g` で「EACCES」と表示された場合は、`sudo` を付けずに、nvm などで自分のユーザーに Node.js をインストールし直してください。
+
+「command not found: warifuri」と表示された場合は、`npm prefix -g` で表示されるフォルダの `bin` を PATH に追加してください。
+
+</details>
+
+## ドキュメント
+
+- 設計思想:[原則](docs/principles.md)
+- 導入方法:[インストールから接続まで](docs/getting-started.md)
+- 使い方:[AI エージェントと秘書に頼めること](docs/usage.md)
+- 連携の例:[Google カレンダーなど](docs/integrations.md)
+- 構成:[全体の仕組み](docs/architecture.md)
+- 設定:[設定項目の一覧](docs/configuration.md)
+
+## バージョン履歴
+
+| 版 | 日付 | 更新内容 |
+|---|---|---|
+| v0.2.0 | (予定) | 秘書、タスクの順番 |
+| v0.1.0 | 2026-10-25 | タスク管理、予定調整、確認画面(Web UI)、MCP、タスク確認 |
+
+詳細は[こちら](https://github.com/asterisk3157/warifuri/releases)
 
 ## ライセンス
 
