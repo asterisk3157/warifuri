@@ -363,3 +363,68 @@ test('the secretary\'s tools answer only the secretary\'s device, and nobody whi
   assert.match((await anyone.callTool({ name: 'reply_options', arguments: { options: ['はい'] } })).content[0].text, /秘書が有効になっていないので/);
   assert.equal((await anyone.callTool({ name: 'board', arguments: {} })).structuredContent.secretary, 'off');
 });
+
+test('while the secretary runs, only it books; the others ask it with ask_secretary, and get its reply', async (t) => {
+  const ledger = openLedger(':memory:', { now: ticking() });
+  const keys = { secretary: ledger.issueKey('secretary', { actor: 'cli' }).key, laptop: ledger.issueKey('laptop', { actor: 'cli' }).key };
+  const clients = [];
+  const servers = [];
+  t.after(async () => {
+    for (const c of clients) await c.close();
+    for (const s of servers) {
+      s.closeAllConnections();
+      await new Promise((r) => s.close(r));
+    }
+    ledger.close();
+  });
+  const asked = [];
+  const chat = (on, reply) => ({
+    on,
+    request: async (fields, writer, opts) => {
+      asked.push({ fields, writer, opts });
+      return reply === 'late' ? { request: { id: 'm_1' }, timedOut: true } : { request: { id: 'm_1' }, reply: { body: reply } };
+    },
+  });
+  const start = async (options) => {
+    const server = createServer({ ledger, ...options });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    servers.push(server);
+    return async (device) => {
+      const client = new Client({ name: 'test', version: '0' });
+      const url = new URL(`http://127.0.0.1:${server.address().port}/mcp`);
+      await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${keys[device]}` } } }));
+      clients.push(client);
+      return client;
+    };
+  };
+  const slot = { kind: 'fixed', title: '打ち合わせ', starts_at: '2026-10-30T10:00:00+09:00', ends_at: '2026-10-30T11:00:00+09:00' };
+
+  const on = await start({ secretaryDevice: 'secretary', chat: chat(true, '金曜の10時に入れました') });
+  const laptop = await on('laptop');
+  for (const [name, args] of [['book', slot], ['unbook', { id: 'b_x' }]]) {
+    const out = await laptop.callTool({ name, arguments: args });
+    assert.equal(out.isError, true, name);
+    assert.match(out.content[0].text, /予定は秘書が決めます.*ask_secretary/);
+  }
+  const secretary = await on('secretary');
+  assert.equal((await secretary.callTool({ name: 'book', arguments: slot })).isError, undefined);
+  assert.match((await secretary.callTool({ name: 'ask_secretary', arguments: { text: 'x' } })).content[0].text, /秘書は自分に頼めません/);
+
+  const answered = await laptop.callTool({ name: 'ask_secretary', arguments: { text: '資料作り', task_id: 't_1', minutes: 120, prefer: '午前', wait_seconds: 30 } });
+  assert.deepEqual(answered.structuredContent, { status: 'answered', request_id: 'm_1', reply: '金曜の10時に入れました' });
+  assert.deepEqual(asked[0].fields, { from: 'laptop', text: '資料作り', task_id: 't_1', minutes: 120, prefer: '午前' });
+  assert.equal(asked[0].writer.device, 'laptop');
+  assert.equal(asked[0].opts.waitMs, 30_000);
+
+  const late = await (await (await start({ secretaryDevice: 'secretary', chat: chat(true, 'late') }))('laptop')).callTool({ name: 'ask_secretary', arguments: { text: '2時間' } });
+  assert.equal(late.structuredContent.status, 'waiting');
+  assert.equal(asked[1].opts.waitMs, 120_000);
+
+  // A secretary that cannot answer (claude missing, turned off): anyone books, nobody asks.
+  for (const options of [{ secretaryDevice: 'secretary', chat: chat(false) }, { secretaryDevice: null }]) {
+    const c = await (await start(options))('laptop');
+    assert.equal((await c.callTool({ name: 'book', arguments: slot })).isError, undefined);
+    assert.match((await c.callTool({ name: 'ask_secretary', arguments: { text: '2時間' } })).content[0].text, /秘書が有効になっていないので、頼めません/);
+    assert.equal((await c.callTool({ name: 'board', arguments: {} })).structuredContent.secretary, 'off');
+  }
+});
