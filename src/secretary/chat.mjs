@@ -516,11 +516,12 @@ export function createChat(ledger, cfg, ctx = {}) {
       return message;
     },
     // The person's answer to a question of the secretary; the secretary takes it next turn.
-    // It is stored with the secretary off too. While questions of the card are still open the
-    // secretary is not woken: it takes all the answers together once the card is done.
+    // It is stored with the secretary off too. While any question in the conversation is still
+    // open (of this card or another), the secretary is not woken: it takes all the answers
+    // together once none is left waiting.
     answer(askId, fields, writer) {
       const out = ledger.answerAsk(askId, fields, writer);
-      if (out.ask.state !== 'open') kick(out.ask.thread_id);
+      if (!ledger.openAsk(out.ask.thread_id)) kick(out.ask.thread_id);
       return out;
     },
     // warifuri's call into the conversation at a set time (job: morning). Not in the night,
