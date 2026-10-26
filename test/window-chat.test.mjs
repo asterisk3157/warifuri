@@ -233,6 +233,23 @@ test('answers: an answer starts a turn and comes in the prompt; a changed answer
   assert.ok(!input.includes('【タスク整理】'));
 });
 
+test('answers: the secretary is woken once every question of the card is answered, with all the answers together', async (t) => {
+  const w = world(t);
+  const a = w.ledger.ask({ questions: [
+    { header: 'タスク整理', question: '「調べもの」はどうしますか？', options: [{ label: '残す' }, { label: '閉じる' }] },
+    { header: '期日', question: '期日はどうしますか？', options: [{ label: '今日のまま' }, { label: '延ばす' }] },
+  ] }, SECRETARY);
+  w.chat.answer(a.id, { index: 0, picked: ['残す'] }, WEB);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 0, 'not woken for the first answer');
+  w.chat.answer(a.id, { index: 1, picked: ['延ばす'] }, WEB);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 1);
+  const input = w.claude.calls[0].input;
+  assert.match(input, /質問「タスク整理」\(「調べもの」はどうしますか？\)への答え: 残す/);
+  assert.match(input, /質問「期日」\(期日はどうしますか？\)への答え: 延ばす/);
+});
+
 test('the morning: a call into the same session, answered with the morning\'s instructions and marked as scheduled; not in the night', async (t) => {
   const w = world(t);
   w.chat.send('おはよう', WEB);

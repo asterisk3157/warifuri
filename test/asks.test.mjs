@@ -177,6 +177,24 @@ test('ask: あとで leaves the questions for later; answering one again changes
   L.close();
 });
 
+test('ask: one card at a time: a new ask waits until every question of the open one is answered or put off', () => {
+  const L = openLedger(':memory:', { now: ticking() });
+  const a = L.ask({ questions: [Q(), Q({ header: '期日' })] }, SECRETARY);
+  assert.deepEqual(problemsOf(() => L.ask({ questions: [Q({ header: '別の件' })] }, SECRETARY)), [
+    `まだ答えを待っている質問があります(${a.id})。聞きたいことは1回の ask に4問までまとめ、答えが届いてから次を聞きます`,
+  ]);
+  L.answerAsk(a.id, { index: 0, picked: ['閉じる'] }, WEB);
+  assert.ok(problemsOf(() => L.ask({ questions: [Q({ header: '別の件' })] }, SECRETARY))[0].startsWith('まだ答えを待っている'), 'one answer is not enough');
+  // Another conversation has its own card.
+  const thread = L.openThread(a.id, WEB);
+  assert.equal(L.ask({ questions: [Q()], thread: thread.id }, SECRETARY).state, 'open');
+  L.answerAsk(a.id, { index: 1, picked: ['閉じる'] }, WEB);
+  const b = L.ask({ questions: [Q({ header: '別の件' })] }, SECRETARY);
+  L.answerAsk(b.id, { later: true }, WEB);
+  assert.equal(L.ask({ questions: [Q({ header: 'その次' })] }, SECRETARY).state, 'open', 'あとで lets the next one come');
+  L.close();
+});
+
 test('ask: a question about an open proposal answers the proposal too; changing it clears the done mark', () => {
   const L = openLedger(':memory:', { now: ticking() });
   const p = L.propose({ kind: 'reschedule_block', title: '予定を明日へ', body: 'b' }, SECRETARY);

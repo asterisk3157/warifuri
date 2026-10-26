@@ -615,8 +615,10 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'such as タスク整理 or 期日), question (one sentence ending in ?), options (' +
       `${ASK_OPTIONS_MIN} to ${ASK_OPTIONS_MAX}, each { label, description }; put the one you recommend first: the window ` +
       'marks it おすすめ) and multiSelect. The window always adds その他 for the person\'s own words, so never add one. ' +
-      'The questions are shown one at a time; the answers come to you in your next turn, as the person gives them (or ' +
-      'あとで). Optional per question: kind, the autonomy kind the action falls under (原則13): warifuri then records the ' +
+      'Put everything you want to ask into one call: while a question in the conversation is still waiting for its ' +
+      'answers, a new ask is refused. The questions are shown one at a time on one card; the answers come to you ' +
+      'together in your next turn, once all of them are answered (or the person picks あとで). Do not act on what you ' +
+      'asked until then. Optional per question: kind, the autonomy kind the action falls under (原則13): warifuri then records the ' +
       'answer itself (the first option alone is approved, its own words changed, any other option refused), so do not ' +
       'call autonomy_outcome for it; about, the goal or task; proposal, the id of an open proposal (from the nightly ' +
       'run) the question asks about: the answer is recorded on it too. When the person changes an earlier answer, ' +
