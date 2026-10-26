@@ -418,7 +418,7 @@ export function describeConfig(cfg) {
 }
 
 const SECTION_HEADS = {
-  client: '# ---- 使う機械の設定。warifuri connect と着手ゲートのフックが読む ----',
+  client: '# ---- 使う機械の設定。warifuri connect と、タスク確認とカレンダーのフックが読む ----',
   secretary: '# ---- 秘書の定時の仕事。warifuri serve と warifuri secretary が読む ----',
 };
 
