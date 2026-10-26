@@ -45,7 +45,7 @@ import { findOnPath } from '../client/connect.mjs';
 import { localIso, inNight } from './schedule.mjs';
 import { createStreamReader, UNSUPPORTED } from './stream.mjs';
 import {
-  deviceOf, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
+  deviceOf, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, writeClaudeSettings, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
   claudeEnv, factLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR,
 } from './secretary.mjs';
 
@@ -281,7 +281,8 @@ export function createChat(ledger, cfg, ctx = {}) {
     const input = withImages ? ['--input-format', 'stream-json'] : [];
     const reader = createStreamReader({ onEvent });
     try {
-      const child = (ctx.spawn ?? defaultSpawn)(claude, [...claudeArgs({ mcpFile, schedule }), ...format, ...input, ...extra], {
+      const settingsFile = writeClaudeSettings(cfg.home, schedule, { platform });
+      const child = (ctx.spawn ?? defaultSpawn)(claude, [...claudeArgs({ mcpFile, schedule, settingsFile }), ...format, ...input, ...extra], {
         cwd: p.chat,
         env: claudeEnv(env, schedule),
         stdio: ['pipe', 'pipe', 'pipe'],

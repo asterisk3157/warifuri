@@ -17,6 +17,7 @@
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
 //   warifuri hook calendar [claude|codex]  (stops calendar writes while the secretary runs, and
 //                                    every calendar tool of a harness on the gcp route)
+//   warifuri hook tools <tool> ...   (the secretary's: stops all but the reads of the tools given)
 //   warifuri secretary enable|disable
 //   warifuri secretary run <nightly|morning|inbox>
 //   warifuri --version               (also -v; the version of this package)
@@ -43,6 +44,7 @@ import { PROFILES_DIR } from './knowledge/profiles.mjs';
 import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
 import { decideCalendar } from './client/calendar-hook.mjs';
+import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger } from './secretary/chat.mjs';
@@ -564,6 +566,16 @@ function runConnect(args) {
 // warifuri hook gate: the start gate; warifuri hook calendar: the calendar hook. Each always
 // exits 0; a refusal is the JSON it prints. Anything it cannot read or reach lets the call through.
 async function runHook(args) {
+  if (args[0] === 'tools') {
+    let out = null;
+    try {
+      out = decideTools(JSON.parse(fs.readFileSync(0, 'utf8')), args.slice(1));
+    } catch {
+      out = null;
+    }
+    await new Promise((resolve) => (out ? process.stdout.write(`${out}\n`, resolve) : resolve()));
+    process.exit(0);
+  }
   const which = args[0] === 'calendar' ? decideCalendar : decide;
   // hook calendar names the harness it runs in (claude or codex), for its calendar route.
   const harness = args[0] === 'calendar' && ['claude', 'codex'].includes(args[1]) ? args[1] : null;
@@ -611,7 +623,7 @@ function main(argv) {
     return undefined;
   }
   if (command === 'hook') {
-    if (rest[0] !== 'gate' && rest[0] !== 'calendar') return usage('hook takes gate or calendar');
+    if (!['gate', 'calendar', 'tools'].includes(rest[0])) return usage('hook takes gate, calendar or tools');
     runHook(rest);
     return undefined;
   }
