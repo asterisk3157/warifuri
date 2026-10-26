@@ -158,7 +158,7 @@ async function start(t, { env = {}, trustProxy } = {}) {
 
   const exchange = (clientId, code, verifier, extra = {}) =>
     form('/token', { grant_type: 'authorization_code', client_id: clientId, code, code_verifier: verifier, redirect_uri: REDIRECT, ...extra });
-  const refresh = (clientId, token) => form('/token', { grant_type: 'refresh_token', client_id: clientId, refresh_token: token });
+  const refresh = (clientId, token, extra = {}) => form('/token', { grant_type: 'refresh_token', client_id: clientId, refresh_token: token, ...extra });
 
   // A raw tools/list call to /mcp with a bearer; returns the status and headers.
   const mcpStatus = async (bearer) => {
@@ -387,9 +387,17 @@ test('refresh rotates; reusing the old refresh token revokes the family; access 
   assert.notEqual(second.access_token, first.access_token);
   assert.equal((await s.mcpStatus(second.access_token)).status, 200);
 
+  // A scope asked for on refresh that the login never had (Codex sends one) is not an error:
+  // the grant stays what it was.
+  const scoped = await s.refresh(id, second.refresh_token, { scope: 'mcp offline_access' });
+  assert.equal(scoped.status, 200);
+  const third = await scoped.json();
+  assert.equal(third.scope ?? '', '');
+  assert.equal((await s.mcpStatus(third.access_token)).status, 200);
+
   // Another client cannot use this refresh token.
   const { body: other } = await s.register();
-  assert.equal((await s.refresh(other.client_id, second.refresh_token)).status, 400);
+  assert.equal((await s.refresh(other.client_id, third.refresh_token)).status, 400);
 
   // The old refresh token again: refused, and the whole family goes.
   const reuse = await s.refresh(id, first.refresh_token);

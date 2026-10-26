@@ -280,9 +280,11 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
       }
       if (expired(row)) return { error: 'invalid_grant', message: 'refresh token expired' };
       if (deviceRevoked(row.device)) return { error: 'invalid_grant', message: 'the device was revoked' };
+      // Scopes grant nothing in warifuri (the device is what a token stands for). A client
+      // that asks for more on refresh than it was granted (Codex sends a scope it never asked
+      // for at login) gets the grant narrowed to what it had, not an error that cuts it off.
       const granted = JSON.parse(row.scopes);
-      const asked = scopes ?? granted;
-      if (asked.some((s) => !granted.includes(s))) return { error: 'invalid_scope', message: 'scope wider than the grant' };
+      const asked = (scopes ?? granted).filter((s) => granted.includes(s));
       db.prepare('UPDATE oauth_tokens SET revoked_at = ? WHERE hash = ?').run(t, row.hash);
       const tokens = issuePair({ clientId, device: row.device, family: row.family, scopes: asked, familyEnd: familyEnd(row.family) });
       record({ ...MACHINE, device: row.device }, 'oauth', clientId, 'refresh', { device: row.device, family: row.family });
