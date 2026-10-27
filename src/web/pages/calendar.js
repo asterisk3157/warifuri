@@ -1,6 +1,7 @@
 // カレンダー: the bookings of a day or a week, with today's list beside them.
 
 import { h, skel, soonBadge, hhmm, mdw, dayStart, addDays, isoLocal, profileColor, tint, WEEKDAYS } from '../ui.js';
+import { renderRichNote } from '../md.js';
 
 const ROW = 52;
 const H0 = 8;
@@ -171,8 +172,9 @@ function grid(data, ctx) {
       h('div', { class: 'wf-grid wf-grid-body', style: { gridTemplateColumns: columns } }, h('div', { class: 'wf-hours' }, ...hours), ...cols)));
 }
 
-// The booking picked in the grid, in full, where today's list is: its title and when, then
-// what it is for (task, goal, habit, profile) and its note, only those it has.
+// The booking picked in the grid, in full, where today's list is: always the same five rows
+// (題名, 日時, 場所, メモ, 作成者), with a dash where there is nothing; then what it is for,
+// when it has a task, goal or habit.
 function detailCard(b, ctx) {
   const s = new Date(Date.parse(b.starts_at));
   const e = new Date(Date.parse(b.ends_at));
@@ -181,21 +183,21 @@ function detailCard(b, ctx) {
   const when = allDay
     ? `${mdw(s)}${+lastDay > +s ? ` – ${mdw(lastDay)}` : ''} 終日`
     : `${mdw(s)} ${fmt(s)}〜${fmt(e)}`;
+  const value = (v) => (v ? v : h('span', { class: 'wf-muted', text: '—' }));
   const rows = [
-    b.task ? ['タスク', b.task.title] : null,
-    b.goal ? ['ゴール', b.goal.title] : null,
-    b.habit ? ['習慣', b.habit.title] : null,
-    b.profile ? ['プロフィール', b.profile] : null,
-    b.location ? ['場所', b.location] : null,
-    b.note ? ['メモ', b.note] : null,
-    b.organizer ? ['作成者', b.organizer] : null,
-  ].filter(Boolean);
+    ['題名', value(b.title)],
+    ['日時', value(when)],
+    ['場所', value(b.location)],
+    ['メモ', b.note ? h('div', { class: 'wf-rich' }, ...renderRichNote(h, b.note)) : value(null)],
+    ['作成者', value(b.organizer)],
+    ...(b.task ? [['タスク', value(b.task.title)]] : []),
+    ...(b.goal ? [['ゴール', value(b.goal.title)]] : []),
+    ...(b.habit ? [['習慣', value(b.habit.title)]] : []),
+  ];
   return h('section', { class: 'wf-today-card wf-surface wf-ev-detail' },
-    h('div', { class: 'wf-detail-head' },
-      h('h2', { text: b.title }),
+    h('div', { class: 'wf-today-head' }, h('h2', { text: '予定の詳細' }),
       h('button', { type: 'button', class: 'wf-close', 'aria-label': '閉じる', title: '閉じる', data: { key: 'detail-close' }, onclick: () => { view.sel = null; ctx.rerender(); }, text: '×' })),
-    h('p', { class: 'wf-detail-when', text: when }),
-    ...rows.map(([k, v]) => h('div', { class: 'wf-detail-row' }, h('span', { class: 'wf-detail-label', text: k }), h('span', { text: v }))));
+    h('dl', { class: 'wf-detail-list' }, ...rows.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', {}, v)])));
 }
 
 function todayCard(data, ctx) {

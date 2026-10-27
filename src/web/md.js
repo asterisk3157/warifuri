@@ -139,3 +139,28 @@ export function renderMarkdown(h, text) {
     return h('p', {}, ...kids);
   });
 }
+
+// A note that may be HTML (Google Calendar keeps an event's description so), as nodes: only
+// these tags are kept, with no attributes but a link's http(s) href; any other tag is left out
+// and its words kept. Nothing is ever set as HTML. Plain text keeps its line breaks.
+const RICH_TAGS = new Set(['b', 'strong', 'i', 'em', 'u', 'br', 'p', 'ul', 'ol', 'li', 'a']);
+
+export function renderRichNote(h, text) {
+  if (!/<[a-z][\s\S]*>/i.test(text)) return [h('span', { class: 'wf-plain', text })];
+  const doc = new DOMParser().parseFromString(text, 'text/html');
+  const walk = (node) => [...node.childNodes].flatMap((n) => {
+    if (n.nodeType === 3) return [document.createTextNode(n.textContent)];
+    if (n.nodeType !== 1) return [];
+    const tag = n.tagName.toLowerCase();
+    if (['script', 'style', 'template', 'iframe', 'object', 'noscript'].includes(tag)) return [];
+    const kids = walk(n);
+    if (!RICH_TAGS.has(tag)) return kids;
+    if (tag === 'br') return [h('br')];
+    if (tag === 'a') {
+      const href = n.getAttribute('href') ?? '';
+      return /^https?:\/\//i.test(href) ? [h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, ...kids)] : kids;
+    }
+    return [h(tag, {}, ...kids)];
+  });
+  return walk(doc.body);
+}

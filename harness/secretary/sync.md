@@ -31,7 +31,7 @@
 
 `autonomy` を読み、予定をカレンダーに書き出す(`write_calendar`)の自律度を確かめます。
 
-- `act_then_tell` なら、期間の warifuri のタスクと習慣の予定のうち、組のないものを本人のカレンダー(primary)に作り、返ってきた予定の id を、その予定の `id`、`source: "google-calendar"`、`external_id` を付けた `book` で付けます。予定の説明に `warifuri:<予定の id>` の1行を入れます。
+- `act_then_tell` なら、期間の warifuri のタスクと習慣の予定のうち、組のないものを本人のカレンダー(primary)に作り(メモは HTML のタグを外した普通のテキストにして説明に入れます)、返ってきた予定の id を、その予定の `id`、`source: "google-calendar"`、`external_id` を付けた `book` で付けます。予定の説明に `warifuri:<予定の id>` の1行を入れます。
 - `ask` なら、書き出しません。案は毎晩の仕事が出します。
 
 本人のカレンダーの予定のうち、warifuri に組のないものは、書き換えも消しもしません。
