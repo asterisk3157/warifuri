@@ -701,6 +701,16 @@ export function openLedger(path, options = {}) {
     return rows.map((r) => placeWithPaths(r.id));
   }
 
+  // When each place last saw work: the latest change of a task in it, or the place's own
+  // change when no task is newer. { [place id]: ISO time }.
+  function placeActivity() {
+    const out = {};
+    for (const r of all('SELECT p.id, p.updated_at, MAX(t.updated_at) AS last FROM places p LEFT JOIN tasks t ON t.place_id = p.id GROUP BY p.id')) {
+      out[r.id] = r.last && r.last > r.updated_at ? r.last : r.updated_at;
+    }
+    return out;
+  }
+
   function placeWithPaths(id) {
     const row = getPlaceRow(id);
     if (!row) return null;
@@ -2102,6 +2112,7 @@ export function openLedger(path, options = {}) {
     placePath,
     placeFor,
     listPlaces,
+    placeActivity,
     setAutonomy,
     getAutonomy,
     listAutonomy,

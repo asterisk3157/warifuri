@@ -305,11 +305,17 @@ export function createWeb({
   githubUser = null,
   githubLogin = false,
   chat = null,
+  secretaryDevice = null,
+  serverDevices = [],
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
   assetsDir = ASSETS_DIR,
 }) {
+  // The devices of the server machine itself (the secretary, other programs there): not shown
+  // among the machines that use the server.
+  const hidden = new Set([secretaryDevice, ...serverDevices].filter(Boolean));
+  const roleOf = (name) => (name === secretaryDevice ? 'secretary' : serverDevices.includes(name) ? 'server' : 'device');
   const mode = isLoopbackHost(host) && !publicUrl && trustProxy === undefined ? 'open' : 'login';
   const secure = typeof publicUrl === 'string' && publicUrl.startsWith('https://');
   const cookieName = secure ? '__Host-warifuri_web' : 'warifuri_web';
@@ -510,7 +516,7 @@ export function createWeb({
     const loggedIn = new Set(ledger.oauth.tokenActivity().filter((a) => a.live).map((a) => a.device));
     return ledger
       .listDevices()
-      .filter((d) => d.revoked_at === null)
+      .filter((d) => d.revoked_at === null && !hidden.has(d.name))
       .map((d) => ({
         name: d.name,
         created_at: d.created_at,
@@ -784,16 +790,18 @@ export function createWeb({
     const activity = ledger.oauth.tokenActivity();
     const loggedIn = new Set(activity.filter((a) => a.live).map((a) => a.device));
     const names = new Map(ledger.oauth.listClients().map((c) => [c.client_id, cleanClientName(c.client_name) ?? null]));
-    const places = ledger.listPlaces().map((p) => ({ id: p.id, name: p.name, profile: p.profile, paths: p.paths }));
+    const lastActive = ledger.placeActivity();
+    const places = ledger.listPlaces().map((p) => ({ id: p.id, name: p.name, profile: p.profile, paths: p.paths, last_active_at: lastActive[p.id] ?? null }));
     const devices = ledger.listDevices().map((d) => ({
       name: d.name,
+      role: roleOf(d.name),
       secret: d.has_key ? 'on' : d.revoked_at ? 'revoked' : 'none',
       github_login: loggedIn.has(d.name),
       created_at: d.created_at,
       revoked_at: d.revoked_at,
     }));
     const apps = activity
-      .filter((a) => a.live)
+      .filter((a) => a.live && !hidden.has(a.device))
       .map((a) => ({ client_id: a.client_id, client_name: names.get(a.client_id) ?? null, device: a.device, last_token_at: a.last_at }))
       .sort((a, b) => (a.last_token_at < b.last_token_at ? 1 : -1));
     res.json({ now: nowIso(), places, devices, apps, profiles: profileColors(home, places.map((p) => p.profile)) });

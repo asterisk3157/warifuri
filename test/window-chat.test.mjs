@@ -242,6 +242,10 @@ test('answers: the secretary is woken once every question of the card is answere
   w.chat.answer(a.id, { index: 0, picked: ['残す'] }, WEB);
   await w.chat.idle();
   assert.equal(w.claude.calls.length, 0, 'not woken for the first answer');
+  // The clock looks into the conversation every 30 seconds: it does not start a turn for it either.
+  await w.chat.kick();
+  assert.equal(w.claude.calls.length, 0, 'not woken by the clock while a question is open');
+  assert.equal(w.chat.status().waiting, 0);
   w.chat.answer(a.id, { index: 1, picked: ['延ばす'] }, WEB);
   await w.chat.idle();
   assert.equal(w.claude.calls.length, 1);

@@ -20,25 +20,33 @@ async function load(api) {
   return { from, days, shown, today: todays ?? shown };
 }
 
-const KIND_LABEL = { fixed: '決まった予定', habit: '習慣' };
 const FIXED = '#a7b4c2';
 const HABIT = '#e8a19c';
+// A booking shorter than this (in pixels of the grid) shows on one line.
+const SHORT = 40;
 
-// What a booking is, in words, and its colour.
+// What a booking is, in words (none for an appointment: its title says it), and its colour.
 function category(b, colors) {
-  if (b.kind === 'fixed') return { label: KIND_LABEL.fixed, color: FIXED };
-  if (b.kind === 'habit') return { label: KIND_LABEL.habit, color: HABIT };
+  if (b.kind === 'fixed') return { label: null, color: FIXED };
+  if (b.kind === 'habit') return { label: '習慣', color: HABIT };
   if (b.profile) return { label: b.profile, color: profileColor(b.profile, colors) };
   return { label: 'タスク', color: profileColor(null, colors) };
 }
 
 const fmt = (d) => hhmm(d);
+const span = (b) => `${fmt(new Date(Date.parse(b.starts_at)))}–${fmt(new Date(Date.parse(b.ends_at)))}`;
+const withLabel = (c, text) => (c.label ? `${c.label} · ${text}` : text);
+
+// Whether a booking covers the whole local day (an all-day event, or one running through it):
+// it goes in the row above the hours, not in the grid.
+const coversDay = (b, day) => Date.parse(b.starts_at) <= day.getTime() && Date.parse(b.ends_at) >= addDays(day, 1).getTime();
 
 // Bookings of one day, cut to the day, laid side by side where they overlap.
 function dayEvents(bookings, day) {
   const start = day.getTime();
   const end = addDays(day, 1).getTime();
   const evs = bookings
+    .filter((b) => !coversDay(b, day))
     .map((b) => ({ b, s: Math.max(start, Date.parse(b.starts_at)), e: Math.min(end, Date.parse(b.ends_at)) }))
     .filter((x) => x.e > x.s)
     .sort((x, y) => x.s - y.s || y.e - x.e);
@@ -101,6 +109,7 @@ function grid(data, ctx) {
   const colors = shown.profiles;
   const list = Array.from({ length: days }, (_, i) => addDays(from, i));
   const perDay = list.map((d) => dayEvents(shown.bookings, d));
+  const allDay = list.map((d) => shown.bookings.filter((b) => coversDay(b, d)));
   // Bookings outside 8:00–22:00 widen the hours shown.
   let h0 = H0;
   let h1 = H1;
@@ -118,6 +127,13 @@ function grid(data, ctx) {
     ? h('div', { class: 'wf-grid wf-grid-head', style: { gridTemplateColumns: columns } }, h('span'),
       ...list.map((d) => h('span', { class: ['wf-dayhead', +d === +today && 'wf-today'] }, h('span', { class: 'wf-wd', text: WEEKDAYS[d.getDay()] }), h('span', { class: 'wf-daynum', text: d.getDate() }))))
     : null;
+  const allDayRow = allDay.some((x) => x.length)
+    ? h('div', { class: 'wf-grid wf-allday', style: { gridTemplateColumns: columns } }, h('span', { class: 'wf-allday-label', text: '終日' }),
+      ...allDay.map((bs) => h('div', { class: 'wf-allday-cell' }, ...bs.map((b) => {
+        const c = category(b, colors);
+        return h('span', { class: 'wf-allday-ev', title: b.title, style: { background: tint(c.color) } }, b.title);
+      }))))
+    : null;
   const cols = list.map((d, i) => {
     const lines = [];
     for (let k = 0; k < h1 - h0; k += 1) lines.push(h('div', { class: 'wf-hline', style: { top: `${k * ROW}px` }, 'aria-hidden': 'true' }));
@@ -126,12 +142,15 @@ function grid(data, ctx) {
       const top = (hourOf(x.s, d) - h0) * ROW + 2;
       const ht = Math.max(18, ((x.e - x.s) / 3600000) * ROW - 4);
       const past = x.e <= now.getTime();
-      const time = `${c.label} · ${fmt(new Date(Date.parse(x.b.starts_at)))}–${fmt(new Date(Date.parse(x.b.ends_at)))}`;
+      const time = withLabel(c, span(x.b));
+      const short = ht < SHORT;
       return h('div', {
-        class: ['wf-ev', past && 'wf-past'],
+        class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short'],
         title: `${x.b.title}\n${time}`,
         style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color) },
-      }, h('span', { class: 'wf-ev-title', text: x.b.title }), h('span', { class: 'wf-ev-time' }, h('span', { class: 'wf-dot', style: { background: c.color }, 'aria-hidden': 'true' }), time));
+      }, short
+        ? h('span', { class: 'wf-ev-title' }, h('span', { class: 'wf-ev-start', text: fmt(new Date(Date.parse(x.b.starts_at))) }), x.b.title)
+        : [h('span', { class: 'wf-ev-title', text: x.b.title }), h('span', { class: 'wf-ev-time' }, h('span', { class: 'wf-dot', style: { background: c.color }, 'aria-hidden': 'true' }), time)]);
     });
     const nowH = hourOf(now.getTime(), d);
     const line = +d === +today && nowH >= h0 && nowH <= h1
@@ -142,6 +161,7 @@ function grid(data, ctx) {
   return h('section', { class: 'wf-week wf-surface', 'aria-label': days > 1 ? '週の予定' : '日の予定' },
     toolbar(ctx, from, days),
     head,
+    allDayRow,
     h('div', { class: 'wf-grid-scroll', data: { scroll: 'cal' } },
       h('div', { class: 'wf-grid wf-grid-body', style: { gridTemplateColumns: columns } }, h('div', { class: 'wf-hours' }, ...hours), ...cols)));
 }
@@ -151,7 +171,9 @@ function todayCard(data, ctx) {
   const today = dayStart(now);
   const colors = data.today.profiles;
   const evs = dayEvents(data.today.bookings, today);
-  const rows = [];
+  const rows = data.today.bookings.filter((b) => coversDay(b, today)).map((b) => h('div', { class: 'wf-today-row' },
+    h('span', { class: 'wf-today-start', text: '終日' }),
+    h('span', { class: 'wf-today-text' }, h('span', { class: 'wf-today-title', text: b.title }))));
   let marked = false;
   const marker = () => h('div', { class: 'wf-today-now', role: 'separator', 'aria-label': '現在の時刻' }, h('b', { text: fmt(now) }), h('i'), h('u'));
   for (const x of evs) {
@@ -166,7 +188,7 @@ function todayCard(data, ctx) {
     const c = category(x.b, colors);
     rows.push(h('div', { class: ['wf-today-row', past && 'wf-past', cur && 'wf-current'] },
       h('span', { class: 'wf-today-start', text: fmt(new Date(s)) }),
-      h('span', { class: 'wf-today-text' }, h('span', { class: 'wf-today-title', text: x.b.title }), h('span', { class: 'wf-today-sub', text: `${c.label} · ${fmt(new Date(s))}〜${fmt(new Date(e))}` }))));
+      h('span', { class: 'wf-today-text' }, h('span', { class: 'wf-today-title', text: x.b.title }), h('span', { class: 'wf-today-sub', text: withLabel(c, `${fmt(new Date(s))}〜${fmt(new Date(e))}`) }))));
     if (cur && !marked) {
       rows.push(marker());
       marked = true;
@@ -174,20 +196,12 @@ function todayCard(data, ctx) {
   }
   return h('section', { class: 'wf-today-card wf-surface' },
     h('div', { class: 'wf-today-head' }, h('h2', { text: '今日の予定' }), h('span', { class: 'wf-muted', text: mdw(today) })),
-    evs.length ? rows : h('div', { class: 'wf-empty', text: '今日の予定はありません' }));
-}
-
-function legend(data) {
-  const colors = { ...data.today.profiles, ...data.shown.profiles };
-  const items = Object.keys(colors).sort().map((name) => [name, profileColor(name, colors)]);
-  items.push([KIND_LABEL.fixed, FIXED], [KIND_LABEL.habit, HABIT]);
-  return h('section', { class: 'wf-legend wf-surface' }, h('h2', { text: '色の見方' }),
-    ...items.map(([label, color]) => h('span', { class: 'wf-legend-item' }, h('span', { class: 'wf-legend-dot', style: { background: tint(color), border: `1px solid ${color}` }, 'aria-hidden': 'true' }), label)));
+    rows.length ? rows : h('div', { class: 'wf-empty', text: '今日の予定はありません' }));
 }
 
 function render(data, ctx) {
   return h('div', { class: 'wf-page-cal' }, ctx.head('カレンダー'), ctx.banner(),
-    h('div', { class: 'wf-cal-body' }, grid(data, ctx), h('aside', { class: 'wf-aside' }, todayCard(data, ctx), legend(data))));
+    h('div', { class: 'wf-cal-body' }, grid(data, ctx), h('aside', { class: 'wf-aside' }, todayCard(data, ctx))));
 }
 
 function skeleton(ctx) {

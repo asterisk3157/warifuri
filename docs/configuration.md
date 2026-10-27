@@ -62,6 +62,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_REDIRECT_HOSTS` | ログインのあとに戻してよい https の先。claude.ai と claude.com に足す。カンマ区切り | なし |  |  | serve |
 | `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、タスク確認のフックが読む | なし | `--url` |  | connect、hook |
 | `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、タスク確認のフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
+| `WARIFURI_SERVER_DEVICES` | サーバーの機械で動くほかのプログラムのデバイスの名前(カンマ区切り)。Web 画面のデバイスの一覧に出さない。秘書のデバイスは書かなくても出ない | なし |  |  | serve |
 | `WARIFURI_GATE` | タスク確認。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
 | `WARIFURI_CALENDAR_CLAUDE` | この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_CALENDAR_CODEX` | この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |

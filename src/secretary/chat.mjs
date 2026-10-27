@@ -488,8 +488,16 @@ export function createChat(ledger, cfg, ctx = {}) {
     return list.filter((m) => !(m.role === 'secretary' && ['text', 'ask'].includes(m.kind)));
   }
   // Rows that call for a turn: the person's words and answers, a trigger, a digest, a request.
-  const calls = (m) => m.role === 'user' || m.kind === 'trigger' || m.kind === 'digest' || isRequest(m);
-  const waiting = (thread) => unseen(thread).filter((m) => m.role === 'user' || m.kind === 'trigger' || isRequest(m)).length;
+  // While a question of the thread is still open, its answers wait: the secretary takes them
+  // all together once none is left (any kick, the clock's included, finds them then).
+  const callsIn = (thread) => {
+    const held = Boolean(ledger.openAsk(thread.id));
+    return (m) => (m.role === 'user' && !(held && m.kind === 'answer')) || m.kind === 'trigger' || m.kind === 'digest' || isRequest(m);
+  };
+  const waiting = (thread) => {
+    const calls = callsIn(thread);
+    return unseen(thread).filter((m) => m.kind !== 'digest' && calls(m)).length;
+  };
 
   async function loop(threadId) {
     for (;;) {
@@ -497,7 +505,7 @@ export function createChat(ledger, cfg, ctx = {}) {
       const thread = ledger.getThread(threadId);
       if (!thread || thread.runner !== 'resume') return;
       const feed = unseen(thread);
-      if (!feed.some(calls)) return;
+      if (!feed.some(callsIn(thread))) return;
       await turn(thread, feed);
     }
   }

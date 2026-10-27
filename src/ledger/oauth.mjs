@@ -262,6 +262,17 @@ export function oauthStore({ db, one, all, transaction, record, now }) {
       const scopes = JSON.parse(row.scopes);
       const tokens = issuePair({ clientId, device: row.device, family, scopes, familyEnd: nowMs() + FAMILY_MS });
       record({ ...MACHINE, device: row.device }, 'oauth', clientId, 'issue', { device: row.device, family, grant: 'authorization_code' });
+      // Logging in again from the same app on the same device registers a new client (Codex
+      // does so on every login), and the older one's tokens would stay live for weeks. They
+      // are the same app: the older logins of that name on this device end here.
+      const name = getClient(clientId)?.client_name;
+      if (typeof name === 'string' && name !== '') {
+        for (const other of all('SELECT client_id, metadata FROM oauth_clients WHERE client_id != ?', clientId)) {
+          if (JSON.parse(other.metadata).client_name !== name) continue;
+          const ended = db.prepare('UPDATE oauth_tokens SET revoked_at = ? WHERE client_id = ? AND device = ? AND revoked_at IS NULL').run(t, other.client_id, row.device).changes;
+          if (ended) record({ ...MACHINE, device: row.device }, 'oauth', other.client_id, 'replaced', { device: row.device, by: clientId, revoked: ended });
+        }
+      }
       return { tokens };
     });
   }
