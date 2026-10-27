@@ -180,9 +180,10 @@ function detailCard(b, ctx) {
   const e = new Date(Date.parse(b.ends_at));
   const allDay = +dayStart(s) === +s && +dayStart(e) === +e;
   const lastDay = addDays(e, -1);
+  const short = (d) => `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
   const when = allDay
-    ? `${mdw(s)}${+lastDay > +s ? ` – ${mdw(lastDay)}` : ''} 終日`
-    : `${mdw(s)} ${fmt(s)}〜${fmt(e)}`;
+    ? `${short(s)}${+lastDay > +s ? `–${short(lastDay)}` : ''} 終日`
+    : `${short(s)} ${fmt(s)}–${fmt(e)}`;
   const value = (v) => (v ? v : h('span', { class: 'wf-muted', text: '—' }));
   const rows = [
     ['題名', value(b.title)],

@@ -41,20 +41,20 @@ function profileButton(p, colors, ctx) {
   h('span', { class: 'wf-goal-meta', text: count(p) ? [p.people && `人 ${p.people}`, p.knowledge && `ナレッジ ${p.knowledge}`, p.inbox && `受信箱 ${p.inbox}`, p.files && `手順 ${p.files}`].filter(Boolean).join(' · ') : 'まだありません' }));
 }
 
-// One file of the profile, left out when it is empty.
+// One file of the profile; always shown, with まだありません when it is empty.
 function section(title, file) {
-  if (!file?.text?.trim()) return null;
+  const has = Boolean(file?.text?.trim());
   return h('section', { class: 'wf-know-sec' },
     h('div', { class: 'wf-group-head' }, h('h2', { text: title })),
-    notes(file.text),
-    file.truncated ? h('p', { class: 'wf-muted', text: '長いため、途中までを表示しています' }) : null);
+    has ? notes(file.text) : h('div', { class: 'wf-know-empty', text: 'まだありません' }),
+    has && file.truncated ? h('p', { class: 'wf-muted', text: '長いため、途中までを表示しています' }) : null);
 }
 
 function filesSection(one, file, ctx) {
   const names = [...(one.files.knowledge ?? []), ...(one.files.procedures ?? [])];
-  if (!names.length) return null;
   return h('section', { class: 'wf-know-sec' },
-    h('div', { class: 'wf-group-head' }, h('h2', { text: '手順' }), h('span', { class: 'wf-group-count', text: `${names.length}件` })),
+    h('div', { class: 'wf-group-head' }, h('h2', { text: '手順' }), names.length ? h('span', { class: 'wf-group-count', text: `${names.length}件` }) : null),
+    names.length ? null : h('div', { class: 'wf-know-empty', text: 'まだありません' }),
     ...names.map((n) => h('div', { class: 'wf-know-file' },
       h('button', { type: 'button', class: 'wf-know-name', 'aria-expanded': String(view.open === n), data: { key: `file-${n}` }, onclick: () => { view.open = view.open === n ? null : n; ctx.refresh(); }, text: n.replace(/^(knowledge|procedures)\//, '').replace(/\.md$/, '') }),
       view.open === n && file?.text ? h('div', { class: 'wf-md wf-know-body' }, renderMarkdown(h, file.text)) : null)));
@@ -69,8 +69,7 @@ function render(data, ctx) {
   }
   const left = h('section', { class: 'wf-goals', 'aria-label': 'プロフィール', data: { scroll: 'profiles' } },
     h('h2', { text: 'プロフィール' }), ...list.profiles.map((p) => profileButton(p, list.colors, ctx)));
-  const parts = one ? [section('人', one.people), section('ナレッジ', one.knowledge), section('受信箱', one.inbox), filesSection(one, file, ctx)].filter(Boolean) : [];
-  const right = parts.length ? parts : [h('div', { class: 'wf-empty', text: 'まだありません' })];
+  const right = one ? [section('人', one.people), section('ナレッジ', one.knowledge), section('受信箱', one.inbox), filesSection(one, file, ctx)] : [];
   return h('div', { class: 'wf-page-tasks' }, header, ctx.banner(),
     h('div', { class: 'wf-tasks-body' }, left, h('section', { class: 'wf-tasklist', 'aria-label': 'ナレッジ', data: { scroll: `know-${view.profile}` } }, ...right)));
 }
