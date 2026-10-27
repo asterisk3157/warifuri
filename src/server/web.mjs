@@ -31,7 +31,7 @@ import { LedgerError, SECRETARY_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
-import { profileDir } from '../knowledge/profiles.mjs';
+import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
 
@@ -42,7 +42,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ASSETS_DIR = path.join(HERE, '..', 'web');
 const PACKAGE = path.join(HERE, '..', '..', 'package.json');
 
-export const PAGES = ['calendar', 'tasks', 'server', 'secretary', 'settings'];
+export const PAGES = ['calendar', 'tasks', 'server', 'secretary', 'knowledge', 'settings'];
 export const LOGIN_MS = 15 * 60 * 1000;
 export const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 // The file in the data directory that keeps the Web screens' sessions across restarts.
@@ -440,6 +440,51 @@ export function createWeb({
       // For the badge on 秘書: what the secretary said or asked that the person has not seen.
       secretary_unread: ledger.secretaryUnread(),
     });
+  });
+
+  // ナレッジ: the profiles (those with a folder, and those named by places and goals), and for
+  // one profile its people, knowledge, inbox and the names in knowledge/ and procedures/, or
+  // one of those files with ?name=. It only reads; changes go through the agents' note.
+  const profileNames = () => {
+    const names = new Set();
+    if (home) {
+      try {
+        for (const d of fs.readdirSync(path.join(home, PROFILES_DIR), { withFileTypes: true })) if (d.isDirectory() && !d.name.startsWith('.')) names.add(profileName(d.name));
+      } catch {
+        // No profiles folder yet.
+      }
+    }
+    for (const p of ledger.listPlaces()) if (p.profile) names.add(p.profile);
+    return [...names].sort();
+  };
+  const lines = (f) => (f?.text ? f.text.split('\n').filter((l) => l.trim().startsWith('- ')).length : 0);
+  api.get('/knowledge', (req, res) => {
+    const profiles = profileNames().map((name) => {
+      let c = null;
+      try {
+        c = home ? readContext(home, name) : null;
+      } catch {
+        c = null;
+      }
+      return {
+        name, people: lines(c?.people), knowledge: lines(c?.knowledge), inbox: lines(c?.inbox),
+        files: (c?.files?.knowledge?.length ?? 0) + (c?.files?.procedures?.length ?? 0),
+      };
+    });
+    res.json({ now: nowIso(), profiles, colors: profileColors(home, profiles.map((p) => p.name)) });
+  });
+  api.get('/knowledge/:profile', (req, res) => {
+    if (!home) return res.status(404).json({ error: 'no profiles folder' });
+    const name = req.params.profile;
+    if (!profileNames().includes(name)) return res.status(404).json({ error: 'not found' });
+    try {
+      if (typeof req.query.name === 'string') return res.json(readContext(home, name, { name: req.query.name }));
+      const c = readContext(home, name);
+      return res.json({ profile: name, people: c.people, knowledge: c.knowledge, inbox: c.inbox, files: c.files, more: c.more });
+    } catch (err) {
+      if (err instanceof LedgerError) return res.status(404).json({ error: 'not found', problems: err.problems });
+      throw err;
+    }
   });
 
   api.get('/calendar', (req, res) => {

@@ -64,7 +64,7 @@ async function start(t, options = {}) {
     fs.rmSync(home, { recursive: true, force: true });
   });
   const secrets = [laptop.key, desk.key, ...Object.values(tokens).filter((v) => typeof v === 'string' && v.startsWith('wf'))];
-  return { base, server, ledger, secrets, ids: { goal: goal.id, a: a.id, b: b.id, c: c.id, loose: loose.id } };
+  return { base, server, ledger, home, secrets, ids: { goal: goal.id, a: a.id, b: b.id, c: c.id, loose: loose.id } };
 }
 
 const get = (base, p, headers = {}) => fetch(`${base}${p}`, { headers, redirect: 'manual' });
@@ -527,4 +527,24 @@ test('the badge on 秘書: what the secretary said since the person last saw the
   const res = await fetch(`${base}/web/api/secretary/read`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: '{}' });
   assert.deepEqual(await res.json(), { unread: 0 });
   assert.equal(await about(), 0);
+});
+
+test('ナレッジ: the profiles with their counts, one profile\'s files, and a file split out of them, read only', async (t) => {
+  const { base, home } = await start(t);
+  fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'knowledge.md'), '- 2026-10-27 「本人の言葉」 苗は朝に水をやる (laptop)\n');
+  fs.mkdirSync(path.join(home, 'profiles', 'hobby', 'procedures'));
+  fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'procedures', '植え替え.md'), '# 植え替え\n\n1. 鉢を用意する\n');
+  const list = await (await get(base, '/web/api/knowledge')).json();
+  assert.ok(list.profiles.some((p) => p.name === 'research'));
+  const hobby = list.profiles.find((p) => p.name === 'hobby');
+  assert.deepEqual([hobby.people, hobby.knowledge, hobby.inbox, hobby.files], [0, 1, 0, 1]);
+  assert.equal(list.colors.hobby, '#123abc');
+  const one = await (await get(base, '/web/api/knowledge/hobby')).json();
+  assert.equal(one.profile, 'hobby');
+  assert.match(one.knowledge.text, /苗は朝に水をやる/);
+  assert.deepEqual(one.files.procedures, ['procedures/植え替え.md']);
+  const file = await (await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('procedures/植え替え.md')}`)).json();
+  assert.match(file.text, /鉢を用意する/);
+  assert.equal((await get(base, '/web/api/knowledge/nobody')).status, 404);
+  assert.equal((await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('../profile.yaml')}`)).status, 404);
 });
