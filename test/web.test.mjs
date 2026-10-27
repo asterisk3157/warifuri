@@ -196,7 +196,7 @@ test('秘書: the conversation only, oldest first, with questions; reports, prop
   assert.deepEqual(out.secretary, { on: false, replying: false });
   assert.deepEqual(out.items.map((x) => [x.type, x.role ?? x.state]), [['message', 'secretary'], ['ask', 'open']]);
   const [msg, ask] = out.items;
-  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'role', 'scheduled', 'steps', 'type']);
+  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
   assert.equal(msg.body, '<b>おはようございます</b>', 'returned as the text it is; the page builds the DOM');
   assert.deepEqual([msg.steps, msg.options, msg.scheduled], [[{ kind: 'read', label: '予定を読みました' }], ['置いて'], 'morning']);
   assert.deepEqual(ask, {

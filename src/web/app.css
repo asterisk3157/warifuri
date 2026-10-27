@@ -529,3 +529,18 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-know-notes li:first-child { border-top: none; }
 .wf-know-text { font-size: 15px; overflow-wrap: anywhere; }
 .wf-know-meta { font-size: 13px; color: var(--sub); }
+.wf-req { align-self: stretch; max-width: 620px; margin: 0 auto; width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-left: 3px solid var(--pastel); border-radius: 10px; background: #fbfcfe; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.wf-req-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--sub); }
+.wf-req-head b { color: var(--ink); font-weight: 600; }
+.wf-req-head .wf-time { margin-left: auto; }
+.wf-req-text { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wf-req-text.wf-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wf-req-conds { font-size: 13px; color: var(--sub); }
+.wf-req-more { align-self: flex-start; background: none; border: none; padding: 0; font: inherit; font-size: 13px; color: var(--accent); cursor: pointer; }
+.wf-ev { font: inherit; text-align: left; cursor: pointer; border: none; }
+.wf-ev-picked { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.wf-ev-detail { gap: 12px; }
+.wf-ev-detail .wf-today-head h2 { overflow-wrap: anywhere; }
+.wf-detail-chip { align-self: flex-start; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 2px 8px; }
+.wf-detail-row { display: grid; grid-template-columns: 88px 1fr; gap: 10px; font-size: 15px; overflow-wrap: anywhere; }
