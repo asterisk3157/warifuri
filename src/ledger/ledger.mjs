@@ -1419,11 +1419,20 @@ export function openLedger(path, options = {}) {
     const out = {};
     for (const t of all("SELECT id, parent_id, read_until FROM threads WHERE kind = 'sub'")) {
       const count = one(`SELECT count(*) AS n FROM messages WHERE thread_id = ? AND ${SPOKEN}`, t.id).n;
-      const from = t.read_until ? one('SELECT rowid AS n FROM messages WHERE id = ?', t.read_until)?.n ?? 0 : 0;
-      const unread = one(`SELECT count(*) AS n FROM messages WHERE thread_id = ? AND role = 'secretary' AND kind IN ('text','ask') AND rowid > ?`, t.id, from).n;
-      out[t.parent_id] = { id: t.id, count, unread };
+      out[t.parent_id] = { id: t.id, count, unread: unreadIn(t) };
     }
     return out;
+  }
+
+  // The secretary's messages and questions after the last message the person saw in a thread.
+  function unreadIn(t) {
+    const from = t.read_until ? one('SELECT rowid AS n FROM messages WHERE id = ?', t.read_until)?.n ?? 0 : 0;
+    return one(`SELECT count(*) AS n FROM messages WHERE thread_id = ? AND role = 'secretary' AND kind IN ('text','ask') AND rowid > ?`, t.id, from).n;
+  }
+  // How many of those wait in the secretary's conversation (0 when there is none yet).
+  function secretaryUnread() {
+    const t = one("SELECT id, read_until FROM threads WHERE kind = 'secretary'");
+    return t ? unreadIn(t) : 0;
   }
 
   // The person has seen the thread up to its last message.
@@ -2130,6 +2139,7 @@ export function openLedger(path, options = {}) {
     placeFor,
     listPlaces,
     placeActivity,
+    secretaryUnread,
     setAutonomy,
     getAutonomy,
     listAutonomy,

@@ -563,6 +563,11 @@ const load = async (api) => {
 
 function render(data, ctx) {
   ctxRef = ctx;
+  // The conversation is on the screen: what the secretary said is seen (the badge on 秘書 goes).
+  if (ctx.about?.secretary_unread) {
+    ctx.about.secretary_unread = 0;
+    ctx.api('/secretary/read', { method: 'POST', body: {} }).catch(() => {});
+  }
   connect();
   const { main } = data;
   const thread = view.thread ? data.thread : null;
