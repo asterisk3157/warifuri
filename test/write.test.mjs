@@ -70,7 +70,9 @@ test('create_goal, create_task, update, link and unlink write as the calling dev
   assert.equal(goal.state, 'ready');
   assert.equal(goal.human_led, true);
   const a = await task(laptop, 'Write docs', { goal_id: goal.id, load: 'light', body: 'background' });
-  const b = await task(laptop, 'Release', { goal_id: goal.id });
+  // Under a goal with an open task, the order is asked for: after, or after: [] on purpose.
+  await refused(laptop, 'create_task', { title: 'Release', mode: 'ai_worker', goal_id: goal.id }, /開いているタスクが 1 件.*after: \[\]/s);
+  const b = await task(laptop, 'Release', { goal_id: goal.id, after: [] });
   assert.equal(a.goal_id, goal.id);
   const rec = ledger.records(a.id)[0];
   assert.deepEqual([rec.action, rec.actor, rec.device], ['create', 'device-key', 'laptop']);

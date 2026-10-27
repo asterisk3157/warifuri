@@ -478,7 +478,7 @@ export function createWeb({
     return {
       id: t.id, title: t.title, state: t.state, mode: t.mode, due: t.due, due_provisional: t.due_provisional,
       next: t.next, waiting_on: t.waiting_on, waiting_for: t.waiting_for, defer_until: t.defer_until,
-      closed_at: t.closed_at, goal_id: t.goal_id,
+      closed_at: t.closed_at, goal_id: t.goal_id, body: t.body ?? null, done_when: t.done_when ?? null, result: t.result ?? null,
       hold: t.hold ? { device: t.hold.device, place_id: t.hold.place_id, place_name: t.hold.place_name, since: t.hold.since } : null,
       after: prev.filter((id) => inList.has(id)),
       open_before: open.map((x) => ({ id: x.id, title: x.title })),

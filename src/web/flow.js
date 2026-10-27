@@ -8,13 +8,15 @@
 // one) cannot hang the layout: a task met again while its column is being worked out counts
 // as column 0.
 //
-// tasks: [{ id, after: [ids before it, in this list] }]. Returns { nodes: { id: { x, y } },
+// tasks: [{ id, after: [ids before it, in this list], small }] (a small task, such as a done one,
+// gets a lower box). Returns { nodes: { id: { x, y, h } },
 // edges: [{ from, to, d, tipX, tipY }], width, height } with d an SVG path ending at the tip.
 
-export const SIZES = { NW: 150, NH: 84, DH: 18, GX: 32, GY: 12 };
+export const SIZES = { NW: 150, NH: 84, SH: 40, DH: 18, GX: 32, GY: 12 };
 
 export function layoutFlow(tasks, sizes = SIZES) {
   const { NW, NH, DH, GX, GY } = sizes;
+  const SH = sizes.SH ?? NH;
   const by = new Map(tasks.map((t) => [t.id, t]));
   const level = new Map();
   const visiting = new Set();
@@ -37,7 +39,7 @@ export function layoutFlow(tasks, sizes = SIZES) {
     (cols[it.lvl] ??= []).push(it);
     return it;
   };
-  for (const t of tasks) put({ id: t.id, lvl: level.get(t.id), real: true, prev: [], next: [] });
+  for (const t of tasks) put({ id: t.id, lvl: level.get(t.id), real: true, small: Boolean(t.small), prev: [], next: [] });
   const edges = [];
   for (const t of tasks) {
     for (const a of new Set(t.after ?? [])) {
@@ -73,8 +75,8 @@ export function layoutFlow(tasks, sizes = SIZES) {
   cols.forEach((col, k) => {
     let y = 0;
     for (const it of col) {
-      const ih = it.real ? NH : DH;
-      at.set(it.id, { x: k * (NW + GX), y, cy: y + ih / 2 });
+      const ih = !it.real ? DH : it.small ? SH : NH;
+      at.set(it.id, { x: k * (NW + GX), y, h: ih, cy: y + ih / 2 });
       y += ih + GY;
     }
     height = Math.max(height, y - GY);
@@ -102,8 +104,8 @@ export function layoutFlow(tasks, sizes = SIZES) {
   });
 
   const nodes = {};
-  for (const t of tasks) nodes[t.id] = { x: at.get(t.id).x, y: at.get(t.id).y };
-  return { nodes, edges: outEdges, width: Math.max(0, cols.length * (NW + GX) - GX), height: Math.max(height, tasks.length ? NH : 0) };
+  for (const t of tasks) nodes[t.id] = { x: at.get(t.id).x, y: at.get(t.id).y, h: at.get(t.id).h };
+  return { nodes, edges: outEdges, width: Math.max(0, cols.length * (NW + GX) - GX), height: Math.max(height, tasks.length ? Math.min(...Object.values(nodes).map((n) => n.h)) : 0) };
 }
 
 // The arrow head at a tip.
