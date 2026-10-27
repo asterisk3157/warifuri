@@ -132,3 +132,18 @@ test('stale: held without change, ready untouched, waiting without change', (t) 
   assert.throws(() => L.stale({ heldDays: -1 }), LedgerError);
   assert.throws(() => L.stale({ now: 'not a date' }), LedgerError);
 });
+
+test('stale: a put-off task whose review day has come, and an open task past its due date', (t) => {
+  const L = fresh(t, '2026-10-01T00:00:00Z');
+  const later = L.createTask({ title: 'Later', mode: 'ai_worker', state: 'deferred', defer_until: '2026-10-10' }, ACTOR);
+  const late = L.createTask({ title: 'Late', mode: 'ai_worker', due: '2026-10-05' }, ACTOR);
+  L.createTask({ title: 'Provisional', mode: 'ai_worker', due: '2026-10-05', due_provisional: true }, ACTOR);
+  L.createTask({ title: 'Closed', mode: 'ai_worker', due: '2026-10-05', state: 'done', result: 'ok' }, ACTOR);
+  assert.deepEqual([L.stale({ now: '2026-10-05T12:00:00' }).review, L.stale({ now: '2026-10-05T12:00:00' }).overdue], [[], []]);
+  const s = L.stale({ now: '2026-10-12T12:00:00' });
+  assert.deepEqual(s.review.map((x) => [x.id, x.days]), [[later.id, 2]]);
+  assert.match(s.review[0].reason, /見直す日\(2026-10-10\)を2日過ぎています/);
+  assert.deepEqual(s.overdue.map((x) => [x.id, x.days]), [[late.id, 7]]);
+  assert.match(s.overdue[0].reason, /期日\(2026-10-05\)を7日過ぎています/);
+  assert.match(L.stale({ now: '2026-10-10T08:00:00' }).review[0].reason, /今日が見直す日です/);
+});

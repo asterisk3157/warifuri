@@ -180,7 +180,9 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     {
       description:
         'Candidates for tidying, with reasons: tasks held with no change for held_days (default 3), ready and ' +
-        'untouched for ready_days (30), waiting with no change for waiting_days (14). It changes nothing.',
+        'untouched for ready_days (30), waiting with no change for waiting_days (14), review: deferred tasks whose ' +
+        'defer_until has come (to resume, put off again or drop), and overdue: open tasks past a due date the person ' +
+        'set (to follow up). It changes nothing.',
       inputSchema: {
         held_days: z.number().min(0).optional(),
         ready_days: z.number().min(0).optional(),
@@ -403,7 +405,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'create_task',
     'Create a task, under a goal or with no goal. Search first, so the same task is not made twice. ' +
       'A task that takes a person\'s time needs done_when. place_id: the place it belongs to (board shows the one you are in). ' +
-      'after: the ids of the tasks that come before it; under a goal, give them when you create it, so the goal has its order.',
+      'after: the ids of the tasks that come before it. Under a goal that already has open tasks, after is required: ' +
+      'decide the order when you create the task (after: [] says it runs alongside them on purpose). When you make a goal ' +
+      'and its tasks, create them in the order they will be done, each with after set to the one before.',
     {
       title: z.string(),
       body: z.string().optional(),
@@ -418,7 +422,19 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       delegated: z.boolean().optional(),
       after: z.array(z.string().min(1)).optional(),
     },
-    async (args) => result(ledger.createTask(given(args), writer)),
+    async (args) => {
+      // 原則3: under a goal that already has open tasks, the order is decided when the task is
+      // made. after: [] says on purpose that it runs alongside them.
+      if (args.goal_id && args.after === undefined) {
+        const open = (ledger.get(args.goal_id)?.tasks ?? []).filter((t) => !['done', 'discarded'].includes(t.state));
+        if (open.length) {
+          return refusal([
+            `ゴールには開いているタスクが ${open.length} 件あります(${open.slice(0, 5).map((t) => `${t.id}「${t.title}」`).join('、')})。順序を決めて、前に終わらせるタスクの id を after に渡します。並べて進めてよいときは after: [] を渡します(原則3)`,
+          ]);
+        }
+      }
+      return result(ledger.createTask(given(args), writer));
+    },
   );
 
   tool(

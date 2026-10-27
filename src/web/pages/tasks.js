@@ -44,7 +44,7 @@ function goalButton(g, today, colors, ctx) {
 
 function flowchart(g, ctx) {
   const tasks = g.tasks;
-  const lay = layoutFlow(tasks.map((t) => ({ id: t.id, after: t.after })));
+  const lay = layoutFlow(tasks.map((t) => ({ id: t.id, after: t.after, small: t.state === 'done' })));
   const hl = tasks.some((t) => t.id === view.hl) ? view.hl : null;
   const near = new Set();
   if (hl) {
@@ -66,15 +66,16 @@ function flowchart(g, ctx) {
     s('path', { d: seg.hlLines || 'M0 0', fill: 'none', stroke: '#8cc4ea', 'stroke-width': 2.5 }),
     s('path', { d: seg.hlHeads || 'M0 0', fill: '#8cc4ea' }));
   const nodes = tasks.map((t) => {
-    const { x, y } = lay.nodes[t.id];
+    const { x, y, h: nh } = lay.nodes[t.id];
     const me = t.id === hl;
+    const small = t.state === 'done';
     const dim = hl ? !near.has(t.id) : t.state === 'done';
     return h('button', {
-      type: 'button', class: ['wf-node', dim && 'wf-dim'], 'aria-pressed': String(me), data: { key: `node-${t.id}` },
+      type: 'button', class: ['wf-node', dim && 'wf-dim', small && 'wf-node-small'], 'aria-pressed': String(me), data: { key: `node-${t.id}` },
       'aria-label': `${t.title}(${STATE[shown(t)]})`,
-      style: { left: `${x}px`, top: `${y}px`, width: `${SIZES.NW}px`, height: `${SIZES.NH}px` },
+      style: { left: `${x}px`, top: `${y}px`, width: `${SIZES.NW}px`, height: `${nh}px` },
       onclick: () => { view.hl = me ? null : t.id; ctx.rerender(); },
-    }, chip(shown(t)), h('span', { class: 'wf-node-title', text: t.title }));
+    }, small ? h('span', { class: 'wf-node-title' }, h('span', { class: 'wf-node-check', 'aria-hidden': 'true', text: '✓ ' }), t.title) : [chip(shown(t)), h('span', { class: 'wf-node-title', text: t.title })]);
   });
   return h('div', { class: 'wf-flowbox', data: { scroll: `flow-${g.id}` } }, h('div', { class: 'wf-flow', style: { width: `${lay.width}px`, height: `${lay.height}px` } }, svg, ...nodes));
 }
@@ -85,7 +86,11 @@ function taskRow(t, today) {
   const d = left(t, today);
   let note = null;
   if (t.state === 'waiting' && (t.waiting_on || t.waiting_for)) note = t.waiting_on && t.waiting_for ? `${t.waiting_on}の「${t.waiting_for}」を待っています` : `${t.waiting_on ?? t.waiting_for}を待っています`;
-  else if (t.state === 'deferred' && t.defer_until) note = `${dueDay(t.defer_until) ? md(dueDay(t.defer_until)) : t.defer_until} に見直す`;
+  else if (t.state === 'deferred' && t.defer_until) {
+    const r = dueDay(t.defer_until);
+    const when = r ? md(r) : t.defer_until;
+    note = r && daysFrom(today, r) <= 0 ? `見直す日(${when})が来ています` : `${when} に見直す`;
+  }
   else if (t.next && !closed) note = `次の一手: ${t.next}`;
   const before = t.open_before.length ? `${t.open_before.map((x) => `「${x.title}」`).join('')}の後` : null;
   return h('div', { class: ['wf-task', closed && 'wf-closed', view.hl === t.id && 'wf-hl'] },
@@ -98,6 +103,17 @@ function taskRow(t, today) {
     h('span', { class: 'wf-task-due' },
       h('span', { class: 'wf-left', style: { color: closed || d === null ? '#8e8e93' : dueColor(d) }, text: closed ? '完了' : leftText(d) }),
       h('small', { text: t.due ? `期限 ${md(dueDay(t.due))}${prov(t)}` : '期限なし' })));
+}
+
+// The task picked in the flowchart, in full: who, state, title, before it, note, due, what it
+// is (body), when it is done (done_when), and the result once closed.
+function detail(t, today) {
+  if (!t) return h('div', { class: 'wf-detail wf-detail-empty', text: '図のタスクを押すと、ここにくわしく出ます' });
+  return h('div', { class: 'wf-detail' },
+    taskRow(t, today),
+    t.done_when ? h('p', { class: 'wf-detail-line' }, h('b', { text: '完了の条件' }), t.done_when) : null,
+    t.result ? h('p', { class: 'wf-detail-line' }, h('b', { text: '成果' }), t.result) : null,
+    t.body ? h('p', { class: 'wf-detail-body', text: t.body }) : null);
 }
 
 function group(title, profile, tasks, today, colors, { showMeta }) {
@@ -143,7 +159,7 @@ function render(data, ctx) {
         found.due ? h('span', { class: 'wf-sel-due', style: { color: dueColor(d) }, text: `${md(dueDay(found.due))}${prov(found)} · ${leftText(d)}` }) : null),
       found.outcome ? h('span', { class: 'wf-outcome', text: `あるべき姿: ${found.outcome}` }) : null,
       found.tasks.length ? flowchart(found, ctx) : h('span', { class: 'wf-muted', text: 'まだタスクがありません' })));
-    right.push(group('タスク', null, found.tasks, today, colors, { showMeta: false }));
+    right.push(detail(found.tasks.find((t) => t.id === view.hl), today));
   } else if (view.goal === 'none') {
     right.push(group('ゴールなし', null, data.unassigned, today, colors, { showMeta: false }));
   } else {
