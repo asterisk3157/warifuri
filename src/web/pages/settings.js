@@ -196,11 +196,11 @@ function placesSection(st, ctx) {
     ? h('button', {
       type: 'button', class: 'wf-btn wf-idle-toggle', data: { key: 'idle' },
       onclick: () => { view.idle = !view.idle; ctx.refresh(); },
-      text: view.idle ? `使っていない作業フォルダ ${idle.length}件を隠す` : `${IDLE_DAYS}日以上使っていない作業フォルダ ${idle.length}件を表示`,
+      text: view.idle ? '最近使っていない作業フォルダを隠す' : `最近使っていない作業フォルダを表示 · ${idle.length}件`,
     })
     : null;
   return [
-    table('作業フォルダ', view.idle ? `${st.places.length}件` : `${shown.length}件(ほかに使っていないもの ${idle.length}件)`, 'places', ['名前', 'プロフィール', '最終アクティブ', 'パス'], rows, 'まだ作業フォルダがありません。エージェントが place で登録すると、ここに出ます'),
+    table('作業フォルダ', `${shown.length}件`, 'places', ['名前', 'プロフィール', '最終アクティブ', 'パス'], rows, 'まだ作業フォルダがありません。エージェントが place で登録すると、ここに出ます'),
     toggle,
   ];
 }

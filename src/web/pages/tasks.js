@@ -89,7 +89,7 @@ function taskRow(t, today) {
   else if (t.state === 'deferred' && t.defer_until) {
     const r = dueDay(t.defer_until);
     const when = r ? md(r) : t.defer_until;
-    note = r && daysFrom(today, r) <= 0 ? `見直す日(${when})が来ています` : `${when} に見直す`;
+    note = r && daysFrom(today, r) <= 0 ? `${when} に見直す日が来ました` : `${when} に見直す`;
   }
   else if (t.next && !closed) note = `次の一手: ${t.next}`;
   const before = t.open_before.length ? `${t.open_before.map((x) => `「${x.title}」`).join('')}の後` : null;
@@ -108,7 +108,7 @@ function taskRow(t, today) {
 // The task picked in the flowchart, in full: who, state, title, before it, note, due, what it
 // is (body), when it is done (done_when), and the result once closed.
 function detail(t, today) {
-  if (!t) return h('div', { class: 'wf-detail wf-detail-empty', text: '図のタスクを押すと、ここにくわしく出ます' });
+  if (!t) return h('div', { class: 'wf-detail wf-detail-empty', text: '図のタスクを選ぶと、詳細が表示されます' });
   return h('div', { class: 'wf-detail' },
     taskRow(t, today),
     t.done_when ? h('p', { class: 'wf-detail-line' }, h('b', { text: '完了の条件' }), t.done_when) : null,
@@ -143,7 +143,7 @@ function overview(goals, openLoose, today, colors, pick) {
   return h('div', {},
     h('div', { class: 'wf-group-head' }, h('h2', { text: 'すべてのゴール' }), h('span', { class: 'wf-group-count', text: `${kept.length}件` })),
     h('div', { class: 'wf-goal-cards' }, ...kept.map(card),
-      openLoose ? h('button', { type: 'button', class: 'wf-goal-card wf-goal-none', data: { key: 'card-none' }, onclick: pick('none'), text: `ゴールなしのタスク · ${openLoose}件` }) : null),
+      openLoose ? h('button', { type: 'button', class: 'wf-goal-card wf-goal-none', data: { key: 'card-none' }, onclick: pick('none'), text: `ゴールのないタスク · ${openLoose}件` }) : null),
     kept.length ? null : h('div', { class: 'wf-empty', text: `「${FILTERS[view.filter]}」に当てはまるゴールはありません` }));
 }
 

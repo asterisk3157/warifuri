@@ -518,10 +518,14 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
   .wf-aside { max-width: none; height: auto; }
   .wf-goals { flex: none; min-width: 0; }
 }
-.wf-know-note { margin: 0 0 6px; font-size: 14px; }
 .wf-know-sec { padding: 14px 0; border-bottom: 1px solid var(--hair); display: flex; flex-direction: column; gap: 10px; }
 .wf-know-sec:last-child { border-bottom: none; }
 .wf-know-sec .wf-group-head { align-items: baseline; gap: 10px; }
 .wf-know-body { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
 .wf-know-file { display: flex; flex-direction: column; gap: 8px; }
 .wf-know-name { align-self: flex-start; text-align: left; font: inherit; font-size: 15px; font-weight: 600; color: var(--accent); background: none; border: none; padding: 2px 0; cursor: pointer; }
+.wf-know-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wf-know-notes li { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-top: 1px solid var(--hair); }
+.wf-know-notes li:first-child { border-top: none; }
+.wf-know-text { font-size: 15px; overflow-wrap: anywhere; }
+.wf-know-meta { font-size: 13px; color: var(--sub); }
