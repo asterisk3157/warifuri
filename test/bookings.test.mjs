@@ -78,7 +78,7 @@ test('schema: a version 3 file gains bookings and devices.last_seen_at, keeps it
   assert.throws(() => ins.run('2026-10-03T00:00:00.000Z', 'human', null, 'booking', 'b1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(SCHEMA_VERSION, 10);
   const L = openLedger(file, { now: handClock().now });
   assert.deepEqual(L.listDevices().map((d) => [d.name, d.last_seen_at]), [['laptop', null]]);
   assert.deepEqual(L.records('hobby').map((r) => [r.id, r.entity]), [[2, 'knowledge']]);
@@ -531,4 +531,18 @@ test('a device key on /mcp and /api marks the device as seen, once a minute', as
   clock.advance(120_000);
   assert.equal((await fetch(`${base}/api/held?dir=/tmp`, { headers: { Authorization: 'Bearer wf_wrong' } })).status, 401);
   assert.equal(seen(), '2026-10-25T03:01:00.000Z');
+});
+
+test('a booking keeps where it is and who made it, as an outside event has them', (t) => {
+  const { L } = fresh(t);
+  const { booking: b } = L.book({
+    kind: 'fixed', title: '朝会', starts_at: '2026-10-30T09:00:00+09:00', ends_at: '2026-10-30T10:30:00+09:00',
+    location: '松屋', note: 'Wi-Fi で作業できる', organizer: 'alex@example.com', source: 'google-calendar', external_id: 'ev1',
+  }, ACTOR);
+  assert.deepEqual([b.location, b.note, b.organizer], ['松屋', 'Wi-Fi で作業できる', 'alex@example.com']);
+  const { booking: moved } = L.book({ source: 'google-calendar', external_id: 'ev1', kind: 'fixed', title: '朝会', starts_at: '2026-10-30T09:00:00+09:00', ends_at: '2026-10-30T10:30:00+09:00', location: '松屋 野田店' }, ACTOR);
+  assert.equal(moved.id, b.id);
+  assert.equal(moved.location, '松屋 野田店');
+  assert.equal(L.schedule({ from: '2026-10-30T00:00:00+09:00', to: '2026-10-31T00:00:00+09:00' }).bookings[0].organizer, 'alex@example.com');
+  assert.throws(() => L.book({ id: b.id, location: 3 }, ACTOR), /場所\(location\)は文字列です/);
 });

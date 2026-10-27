@@ -49,7 +49,7 @@ test('schema: a version 7 file gains threads and messages and keeps its records'
   assert.throws(() => ins.run('2026-10-02T00:00:00.000Z', 'web', null, 'message', 'm1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(SCHEMA_VERSION, 10);
   const L = openLedger(file, { now: ticking() });
   assert.deepEqual(L.records('r1').map((r) => [r.id, r.entity]), [[1, 'report']]);
   const thread = L.ensureThread('secretary', WEB);

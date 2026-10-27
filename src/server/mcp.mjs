@@ -608,7 +608,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'source (such as google-calendar) and external_id (the event id there) name the outside event the booking is: ' +
       'without id, a pair already in the ledger changes that booking instead of making a second one, so importing ' +
       'an event again is safe; with id, attaches the pair (for an event you just wrote there), unless another ' +
-      'booking has it. external_id needs source.',
+      'booking has it. external_id needs source. note: a note, such as an outside event\'s description; location: where it is; organizer: who made it (such as an email address).',
     {
       id: z.string().min(1).optional(),
       kind: z.enum(BOOKING_KINDS).optional(),
@@ -618,6 +618,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       starts_at: z.string().optional(),
       ends_at: z.string().optional(),
       note: clearable,
+      location: clearable,
+      organizer: clearable,
       source: clearable,
       external_id: clearable,
     },

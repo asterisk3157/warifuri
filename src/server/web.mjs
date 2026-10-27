@@ -499,8 +499,8 @@ export function createWeb({
     }
     if (Date.parse(out.to) - Date.parse(out.from) > MAX_RANGE_MS) return res.status(400).json({ error: 'bad range', problems: ['期間は42日までです'] });
     const bookings = out.bookings.map((b) => ({
-      id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note,
-      task: b.task, habit: b.habit, goal: b.goal, profile: b.profile, from_calendar: typeof b.source === 'string' && b.source.startsWith('google-calendar'),
+      id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note, location: b.location ?? null, organizer: b.organizer ?? null,
+      task: b.task, habit: b.habit, goal: b.goal, profile: b.profile,
     }));
     return res.json({ now: nowIso(), from: out.from, to: out.to, bookings, profiles: profileColors(home, bookings.map((b) => b.profile)) });
   });

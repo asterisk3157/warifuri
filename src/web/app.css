@@ -540,7 +540,11 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-ev { font: inherit; text-align: left; cursor: pointer; border: none; }
 .wf-ev-picked { outline: 2px solid var(--accent); outline-offset: 1px; }
 button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
-.wf-ev-detail { gap: 12px; }
-.wf-ev-detail .wf-today-head h2 { overflow-wrap: anywhere; }
-.wf-detail-chip { align-self: flex-start; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 2px 8px; }
-.wf-detail-row { display: grid; grid-template-columns: 88px 1fr; gap: 10px; font-size: 15px; overflow-wrap: anywhere; }
+.wf-ev-detail { gap: 10px; }
+.wf-detail-head { display: flex; align-items: flex-start; gap: 12px; }
+.wf-detail-head h2 { flex: 1; font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
+.wf-close { flex: none; width: 28px; height: 28px; border-radius: 999px; border: none; background: var(--hair); color: var(--sub); font-size: 18px; line-height: 28px; text-align: center; cursor: pointer; padding: 0; }
+.wf-close:hover { background: var(--line); color: var(--ink); }
+.wf-detail-when { margin: 0; font-size: 15px; color: var(--ink); }
+.wf-detail-row { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--hair); font-size: 15px; overflow-wrap: anywhere; }
+.wf-detail-label { font-size: 12px; color: var(--sub); }

@@ -391,6 +391,8 @@ export function checkBooking(row, ctx = {}) {
   if (row.kind === 'fixed' && isBlank(row.title)) p.push('固定の予定には題名(title)が要ります');
   if (!isText(row.title)) p.push('題名(title)は文字列です');
   if (!isText(row.note)) p.push('メモ(note)は文字列です');
+  if (!isText(row.location)) p.push('場所(location)は文字列です');
+  if (!isText(row.organizer)) p.push('作成者(organizer)は文字列です');
   if (!isText(row.source)) p.push('出どころ(source)は文字列です');
   if (!isText(row.external_id)) p.push('外の予定の id(external_id)は文字列です');
   else if (!isBlank(row.external_id) && isBlank(row.source)) {

@@ -171,27 +171,31 @@ function grid(data, ctx) {
       h('div', { class: 'wf-grid wf-grid-body', style: { gridTemplateColumns: columns } }, h('div', { class: 'wf-hours' }, ...hours), ...cols)));
 }
 
-// The booking picked in the grid, in full, where today's list is.
-function detailCard(b, colors, ctx) {
-  const c = category(b, colors);
+// The booking picked in the grid, in full, where today's list is: its title and when, then
+// what it is for (task, goal, habit, profile) and its note, only those it has.
+function detailCard(b, ctx) {
   const s = new Date(Date.parse(b.starts_at));
   const e = new Date(Date.parse(b.ends_at));
-  const allDay = coversDay(b, dayStart(s)) || (+dayStart(s) === +s && +dayStart(e) === +e);
-  const day = `${mdw(s)}${+dayStart(e) - +dayStart(s) > 86_400_000 ? ` – ${mdw(addDays(e, -1))}` : ''}`;
+  const allDay = +dayStart(s) === +s && +dayStart(e) === +e;
+  const lastDay = addDays(e, -1);
+  const when = allDay
+    ? `${mdw(s)}${+lastDay > +s ? ` – ${mdw(lastDay)}` : ''} 終日`
+    : `${mdw(s)} ${fmt(s)}〜${fmt(e)}`;
   const rows = [
-    ['日時', allDay ? `${day} 終日` : `${mdw(s)} ${fmt(s)}〜${fmt(e)}`],
     b.task ? ['タスク', b.task.title] : null,
     b.goal ? ['ゴール', b.goal.title] : null,
     b.habit ? ['習慣', b.habit.title] : null,
     b.profile ? ['プロフィール', b.profile] : null,
-    b.from_calendar ? ['カレンダー', 'Google カレンダーから取り込んだ予定'] : null,
+    b.location ? ['場所', b.location] : null,
     b.note ? ['メモ', b.note] : null,
+    b.organizer ? ['作成者', b.organizer] : null,
   ].filter(Boolean);
   return h('section', { class: 'wf-today-card wf-surface wf-ev-detail' },
-    h('div', { class: 'wf-today-head' }, h('h2', { text: b.title }),
-      h('button', { type: 'button', class: 'wf-btn', data: { key: 'detail-close' }, onclick: () => { view.sel = null; ctx.rerender(); }, text: '閉じる' })),
-    h('span', { class: 'wf-detail-chip', style: { background: tint(c.color) } }, c.label ?? '予定'),
-    ...rows.map(([k, v]) => h('div', { class: 'wf-detail-row' }, h('span', { class: 'wf-muted', text: k }), h('span', { text: v }))));
+    h('div', { class: 'wf-detail-head' },
+      h('h2', { text: b.title }),
+      h('button', { type: 'button', class: 'wf-close', 'aria-label': '閉じる', title: '閉じる', data: { key: 'detail-close' }, onclick: () => { view.sel = null; ctx.rerender(); }, text: '×' })),
+    h('p', { class: 'wf-detail-when', text: when }),
+    ...rows.map(([k, v]) => h('div', { class: 'wf-detail-row' }, h('span', { class: 'wf-detail-label', text: k }), h('span', { text: v }))));
 }
 
 function todayCard(data, ctx) {
@@ -231,7 +235,7 @@ const selected = (data) => (view.sel ? [...data.shown.bookings, ...data.today.bo
 
 function render(data, ctx) {
   return h('div', { class: 'wf-page-cal' }, ctx.head('カレンダー'), ctx.banner(),
-    h('div', { class: 'wf-cal-body' }, grid(data, ctx), h('aside', { class: 'wf-aside' }, selected(data) ? detailCard(selected(data), data.shown.profiles, ctx) : todayCard(data, ctx))));
+    h('div', { class: 'wf-cal-body' }, grid(data, ctx), h('aside', { class: 'wf-aside' }, selected(data) ? detailCard(selected(data), ctx) : todayCard(data, ctx))));
 }
 
 function skeleton(ctx) {

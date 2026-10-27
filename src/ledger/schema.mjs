@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -507,6 +507,13 @@ export const MIGRATIONS = [
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
   CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+
+  // 9 -> 10: a booking may say where it is and who made it (an outside event's location and
+  // organizer, such as an email address).
+  `
+  ALTER TABLE bookings ADD COLUMN location TEXT;
+  ALTER TABLE bookings ADD COLUMN organizer TEXT;
   `,
 ];
 
