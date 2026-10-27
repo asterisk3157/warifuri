@@ -319,7 +319,7 @@ function requestCard(m) {
   const open = view.openRequests?.has(m.id);
   const text = h('p', { class: ['wf-req-text', !open && 'wf-clamp'], text: r.text });
   return h('div', { class: 'wf-req' },
-    h('div', { class: 'wf-req-head' }, h('b', { text: 'エージェントからの依頼' }), r.from ? h('span', { text: r.from }) : null, h('small', { class: 'wf-time', text: hhmm(m.created_at) })),
+    h('div', { class: 'wf-req-head' }, h('b', { text: 'エージェントからの依頼' }), h('small', { class: 'wf-time', text: hhmm(m.created_at) })),
     text,
     conds.length ? h('div', { class: 'wf-req-conds', text: conds.join(' · ') }) : null,
     r.text.length > 120 ? h('button', {

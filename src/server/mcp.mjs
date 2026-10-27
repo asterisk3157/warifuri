@@ -638,7 +638,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'the secretary alone books, moves and removes bookings then (book and unbook refuse other devices). Do not ' +
       'pick the time yourself: give what it is for (task_id), how long (minutes), by when (by), and what is ' +
       'preferred (prefer, such as mornings); when the person already set the time, give starts_at and ends_at. ' +
-      'text says the rest in plain words. The request goes into the secretary\'s conversation, which the person ' +
+      'text says the rest in plain words the person can read too: no tool names (book, unbook, note), ids or field ' +
+      'names, since it is shown to the person as it is. The request goes into the secretary\'s conversation, which the person ' +
       `sees, and this waits up to wait_seconds (at most ${ASK_SECRETARY_WAIT_MAX}, the default) for the reply: ` +
       'status answered gives the secretary\'s reply to pass on to the person; status waiting means the request ' +
       'stays there and the secretary takes it when it can: tell the person it was asked and the answer will be ' +

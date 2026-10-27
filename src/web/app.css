@@ -529,7 +529,7 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-know-notes li:first-child { border-top: none; }
 .wf-know-text { font-size: 15px; overflow-wrap: anywhere; }
 .wf-know-meta { font-size: 13px; color: var(--sub); }
-.wf-req { align-self: stretch; max-width: 620px; margin: 0 auto; width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-left: 3px solid var(--pastel); border-radius: 10px; background: #fbfcfe; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.wf-req { align-self: stretch; max-width: 620px; margin: 0 auto; width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
 .wf-req-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--sub); }
 .wf-req-head b { color: var(--ink); font-weight: 600; }
 .wf-req-head .wf-time { margin-left: auto; }

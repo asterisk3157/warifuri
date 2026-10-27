@@ -153,7 +153,7 @@ function grid(data, ctx) {
       return h('button', {
         type: 'button', class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short', picked && 'wf-ev-picked'], data: { key: `ev-${x.b.id}-${i}` },
         title: `${x.b.title}\n${withLabel(c, span(x.b))}`, 'aria-pressed': String(picked),
-        style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color), borderLeft: `3px solid ${c.color}` },
+        style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color) },
         onclick: () => { view.sel = picked ? null : x.b.id; ctx.rerender(); },
       }, h('span', { class: 'wf-ev-title', text: x.b.title }));
     });
