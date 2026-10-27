@@ -6,7 +6,7 @@ For AI agents (Claude Code, Codex and others) working in this repository.
 
 warifuri is a secretary for people who work with AI agents: a ledger of goals and tasks, opened through an MCP endpoint, with plug-ins around it. Read these before changing anything:
 
-1. `docs/principles.md` — the principles (1–22). It is the spine of the design.
+1. `docs/principles.md` — the principles (1–25). It is the spine of the design.
 2. `docs/architecture.md` — the architecture derived from it. When the two disagree, `principles.md` wins; fix `architecture.md`.
 
 ## Rules

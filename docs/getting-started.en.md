@@ -217,7 +217,7 @@ To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The t
 <details>
 <summary>What the secretary can use</summary>
 
-The secretary can use only warifuri's tools; claude.ai connectors (mail, calendar) are off by default. How to let it use a calendar will be described in [Integrations](integrations.md).
+The secretary can use only warifuri's tools; claude.ai connectors (mail, calendar) are off by default. How to let it use a calendar is in [Integrations](integrations.md) (in Japanese).
 
 </details>
 
@@ -260,7 +260,7 @@ warifuri backup --dir <backup folder>
 <summary>Steps</summary>
 
 1. Stop the server.
-2. In Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`, delete the entry under `hooks` → `PreToolUse` that calls `warifuri hook gate` (`warifuri.cmd hook gate` on Windows). Leave other hooks alone.
+2. In Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`, delete the entries under `hooks` → `PreToolUse` that call `warifuri hook gate` and `warifuri hook calendar` (`warifuri.cmd hook gate` and `warifuri.cmd hook calendar` on Windows). Leave other hooks alone.
 3. Delete the skill folders `~/.claude/skills/warifuri/` and `~/.codex/skills/warifuri/`.
 4. Remove the MCP server registrations.
 

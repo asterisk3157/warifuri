@@ -217,7 +217,7 @@ warifuri secretary enable
 <details>
 <summary>秘書が使えるもの</summary>
 
-秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを使わせる方法は、[連携の例](integrations.md)に書く予定です。
+秘書が使えるのは warifuri のツールだけで、claude.ai のコネクタ(メールやカレンダー)は既定では使えません。カレンダーを使わせる方法は、[連携の例](integrations.md)にあります。
 
 </details>
 
@@ -260,7 +260,7 @@ warifuri backup --dir <バックアップ先のフォルダ>
 <summary>手順</summary>
 
 1. サーバーを停止します。
-2. Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` の `hooks` の `PreToolUse` から、`warifuri hook gate`(Windows では `warifuri.cmd hook gate`)を呼ぶ項目を削除します。ほかのフックは残してください。
+2. Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` の `hooks` の `PreToolUse` から、`warifuri hook gate` と `warifuri hook calendar`(Windows では `warifuri.cmd hook gate` と `warifuri.cmd hook calendar`)を呼ぶ項目を削除します。ほかのフックは残してください。
 3. スキルのフォルダ `~/.claude/skills/warifuri/` と `~/.codex/skills/warifuri/` を削除します。
 4. MCP サーバーの登録を削除します。
 
