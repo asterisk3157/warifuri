@@ -131,6 +131,12 @@ export const SETTINGS = [
     commands: CLIENT,
   },
   {
+    name: 'WARIFURI_SERVER_DEVICES',
+    about: 'サーバーの機械で動くほかのプログラムのデバイスの名前(カンマ区切り)。Web 画面のデバイスの一覧に出さない。秘書のデバイスは書かなくても出ない',
+    commands: ['serve'],
+    check: (v) => (v.split(',').every((t) => /^[A-Za-z0-9._-]{1,64}$/.test(t.trim())) ? null : 'must be device names, comma-separated'),
+  },
+  {
     name: 'WARIFURI_GATE',
     section: 'client',
     about: 'タスク確認。off にすると、作業中のタスクがなくても編集を止めない',

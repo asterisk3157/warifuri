@@ -933,6 +933,8 @@ function apiRouter(ledger, limit, secretaryRuns = () => false) {
 // screens (web.mjs) open without a login. chat: the conversation with the secretary
 // (src/secretary/chat.mjs) for the 秘書 screen, or null. app.locals.web is { mode, issueLogin }.
 // secretaryDevice: the device the secretary calls from (only it may use the secretary's tools),
+// serverDevices: other devices of the server machine (such as a program running beside it),
+// left out of the Web screens' devices as the secretary's is.
 // null when the secretary is off (nobody may), or left out to let any device. While it is set
 // (and chat, when given, can answer), only that device may book and unbook; the others ask it
 // with ask_secretary.
@@ -949,6 +951,7 @@ export function createApp({
   webLimit = apiLimit,
   chat = null,
   secretaryDevice,
+  serverDevices = [],
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -977,7 +980,10 @@ export function createApp({
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true)));
-  web = createWeb({ ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit });
+  web = createWeb({
+    ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,
+    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices,
+  });
   app.use(web.router);
   app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };
 

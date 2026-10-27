@@ -481,3 +481,36 @@ test('a session outlives a restart of the server: it is kept, as a hash, in the 
   assert.equal((await get(second.base, '/calendar', { Cookie: cookie })).status, 200);
   assert.equal((await get(second.base, '/calendar', { Cookie: 'warifuri_web=forged' })).status, 401);
 });
+
+test('devices: the secretary and the server machine\'s programs are kept apart; places carry when they last saw work', async (t) => {
+  const { base, ledger } = await start(t, { secretaryDevice: 'laptop', serverDevices: ['lost'] });
+  const srv = await (await get(base, '/web/api/server')).json();
+  assert.deepEqual(srv.devices.map((d) => d.name), ['desk']);
+  const st = await (await get(base, '/web/api/settings')).json();
+  assert.deepEqual(st.devices.map((d) => [d.name, d.role]), [['desk', 'device'], ['laptop', 'secretary'], ['lost', 'server']]);
+  assert.ok(st.places.every((p) => /^\d{4}-/.test(p.last_active_at)));
+  const thesis = st.places.find((p) => p.name === 'thesis');
+  assert.ok(thesis.last_active_at >= ledger.listPlaces().find((p) => p.name === 'thesis').updated_at);
+});
+
+test('logging in again from the same app on the same device ends the older login', () => {
+  const ledger = openLedger(':memory:');
+  ledger.issueKey('desk', ACTOR);
+  ledger.issueKey('laptop', ACTOR);
+  const login = (name, device) => {
+    const client = ledger.oauth.registerClient({ client_name: name, redirect_uris: ['http://localhost:9/cb'] });
+    const pending = ledger.oauth.createPending({ clientId: client.client_id, redirectUri: 'http://localhost:9/cb', codeChallenge: 'c', scopes: [] });
+    ledger.oauth.setPendingLogin(pending.id, 'alex');
+    const { code } = ledger.oauth.approve(pending.id, device, ACTOR);
+    return { id: client.client_id, ...ledger.oauth.exchangeCode(client.client_id, code, 'http://localhost:9/cb').tokens };
+  };
+  const first = login('Codex', 'desk');
+  const other = login('Codex', 'laptop');
+  const elsewhere = login('Claude Code', 'desk');
+  const again = login('Codex', 'desk');
+  const live = ledger.oauth.tokenActivity().filter((a) => a.live).map((a) => a.client_id).sort();
+  assert.deepEqual(live, [other.id, elsewhere.id, again.id].sort());
+  assert.ok(!live.includes(first.id));
+  assert.ok(ledger.records(first.id).some((r) => r.action === 'replaced'));
+  ledger.close();
+});

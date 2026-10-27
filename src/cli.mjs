@@ -383,6 +383,7 @@ function runServe(args) {
       host: values.WARIFURI_HOST, publicUrl: values.WARIFURI_PUBLIC_URL ?? null, chat,
       // Only the secretary's device may use the secretary's tools; nobody while it is off.
       secretaryDevice: secretary.readSecretaryKey(cfg.home) ? secretary.deviceOf(values) : null,
+      serverDevices: (values.WARIFURI_SERVER_DEVICES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     });
   } catch (err) {
     chat.stop();

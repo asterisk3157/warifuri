@@ -239,7 +239,9 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 button.wf-row { cursor: pointer; text-align: left; width: 100%; background: transparent; border: none; border-top: 1px solid var(--hair); }
 button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-cols-dev, .wf-row-dev { grid-template-columns: minmax(150px, 1.1fr) minmax(90px, .6fr) minmax(200px, 1.6fr); }
-.wf-cols-places, .wf-row-places { grid-template-columns: minmax(120px, .8fr) 100px minmax(200px, 2fr); }
+.wf-cols-places, .wf-row-places { grid-template-columns: minmax(120px, .8fr) 100px 90px minmax(200px, 2fr); }
+.wf-row-places.wf-idle { opacity: .6; }
+.wf-idle-toggle { align-self: flex-start; margin-top: 12px; }
 .wf-cols-secrets, .wf-row-secrets { grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) minmax(120px, 1fr) minmax(110px, .8fr); }
 .wf-cols-apps, .wf-row-apps { grid-template-columns: minmax(140px, 1fr) minmax(100px, .8fr) minmax(120px, 1fr); }
 .wf-cell { display: flex; flex-direction: column; min-width: 0; }

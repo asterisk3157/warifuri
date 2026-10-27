@@ -178,24 +178,48 @@ function table(title, count, kind, heads, rows, empty) {
     rows.length ? null : h('div', { class: 'wf-empty', text: empty }));
 }
 
-function placesSection(st) {
-  const rows = st.places.map((p) => h('div', { class: 'wf-row wf-row-places' },
+// A place with no work for this many days is put away under 使っていない.
+const IDLE_DAYS = 30;
+
+function placesSection(st, ctx) {
+  const idleBefore = ctx.now.getTime() - IDLE_DAYS * 86_400_000;
+  const sorted = [...st.places].sort((a, b) => ((a.last_active_at ?? '') < (b.last_active_at ?? '') ? 1 : -1));
+  const idle = sorted.filter((p) => !p.last_active_at || Date.parse(p.last_active_at) < idleBefore);
+  const shown = view.idle ? sorted : sorted.filter((p) => !idle.includes(p));
+  const rows = shown.map((p) => h('div', { class: ['wf-row wf-row-places', idle.includes(p) && 'wf-idle'] },
     h('span', { class: 'wf-ellipsis', style: { fontWeight: '600' }, text: p.name }),
     h('span', {}, p.profile ? profileChip(p.profile, st.profiles, 15) : h('span', { class: 'wf-muted', text: 'なし' })),
+    h('span', { class: 'wf-muted', text: p.last_active_at ? ago(p.last_active_at, ctx.now) : '—' }),
     h('span', { class: 'wf-cell', style: { gap: '2px' } }, ...p.paths.map((x) => h('span', { style: { display: 'flex', gap: '8px', minWidth: '0' } },
       h('span', { class: 'wf-muted wf-ellipsis', style: { flex: 'none', width: '64px' }, text: x.device }), h('span', { class: 'wf-mono wf-ellipsis', text: x.path }))))));
-  return table('作業フォルダ', `${st.places.length}件`, 'places', ['名前', 'プロフィール', 'パス'], rows, 'まだ作業フォルダがありません。エージェントが place で登録すると、ここに出ます');
+  const toggle = idle.length
+    ? h('button', {
+      type: 'button', class: 'wf-btn wf-idle-toggle', data: { key: 'idle' },
+      onclick: () => { view.idle = !view.idle; ctx.refresh(); },
+      text: view.idle ? `使っていない作業フォルダ ${idle.length}件を隠す` : `${IDLE_DAYS}日以上使っていない作業フォルダ ${idle.length}件を表示`,
+    })
+    : null;
+  return [
+    table('作業フォルダ', view.idle ? `${st.places.length}件` : `${shown.length}件(ほかに使っていないもの ${idle.length}件)`, 'places', ['名前', 'プロフィール', '最終アクティブ', 'パス'], rows, 'まだ作業フォルダがありません。エージェントが place で登録すると、ここに出ます'),
+    toggle,
+  ];
 }
 
 function devicesSection(st) {
   const words = { on: '使用中', none: 'なし', revoked: '取り消し済み' };
-  const rows = st.devices.map((d) => h('div', { class: 'wf-row wf-row-secrets' },
+  const row = (d) => h('div', { class: 'wf-row wf-row-secrets' },
     h('span', { class: 'wf-ellipsis', style: { fontWeight: '600' }, text: d.name }),
     h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: d.secret === 'on' ? '#1d1d1f' : '#6e6e73' } },
       h('span', { class: 'wf-dot', style: { background: d.secret === 'on' ? '#5fb98f' : '#d2d2d7' }, 'aria-hidden': 'true' }), words[d.secret]),
     h('span', { style: { color: d.github_login ? '#1d1d1f' : '#6e6e73' }, text: d.github_login ? 'あり' : 'なし' }),
-    h('span', { class: 'wf-muted', text: d.created_at ? ymd(new Date(d.created_at)) : '—' })));
-  return table('デバイスとシークレット', `${st.devices.length}台`, 'secrets', ['デバイス', 'シークレット', 'GitHub ログイン', '登録日'], rows, 'まだデバイスがありません');
+    h('span', { class: 'wf-muted', text: d.created_at ? ymd(new Date(d.created_at)) : '—' }));
+  // The machines that use the server, the secretary, and other programs on the server machine.
+  const groups = [['device', 'デバイス', 'まだデバイスがありません'], ['secretary', '秘書'], ['server', 'サーバー']];
+  return groups.map(([role, title, empty]) => {
+    const list = st.devices.filter((d) => (d.role ?? 'device') === role);
+    if (!list.length && !empty) return null;
+    return table(title, `${list.length}台`, 'secrets', [role === 'device' ? 'デバイス' : '名前', 'シークレット', 'GitHub ログイン', '登録日'], list.map(row), empty);
+  });
 }
 
 function appsSection(st, ctx) {
@@ -214,7 +238,7 @@ function render(data, ctx) {
   if (view.sec === 'profile') content = profileSection(data.profile, ctx);
   else if (view.sec === 'display') content = displaySection();
   else if (view.sec === 'life') content = lifeSection();
-  else if (view.sec === 'places') content = placesSection(st);
+  else if (view.sec === 'places') content = placesSection(st, ctx);
   else if (view.sec === 'devices') content = devicesSection(st);
   else content = appsSection(st, ctx);
   return h('div', { class: 'wf-set-main', data: { scroll: `set-${view.sec}` } },
