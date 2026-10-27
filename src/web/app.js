@@ -74,8 +74,9 @@ function card() {
     h('span', { class: 'wf-card-row wf-card-label' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), label));
 }
 
-function navItem(key, label, iconName) {
-  return h('a', { class: 'wf-nav-item', href: `/${key}`, aria: { current: NAME === key ? 'page' : undefined } }, icon(iconName), h('span', { text: label }));
+function navItem(key, label, iconName, badge = 0) {
+  return h('a', { class: 'wf-nav-item', href: `/${key}`, aria: { current: NAME === key ? 'page' : undefined } }, icon(iconName), h('span', { text: label }),
+    badge ? h('span', { class: 'wf-nav-badge', 'aria-label': `新しい知らせ ${badge}件`, text: badge > 99 ? '99+' : String(badge) }) : null);
 }
 
 function soonItem(label, iconName) {
@@ -94,7 +95,7 @@ function renderNav() {
     navItem('calendar', 'カレンダー', 'calendar'),
     navItem('tasks', 'タスク', 'tasks'),
     navItem('server', 'サーバー', 'server'),
-    navItem('secretary', '秘書', 'secretary'),
+    navItem('secretary', '秘書', 'secretary', NAME === 'secretary' ? 0 : state.about?.secretary_unread ?? 0),
     soonItem('ナレッジ', 'knowledge'),
     soonItem('デスク', 'desk'),
     h('a', { class: 'wf-nav-item wf-nav-bottom', href: '/settings' }, icon('gear'), h('span', { text: '設定' })),

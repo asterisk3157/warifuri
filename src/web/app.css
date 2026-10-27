@@ -70,6 +70,7 @@ nav a:hover .wf-led2 { animation: wf-led .9s ease .3s 1; }
 #wf-nav.wf-nav-settings { flex-basis: 272px; }
 .wf-nav-gap { height: 12px; flex: none; }
 .wf-nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; text-decoration: none; font-size: 15px; color: var(--ink); font-weight: 400; }
+.wf-nav-badge { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #e5484d; color: #ffffff; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
 a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink); }
 .wf-nav-item[aria-current="page"] { color: var(--accent); font-weight: 600; background: var(--tint); }
 .wf-nav-item[aria-current="page"]:hover { color: var(--accent); }

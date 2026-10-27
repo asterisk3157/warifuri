@@ -514,3 +514,17 @@ test('logging in again from the same app on the same device ends the older login
   assert.ok(ledger.records(first.id).some((r) => r.action === 'replaced'));
   ledger.close();
 });
+
+test('the badge on 秘書: what the secretary said since the person last saw the conversation', async (t) => {
+  const { base, ledger } = await start(t);
+  const about = async () => (await (await get(base, '/web/api/about')).json()).secretary_unread;
+  assert.equal(await about(), 0);
+  const main = ledger.ensureThread('secretary', { actor: 'web', device: null });
+  ledger.addMessage(main.id, { role: 'user', body: 'おはよう' }, { actor: 'web', device: null });
+  ledger.addMessage(main.id, { role: 'secretary', body: 'おはようございます' }, { actor: 'secretary-chat', device: 'desk' });
+  ledger.ask({ questions: [{ header: '期日', question: '延ばしますか？', options: [{ label: '延ばす' }, { label: 'そのまま' }] }] }, { actor: 'device-key', device: 'desk' });
+  assert.equal(await about(), 2);
+  const res = await fetch(`${base}/web/api/secretary/read`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: '{}' });
+  assert.deepEqual(await res.json(), { unread: 0 });
+  assert.equal(await about(), 0);
+});

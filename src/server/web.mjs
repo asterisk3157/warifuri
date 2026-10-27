@@ -435,7 +435,11 @@ export function createWeb({
   const mcpUrl = (req) => `${origin(req)}/mcp`;
 
   api.get('/about', (req, res) => {
-    res.json({ now: nowIso(), mode, place: publicUrl ? 'server' : 'local', label: serverLabel, url: origin(req), mcp_url: mcpUrl(req), machine: machineInfo() });
+    res.json({
+      now: nowIso(), mode, place: publicUrl ? 'server' : 'local', label: serverLabel, url: origin(req), mcp_url: mcpUrl(req), machine: machineInfo(),
+      // For the badge on 秘書: what the secretary said or asked that the person has not seen.
+      secretary_unread: ledger.secretaryUnread(),
+    });
   });
 
   api.get('/calendar', (req, res) => {
@@ -675,6 +679,13 @@ export function createWeb({
     const t = subThread(req.params.id);
     if (!t) return res.status(404).json({ error: 'not found' });
     return res.json(threadOut(t));
+  });
+
+  // The person has seen the secretary's conversation (the 秘書 screen was open).
+  api.post('/secretary/read', sameOrigin, smallJson, (req, res) => {
+    const main = ledger.getThread();
+    if (main) ledger.markThreadRead(main.id, { actor: 'web', device: null });
+    return res.json({ unread: ledger.secretaryUnread() });
   });
 
   // The person has read the thread (it was open on the screen).
