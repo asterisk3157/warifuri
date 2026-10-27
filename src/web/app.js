@@ -8,11 +8,12 @@ import tasks from './pages/tasks.js';
 import server from './pages/server.js';
 import secretary from './pages/secretary.js';
 import settings from './pages/settings.js';
+import knowledge from './pages/knowledge.js';
 
-const PAGES = { calendar, tasks, server, secretary, settings };
+const PAGES = { calendar, tasks, server, secretary, knowledge, settings };
 const NAME = location.pathname.split('/')[1] || 'calendar';
 const page = PAGES[NAME] ?? calendar;
-const TITLES = { calendar: 'カレンダー', tasks: 'タスク', server: 'サーバー', secretary: '秘書', settings: '設定' };
+const TITLES = { calendar: 'カレンダー', tasks: 'タスク', server: 'サーバー', secretary: '秘書', knowledge: 'ナレッジ', settings: '設定' };
 const REFRESH_MS = 30_000;
 
 const nav = document.getElementById('wf-nav');
@@ -96,7 +97,7 @@ function renderNav() {
     navItem('tasks', 'タスク', 'tasks'),
     navItem('server', 'サーバー', 'server'),
     navItem('secretary', '秘書', 'secretary', NAME === 'secretary' ? 0 : state.about?.secretary_unread ?? 0),
-    soonItem('ナレッジ', 'knowledge'),
+    navItem('knowledge', 'ナレッジ', 'knowledge'),
     soonItem('デスク', 'desk'),
     h('a', { class: 'wf-nav-item wf-nav-bottom', href: '/settings' }, icon('gear'), h('span', { text: '設定' })),
     card(),
