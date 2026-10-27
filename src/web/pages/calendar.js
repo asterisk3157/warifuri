@@ -1,11 +1,12 @@
 // カレンダー: the bookings of a day or a week, with today's list beside them.
 
 import { h, skel, soonBadge, hhmm, mdw, dayStart, addDays, isoLocal, profileColor, tint, WEEKDAYS } from '../ui.js';
+import { renderRichNote } from '../md.js';
 
 const ROW = 52;
 const H0 = 8;
 const H1 = 22;
-const view = { mode: 'week', anchor: dayStart(new Date()) };
+const view = { mode: 'week', anchor: dayStart(new Date()), sel: null };
 
 const mondayOf = (d) => addDays(d, -((d.getDay() + 6) % 7));
 const range = () => (view.mode === 'day' ? { from: view.anchor, days: 1 } : { from: mondayOf(view.anchor), days: 7 });
@@ -119,6 +120,12 @@ function grid(data, ctx) {
       h1 = Math.max(h1, Math.ceil(hourOf(x.e, list[i])));
     }
   });
+  // Today in view: the hours reach the time now, so its line is always there.
+  if (list.some((d) => +d === +today)) {
+    const nowH = hourOf(now.getTime(), today);
+    h0 = Math.min(h0, Math.floor(nowH));
+    h1 = Math.max(h1, Math.min(24, Math.floor(nowH) + 1));
+  }
   const columns = `56px repeat(${days}, minmax(0, 1fr))`;
   const hours = [];
   for (let k = h0; k < h1; k += 1) hours.push(h('span', { class: 'wf-hour', text: `${k}:00` }));
@@ -131,7 +138,7 @@ function grid(data, ctx) {
     ? h('div', { class: 'wf-grid wf-allday', style: { gridTemplateColumns: columns } }, h('span', { class: 'wf-allday-label', text: '終日' }),
       ...allDay.map((bs) => h('div', { class: 'wf-allday-cell' }, ...bs.map((b) => {
         const c = category(b, colors);
-        return h('span', { class: 'wf-allday-ev', title: b.title, style: { background: tint(c.color) } }, b.title);
+        return h('button', { type: 'button', class: ['wf-allday-ev', view.sel === b.id && 'wf-ev-picked'], title: b.title, style: { background: tint(c.color) }, onclick: () => { view.sel = view.sel === b.id ? null : b.id; ctx.rerender(); } }, b.title);
       }))))
     : null;
   const cols = list.map((d, i) => {
@@ -142,15 +149,14 @@ function grid(data, ctx) {
       const top = (hourOf(x.s, d) - h0) * ROW + 2;
       const ht = Math.max(18, ((x.e - x.s) / 3600000) * ROW - 4);
       const past = x.e <= now.getTime();
-      const time = withLabel(c, span(x.b));
       const short = ht < SHORT;
-      return h('div', {
-        class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short'],
-        title: `${x.b.title}\n${time}`,
+      const picked = view.sel === x.b.id;
+      return h('button', {
+        type: 'button', class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short', picked && 'wf-ev-picked'], data: { key: `ev-${x.b.id}-${i}` },
+        title: `${x.b.title}\n${withLabel(c, span(x.b))}`, 'aria-pressed': String(picked),
         style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color) },
-      }, short
-        ? h('span', { class: 'wf-ev-title' }, h('span', { class: 'wf-ev-start', text: fmt(new Date(Date.parse(x.b.starts_at))) }), x.b.title)
-        : [h('span', { class: 'wf-ev-title', text: x.b.title }), h('span', { class: 'wf-ev-time' }, h('span', { class: 'wf-dot', style: { background: c.color }, 'aria-hidden': 'true' }), time)]);
+        onclick: () => { view.sel = picked ? null : x.b.id; ctx.rerender(); },
+      }, h('span', { class: 'wf-ev-title', text: x.b.title }));
     });
     const nowH = hourOf(now.getTime(), d);
     const line = +d === +today && nowH >= h0 && nowH <= h1
@@ -164,6 +170,35 @@ function grid(data, ctx) {
     allDayRow,
     h('div', { class: 'wf-grid-scroll', data: { scroll: 'cal' } },
       h('div', { class: 'wf-grid wf-grid-body', style: { gridTemplateColumns: columns } }, h('div', { class: 'wf-hours' }, ...hours), ...cols)));
+}
+
+// The booking picked in the grid, in full, where today's list is: always the same five rows
+// (題名, 日時, 場所, メモ, 作成者), with a dash where there is nothing; then what it is for,
+// when it has a task, goal or habit.
+function detailCard(b, ctx) {
+  const s = new Date(Date.parse(b.starts_at));
+  const e = new Date(Date.parse(b.ends_at));
+  const allDay = +dayStart(s) === +s && +dayStart(e) === +e;
+  const lastDay = addDays(e, -1);
+  const short = (d) => `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+  const when = allDay
+    ? `${short(s)}${+lastDay > +s ? `–${short(lastDay)}` : ''} 終日`
+    : `${short(s)} ${fmt(s)}–${fmt(e)}`;
+  const value = (v) => (v ? v : h('span', { class: 'wf-muted', text: '—' }));
+  const rows = [
+    ['題名', value(b.title)],
+    ['日時', value(when)],
+    ['場所', value(b.location)],
+    ['メモ', b.note ? h('div', { class: 'wf-rich' }, ...renderRichNote(h, b.note)) : value(null)],
+    ['作成者', value(b.organizer)],
+    ...(b.task ? [['タスク', value(b.task.title)]] : []),
+    ...(b.goal ? [['ゴール', value(b.goal.title)]] : []),
+    ...(b.habit ? [['習慣', value(b.habit.title)]] : []),
+  ];
+  return h('section', { class: 'wf-today-card wf-surface wf-ev-detail' },
+    h('div', { class: 'wf-today-head' }, h('h2', { text: '予定の詳細' }),
+      h('button', { type: 'button', class: 'wf-close', 'aria-label': '閉じる', title: '閉じる', data: { key: 'detail-close' }, onclick: () => { view.sel = null; ctx.rerender(); }, text: '×' })),
+    h('dl', { class: 'wf-detail-list' }, ...rows.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', {}, v)])));
 }
 
 function todayCard(data, ctx) {
@@ -199,9 +234,11 @@ function todayCard(data, ctx) {
     rows.length ? rows : h('div', { class: 'wf-empty', text: '今日の予定はありません' }));
 }
 
+const selected = (data) => (view.sel ? [...data.shown.bookings, ...data.today.bookings].find((b) => b.id === view.sel) ?? null : null);
+
 function render(data, ctx) {
   return h('div', { class: 'wf-page-cal' }, ctx.head('カレンダー'), ctx.banner(),
-    h('div', { class: 'wf-cal-body' }, grid(data, ctx), h('aside', { class: 'wf-aside' }, todayCard(data, ctx))));
+    h('div', { class: 'wf-cal-body' }, grid(data, ctx), h('aside', { class: 'wf-aside' }, selected(data) ? detailCard(selected(data), ctx) : todayCard(data, ctx))));
 }
 
 function skeleton(ctx) {

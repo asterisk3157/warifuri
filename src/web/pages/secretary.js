@@ -306,7 +306,31 @@ function threadLink(t, parent) {
     ICON.threads(), unread ? `未読 ${t.unread}件` : `スレッド ${t.count}件`);
 }
 
+// An agent's request: who asked, what, and the conditions given, folded to a few lines.
+function requestCard(m) {
+  const r = m.request;
+  const when = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${hhmm(iso)}`; };
+  const conds = [
+    r.minutes ? `${r.minutes}分` : null,
+    r.by ? `${r.by.slice(5, 10).replace('-', '/')}まで` : null,
+    r.prefer ? `希望: ${r.prefer}` : null,
+    r.starts_at ? `${when(r.starts_at)}〜${r.ends_at ? hhmm(r.ends_at) : ''}` : null,
+  ].filter(Boolean);
+  const open = view.openRequests?.has(m.id);
+  const text = h('p', { class: ['wf-req-text', !open && 'wf-clamp'], text: r.text });
+  return h('div', { class: 'wf-req' },
+    h('div', { class: 'wf-req-head' }, h('b', { text: 'エージェントからの依頼' }), h('small', { class: 'wf-time', text: hhmm(m.created_at) })),
+    text,
+    conds.length ? h('div', { class: 'wf-req-conds', text: conds.join(' · ') }) : null,
+    r.text.length > 120 ? h('button', {
+      type: 'button', class: 'wf-req-more',
+      onclick: () => { view.openRequests ??= new Set(); if (open) view.openRequests.delete(m.id); else view.openRequests.add(m.id); ctxRef?.rerender(); },
+      text: open ? '閉じる' : 'すべて表示',
+    }) : null);
+}
+
 function message(m, { where, last, threads }) {
+  if (m.role === 'system' && m.request) return requestCard(m);
   if (m.role === 'system') return h('p', { class: 'wf-note', text: m.body });
   const t = threads?.[m.id] ?? null;
   const startThread = where === 'main' && !(t && (t.count || t.unread))

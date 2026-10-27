@@ -62,7 +62,7 @@ test('schema: a version 8 file keeps its thread, messages and proposals, and gai
   assert.throws(() => raw.prepare("INSERT INTO records (at, actor, entity, entity_id, action, changes) VALUES ('x', 'web', 'attachment', 'a1', 'create', '{}')").run(), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(SCHEMA_VERSION, 10);
   const L = openLedger(file, { now: ticking() });
   const thread = L.getThread();
   assert.equal(thread.session_id, 's-1');
@@ -79,7 +79,7 @@ test('schema: a version 8 file keeps its thread, messages and proposals, and gai
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '9');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '10');
   for (const t of ['messages_v8', 'threads_v8', 'records_v8']) assert.equal(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(t), undefined);
   for (const i of ['messages_thread', 'messages_state', 'threads_kind', 'records_entity']) assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(i), i);
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);

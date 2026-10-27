@@ -78,10 +78,10 @@ const TASK_COLUMNS = [
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'profile', 'created_at', 'updated_at'];
 const BOOKING_COLUMNS = [
-  'id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'source', 'external_id', 'created_at', 'updated_at',
+  'id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'location', 'organizer', 'source', 'external_id', 'created_at', 'updated_at',
 ];
 // Fields book() takes; id names the booking to change.
-const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'source', 'external_id'];
+const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at', 'ends_at', 'note', 'location', 'organizer', 'source', 'external_id'];
 
 // Fields a caller may change with update(); state and its fields go through setState().
 const GOAL_EDITABLE = ['title', 'outcome', 'due', 'due_provisional', 'mode', 'human_led', 'profile'];
@@ -849,7 +849,7 @@ export function openLedger(path, options = {}) {
       ? { ...before }
       : {
           id: null, title: null, kind: undefined, task_id: null, habit_id: null, starts_at: undefined, ends_at: undefined,
-          note: null, source: null, external_id: null,
+          note: null, location: null, organizer: null, source: null, external_id: null,
         };
     for (const [k, v] of Object.entries(given)) if (v !== undefined && BOOKING_FIELDS.includes(k)) next[k] = v;
     // A link that does not belong to the kind is dropped, unless the caller gave it.

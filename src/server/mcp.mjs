@@ -610,7 +610,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'source (such as google-calendar) and external_id (the event id there) name the outside event the booking is: ' +
       'without id, a pair already in the ledger changes that booking instead of making a second one, so importing ' +
       'an event again is safe; with id, attaches the pair (for an event you just wrote there), unless another ' +
-      'booking has it. external_id needs source.',
+      'booking has it. external_id needs source. note: a note, such as an outside event\'s description; location: where it is; organizer: who made it (such as an email address).',
     {
       id: z.string().min(1).optional(),
       kind: z.enum(BOOKING_KINDS).optional(),
@@ -620,6 +620,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       starts_at: z.string().optional(),
       ends_at: z.string().optional(),
       note: clearable,
+      location: clearable,
+      organizer: clearable,
       source: clearable,
       external_id: clearable,
     },
@@ -640,7 +642,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'the secretary alone books, moves and removes bookings then (book and unbook refuse other devices). Do not ' +
       'pick the time yourself: give what it is for (task_id), how long (minutes), by when (by), and what is ' +
       'preferred (prefer, such as mornings); when the person already set the time, give starts_at and ends_at. ' +
-      'text says the rest in plain words. The request goes into the secretary\'s conversation, which the person ' +
+      'text says the rest in plain words the person can read too: no tool names (book, unbook, note), ids or field ' +
+      'names, since it is shown to the person as it is. The request goes into the secretary\'s conversation, which the person ' +
       `sees, and this waits up to wait_seconds (at most ${ASK_SECRETARY_WAIT_MAX}, the default) for the reply: ` +
       'status answered gives the secretary\'s reply to pass on to the person; status waiting means the request ' +
       'stays there and the secretary takes it when it can: tell the person it was asked and the answer will be ' +

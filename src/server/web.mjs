@@ -499,7 +499,7 @@ export function createWeb({
     }
     if (Date.parse(out.to) - Date.parse(out.from) > MAX_RANGE_MS) return res.status(400).json({ error: 'bad range', problems: ['期間は42日までです'] });
     const bookings = out.bookings.map((b) => ({
-      id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note,
+      id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note, location: b.location ?? null, organizer: b.organizer ?? null,
       task: b.task, habit: b.habit, goal: b.goal, profile: b.profile,
     }));
     return res.json({ now: nowIso(), from: out.from, to: out.to, bookings, profiles: profileColors(home, bookings.map((b) => b.profile)) });
@@ -616,6 +616,11 @@ export function createWeb({
         preview: PREVIEW_TYPES.includes(a.type) ? `/web/api/secretary/files/${encodeURIComponent(a.id)}` : null,
       })),
       files_only: d.files_only === true,
+      // An agent's request (ask_secretary): who asked and the conditions, shown as a card.
+      request: m.role === 'system' && d.request ? {
+        from: d.request.from ?? null, text: d.request.text ?? '', minutes: d.request.minutes ?? null, by: d.request.by ?? null,
+        prefer: d.request.prefer ?? null, starts_at: d.request.starts_at ?? null, ends_at: d.request.ends_at ?? null,
+      } : null,
       answer: m.kind === 'answer' ? { ask: d.ask ?? null, index: d.index ?? null, header: d.header ?? null, later: d.later === true, changed: d.changed === true } : null,
     };
   };
