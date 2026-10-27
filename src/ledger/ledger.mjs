@@ -1880,6 +1880,11 @@ export function openLedger(path, options = {}) {
     if (Number.isNaN(nowMs)) problems.push('now は日時です');
     if (problems.length) throw new LedgerError(problems);
     const daysSince = (iso) => Math.floor((nowMs - Date.parse(iso)) / DAY_MS);
+    // A date alone (YYYY-MM-DD) is a day of the server machine's clock: it starts at its
+    // midnight and ends at the next one. A date with a time is that moment.
+    const dateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+    const startOf = (v) => (dateOnly(v) ? Date.parse(`${v}T00:00:00`) : Date.parse(v));
+    const endOf = (v) => (dateOnly(v) ? Date.parse(`${v}T00:00:00`) + DAY_MS : Date.parse(v));
     const brief = (t) => ({ id: t.id, title: t.title, state: t.state, goal_id: t.goal_id, profile: t.profile });
     const byDays = (a, b) => b.days - a.days || (a.id < b.id ? -1 : 1);
 
@@ -1906,6 +1911,18 @@ export function openLedger(path, options = {}) {
       held: heldList.sort(byDays),
       ready: untouched('ready', readyDays, (_t, d) => `ready のまま${d}日触られていません`).sort(byDays),
       waiting: untouched('waiting', waitingDays, (t, d) => `${t.waiting_on} の「${t.waiting_for}」を待ったまま、${d}日動きがありません`).sort(byDays),
+      // Put off until a day that has come: to look at again (resume, put off again, or drop).
+      review: all(`${TASK_SELECT} WHERE t.state = 'deferred' AND t.defer_until IS NOT NULL`)
+        .filter((t) => nowMs >= startOf(t.defer_until))
+        .map((t) => ({ t, days: Math.floor((nowMs - startOf(t.defer_until)) / DAY_MS) }))
+        .map(({ t, days }) => ({ ...brief(t), defer_until: t.defer_until, days, reason: days ? `見直す日(${t.defer_until.slice(0, 10)})を${days}日過ぎています` : '今日が見直す日です' }))
+        .sort(byDays),
+      // Open tasks past their due date (not a provisional one): to follow up.
+      overdue: all(`${TASK_SELECT} WHERE t.state NOT IN ('done', 'discarded') AND t.due IS NOT NULL AND t.due_provisional = 0`)
+        .filter((t) => nowMs > endOf(t.due))
+        .map((t) => ({ t, days: Math.floor((nowMs - endOf(t.due)) / DAY_MS) + 1 }))
+        .map(({ t, days }) => ({ ...brief(t), due: t.due, days, reason: `期日(${t.due.slice(0, 10)})を${days}日過ぎています` }))
+        .sort(byDays),
     };
   }
 

@@ -86,7 +86,11 @@ function taskRow(t, today) {
   const d = left(t, today);
   let note = null;
   if (t.state === 'waiting' && (t.waiting_on || t.waiting_for)) note = t.waiting_on && t.waiting_for ? `${t.waiting_on}の「${t.waiting_for}」を待っています` : `${t.waiting_on ?? t.waiting_for}を待っています`;
-  else if (t.state === 'deferred' && t.defer_until) note = `${dueDay(t.defer_until) ? md(dueDay(t.defer_until)) : t.defer_until} に見直す`;
+  else if (t.state === 'deferred' && t.defer_until) {
+    const r = dueDay(t.defer_until);
+    const when = r ? md(r) : t.defer_until;
+    note = r && daysFrom(today, r) <= 0 ? `見直す日(${when})が来ています` : `${when} に見直す`;
+  }
   else if (t.next && !closed) note = `次の一手: ${t.next}`;
   const before = t.open_before.length ? `${t.open_before.map((x) => `「${x.title}」`).join('')}の後` : null;
   return h('div', { class: ['wf-task', closed && 'wf-closed', view.hl === t.id && 'wf-hl'] },

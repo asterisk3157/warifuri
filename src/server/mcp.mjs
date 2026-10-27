@@ -180,7 +180,9 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     {
       description:
         'Candidates for tidying, with reasons: tasks held with no change for held_days (default 3), ready and ' +
-        'untouched for ready_days (30), waiting with no change for waiting_days (14). It changes nothing.',
+        'untouched for ready_days (30), waiting with no change for waiting_days (14), review: deferred tasks whose ' +
+        'defer_until has come (to resume, put off again or drop), and overdue: open tasks past a due date the person ' +
+        'set (to follow up). It changes nothing.',
       inputSchema: {
         held_days: z.number().min(0).optional(),
         ready_days: z.number().min(0).optional(),
