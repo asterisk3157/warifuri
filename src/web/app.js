@@ -80,10 +80,6 @@ function navItem(key, label, iconName, badge = 0) {
     badge ? h('span', { class: 'wf-nav-badge', 'aria-label': `新しい知らせ ${badge}件`, text: badge > 99 ? '99+' : String(badge) }) : null);
 }
 
-function soonItem(label, iconName) {
-  return h('span', { class: 'wf-nav-item wf-disabled', 'aria-disabled': 'true' }, icon(iconName), h('span', { text: label }), soonBadge());
-}
-
 function renderNav() {
   if (page.nav) {
     nav.className = 'wf-nav-settings';
@@ -98,7 +94,6 @@ function renderNav() {
     navItem('server', 'サーバー', 'server'),
     navItem('secretary', '秘書', 'secretary', NAME === 'secretary' ? 0 : state.about?.secretary_unread ?? 0),
     navItem('knowledge', 'ナレッジ', 'knowledge'),
-    soonItem('デスク', 'desk'),
     h('a', { class: 'wf-nav-item wf-nav-bottom', href: '/settings' }, icon('gear'), h('span', { text: '設定' })),
     card(),
   );

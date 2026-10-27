@@ -124,8 +124,6 @@ function profileSection(p, ctx) {
     body = h('form', { class: 'wf-form', onsubmit: (e) => { e.preventDefault(); save(); } },
       h('label', { class: 'wf-field' }, '名前',
         h('input', { id: 'wf-name', value: view.draft.name, maxlength: 40, required: true, autocomplete: 'off', oninput: (e) => { view.draft.name = e.target.value; } })),
-      h('div', { class: 'wf-field' }, 'アイコン画像',
-        h('span', { class: 'wf-field-row' }, h('button', { type: 'button', class: 'wf-btn-line', disabled: true, text: '画像を選ぶ' }), soonBadge(), h('span', { text: '選ばないときは名前の頭文字' }))),
       h('div', { class: 'wf-field', role: 'group', 'aria-label': 'テーマカラー' }, 'テーマカラー', h('span', { class: 'wf-swatches' }, ...swatches)),
       h('label', { class: 'wf-field' }, 'GitHub アカウント',
         h('input', { value: p.github ? `@${p.github}` : 'GitHub のログインは使っていません', disabled: true }), h('span', { text: 'ログインしたアカウントが入ります' })),
@@ -146,18 +144,12 @@ function profileSection(p, ctx) {
     h('div', { class: 'wf-profile-body' }, top, body));
 }
 
-const silRows = (n) => h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column' } },
-  ...Array.from({ length: n }, () => h('div', { class: 'wf-sil-row' }, skel('30%', '14px'), skel('120px', '28px'))));
-
 function displaySection() {
   const theme = h('div', { class: 'wf-seg', role: 'group', 'aria-label': 'テーマ' },
     h('button', { type: 'button', 'aria-pressed': 'true', text: 'ライト' }),
-    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false', text: 'ダーク（準備中）' }),
-    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false', text: '自動（準備中）' }));
+    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false' }, 'ダーク', soonBadge()));
   return [
     h('section', { class: 'wf-surface wf-theme' }, h('span', { class: 'wf-muted', text: 'テーマ' }), theme),
-    h('section', { class: 'wf-placeholder', 'aria-disabled': 'true', style: { gap: '4px' } },
-      h('div', { class: 'wf-placeholder-head', style: { paddingBottom: '10px' } }, h('h2', { class: 'wf-muted', text: '文字の大きさとテーマカラー' }), soonBadge()), silRows(3)),
   ];
 }
 
@@ -165,7 +157,7 @@ function lifeSection() {
   const pair = () => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, skel('40%', '12px'), skel('100%', '32px'));
   return h('section', { class: 'wf-placeholder', 'aria-disabled': 'true' },
     h('div', { class: 'wf-placeholder-head' }, h('h2', { text: '自身について' }), soonBadge()),
-    h('p', { text: '秘書が予定を組むときに使います。空き時間を探す機能と一緒に使えるようになります。' }),
+    h('p', { text: '秘書が予定を組むときに使う、生活の決まりと場所です。' }),
     h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: '#f9f9fb' } },
       h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' } }, pair(), pair(), pair(), pair()), pair()));
 }
