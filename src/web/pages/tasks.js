@@ -124,6 +124,29 @@ function group(title, profile, tasks, today, colors, { showMeta }) {
     kept.length ? null : h('div', { class: 'wf-empty', text: `「${FILTERS[view.filter]}」に当てはまるタスクはありません` }));
 }
 
+// すべてのゴール: one card per goal (its due, outcome, progress and what can start now), and
+// the tasks with no goal; a card opens that goal. The filters pick goals with such tasks.
+function overview(goals, openLoose, today, colors, pick) {
+  const kept = goals.filter((g) => view.filter === 0 || g.tasks.some((t) => KEEP[view.filter](t, today)));
+  const card = (g) => {
+    const done = g.tasks.filter((t) => t.state === 'done').length;
+    const total = g.tasks.length;
+    const d = dueDay(g.due) ? daysFrom(today, dueDay(g.due)) : null;
+    const nexts = g.tasks.filter((t) => shown(t) === 'ready');
+    return h('button', { type: 'button', class: 'wf-goal-card', data: { key: `card-${g.id}` }, onclick: pick(g.id) },
+      h('span', { class: 'wf-goal-top' }, h('span', { class: 'wf-goal-title', text: g.title }), d === null ? null : h('span', { class: 'wf-left', style: { color: dueColor(d) }, text: `${leftText(d)}${prov(g)}` })),
+      g.outcome ? h('span', { class: 'wf-goal-outcome', text: g.outcome }) : null,
+      h('span', { class: 'wf-goal-meta' }, profileChip(g.profile, colors), `${done}/${total} 完了`, g.due ? `· 期日 ${md(dueDay(g.due))}${prov(g)}` : null),
+      h('span', { class: 'wf-bar', 'aria-hidden': 'true' }, h('span', { style: { width: `${total ? Math.round((done / total) * 100) : 0}%` } })),
+      nexts.length ? h('span', { class: 'wf-goal-next' }, h('b', { text: '着手可能' }), ...nexts.slice(0, 3).map((t) => h('span', { class: 'wf-n', text: `· ${t.title}` })), nexts.length > 3 ? h('span', { text: `ほか${nexts.length - 3}件` }) : null) : null);
+  };
+  return h('div', {},
+    h('div', { class: 'wf-group-head' }, h('h2', { text: 'すべてのゴール' }), h('span', { class: 'wf-group-count', text: `${kept.length}件` })),
+    h('div', { class: 'wf-goal-cards' }, ...kept.map(card),
+      openLoose ? h('button', { type: 'button', class: 'wf-goal-card wf-goal-none', data: { key: 'card-none' }, onclick: pick('none'), text: `ゴールなしのタスク · ${openLoose}件` }) : null),
+    kept.length ? null : h('div', { class: 'wf-empty', text: `「${FILTERS[view.filter]}」に当てはまるゴールはありません` }));
+}
+
 function render(data, ctx) {
   const today = ctx.now;
   const colors = data.profiles;
@@ -163,8 +186,7 @@ function render(data, ctx) {
   } else if (view.goal === 'none') {
     right.push(group('ゴールなし', null, data.unassigned, today, colors, { showMeta: false }));
   } else {
-    for (const g of goals) right.push(group(g.title, g.profile, g.tasks, today, colors, { showMeta: true }));
-    right.push(group('ゴールなし', null, data.unassigned, today, colors, { showMeta: false }));
+    right.push(overview(goals, openLoose, today, colors, pick));
   }
   return h('div', { class: 'wf-page-tasks' }, header, ctx.banner(),
     h('div', { class: 'wf-tasks-body' }, list, h('section', { class: 'wf-tasklist', 'aria-label': 'タスク', data: { scroll: `tasks-${view.goal}` } }, ...right)));
