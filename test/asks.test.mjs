@@ -418,7 +418,7 @@ test('while the secretary runs, only it books; the others ask it with ask_secret
 
   const late = await (await (await start({ secretaryDevice: 'secretary', chat: chat(true, 'late') }))('laptop')).callTool({ name: 'ask_secretary', arguments: { text: '2時間' } });
   assert.equal(late.structuredContent.status, 'waiting');
-  assert.equal(asked[1].opts.waitMs, 120_000);
+  assert.equal(asked[1].opts.waitMs, 90_000);
 
   // A secretary that cannot answer (claude missing, turned off): anyone books, nobody asks.
   for (const options of [{ secretaryDevice: 'secretary', chat: chat(false) }, { secretaryDevice: null }]) {

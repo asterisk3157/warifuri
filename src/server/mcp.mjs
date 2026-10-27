@@ -68,8 +68,10 @@ const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'r
 // The tools that put, move or remove bookings. While the secretary runs, only it decides the
 // time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
 const BOOKING_TOOLS = new Set(['book', 'unbook']);
-// The longest an agent may wait for the secretary's reply to ask_secretary, in seconds.
-const ASK_SECRETARY_WAIT_MAX = 120;
+// The longest an agent may wait for the secretary's reply to ask_secretary, in seconds: under
+// the 100 seconds after which a tunnel in front of the server (such as Cloudflare's) cuts a
+// request that has not answered.
+const ASK_SECRETARY_WAIT_MAX = 90;
 
 // Only the arguments that were given, so the ledger sees what the caller meant to change.
 const given = (args) => Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
