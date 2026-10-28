@@ -54,8 +54,21 @@ function devices(data, ctx) {
     rows.length ? null : h('div', { class: 'wf-empty', text: 'まだデバイスがありません。使う機械で warifuri connect を実行すると、ここに出ます' }));
 }
 
+function homeServer() {
+  const side = () => h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, skel('44px', '28px', { flex: 'none' }),
+    h('span', { style: { flex: '1', display: 'flex', flexDirection: 'column', gap: '6px' } }, skel('70%', '10px'), skel('45%', '8px')));
+  const stat = () => h('span', { style: { flex: '1', display: 'flex', flexDirection: 'column', gap: '6px' } }, skel('50%', '8px'), skel('80%', '14px'));
+  return h('section', { class: 'wf-placeholder', 'aria-disabled': 'true' },
+    h('div', { class: 'wf-placeholder-head' }, h('h2', { class: 'wf-muted', text: '自宅サーバー' }), soonBadge()),
+    h('p', { text: '自宅サーバーとその中の VM について、CPU・メモリ・ディスクの様子と、ネットワークの構成図を出す予定です。監視の機能を足したときだけ表示されます。' }),
+    h('div', { class: 'wf-silhouette', 'aria-hidden': 'true' },
+      h('div', { style: { flex: '0 0 190px', display: 'flex', flexDirection: 'column', gap: '14px' } }, side(), side(), side(), side(), side()),
+      h('div', { style: { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '12px' } }, skel('30%', '14px'), skel('100%', '160px', { borderRadius: '10px' }),
+        h('div', { style: { display: 'flex', gap: '20px' } }, stat(), stat(), stat(), stat()))));
+}
+
 function render(data, ctx) {
-  return h('div', { class: 'wf-page-scroll', data: { scroll: 'server' } }, ctx.head('サーバー'), ctx.banner(), serverCard(data, ctx), devices(data, ctx));
+  return h('div', { class: 'wf-page-scroll', data: { scroll: 'server' } }, ctx.head('サーバー'), ctx.banner(), serverCard(data, ctx), devices(data, ctx), homeServer());
 }
 
 function skeleton(ctx) {
@@ -63,7 +76,8 @@ function skeleton(ctx) {
     h('section', { class: 'wf-surface wf-srv-card', 'aria-busy': 'true' }, skel('180px', '17px'),
       h('div', { class: 'wf-facts' }, ...[0, 1, 2, 3].map(() => h('div', { class: 'wf-fact' }, skel('60%', '13px'), skel('80%', '15px'))))),
     h('section', { class: 'wf-surface wf-table', 'aria-busy': 'true' }, h('div', { class: 'wf-table-head' }, skel('100px', '17px')),
-      ...[0, 1, 2].map(() => h('div', { class: 'wf-row wf-row-dev' }, skel('70%', '15px'), skel('50%', '15px'), skel('80%', '15px')))));
+      ...[0, 1, 2].map(() => h('div', { class: 'wf-row wf-row-dev' }, skel('70%', '15px'), skel('50%', '15px'), skel('80%', '15px')))),
+    homeServer());
 }
 
 export default { load, render, skeleton };
