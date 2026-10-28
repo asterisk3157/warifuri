@@ -424,3 +424,17 @@ test('the calendar sync: every <n>m times, on only with a calendar given, and no
   // By hand, it runs in the night too.
   assert.equal((await runJob('sync', cfg, { env: w.env, spawn, now: () => at(2) })).code, 0);
 });
+
+test('enable turns the inbox on in plugins.yaml and disable takes it out, keeping other lines', () => {
+  const w = world();
+  fs.writeFileSync(path.join(w.home, 'plugins.yaml'), '- calendar\n');
+  const on = cli(['secretary', 'enable'], { home: w.home, env: w.env });
+  assert.equal(on.status, 0, on.stderr);
+  assert.match(on.stdout, /agents' notes go to the inbox/);
+  assert.equal(fs.readFileSync(path.join(w.home, 'plugins.yaml'), 'utf8'), '- calendar\n- secretary\n');
+  assert.equal(cli(['secretary', 'enable'], { home: w.home, env: w.env }).status, 0);
+  assert.equal(fs.readFileSync(path.join(w.home, 'plugins.yaml'), 'utf8'), '- calendar\n- secretary\n');
+  const off = cli(['secretary', 'disable'], { home: w.home, env: w.env });
+  assert.equal(off.status, 0, off.stderr);
+  assert.equal(fs.readFileSync(path.join(w.home, 'plugins.yaml'), 'utf8'), '- calendar\n');
+});

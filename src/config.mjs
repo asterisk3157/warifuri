@@ -147,7 +147,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_CALENDAR_CLAUDE',
     section: 'client',
-    about: 'この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
+    about: 'この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
     def: 'connector',
     commands: CLIENT,
     check: (v) => (v === 'connector' || v === 'gcp' ? null : 'must be connector or gcp'),
@@ -155,7 +155,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_CALENDAR_CODEX',
     section: 'client',
-    about: 'この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri の予定と、warifuri に渡した自分の Google Cloud の資格情報だけで触る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
+    about: 'この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
     def: 'connector',
     commands: CLIENT,
     check: (v) => (v === 'connector' || v === 'gcp' ? null : 'must be connector or gcp'),

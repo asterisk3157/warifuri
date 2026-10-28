@@ -152,8 +152,8 @@ const silRows = (n) => h('div', { 'aria-hidden': 'true', style: { display: 'flex
 function displaySection() {
   const theme = h('div', { class: 'wf-seg', role: 'group', 'aria-label': 'テーマ' },
     h('button', { type: 'button', 'aria-pressed': 'true', text: 'ライト' }),
-    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false', text: 'ダーク（準備中）' }),
-    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false', text: '自動（準備中）' }));
+    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false' }, 'ダーク', soonBadge()),
+    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false' }, '自動', soonBadge()));
   return [
     h('section', { class: 'wf-surface wf-theme' }, h('span', { class: 'wf-muted', text: 'テーマ' }), theme),
     h('section', { class: 'wf-placeholder', 'aria-disabled': 'true', style: { gap: '4px' } },
@@ -165,7 +165,7 @@ function lifeSection() {
   const pair = () => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, skel('40%', '12px'), skel('100%', '32px'));
   return h('section', { class: 'wf-placeholder', 'aria-disabled': 'true' },
     h('div', { class: 'wf-placeholder-head' }, h('h2', { text: '自身について' }), soonBadge()),
-    h('p', { text: '秘書が予定を組むときに使います。空き時間を探す機能と一緒に使えるようになります。' }),
+    h('p', { text: '秘書が予定を組むときに使う、生活の決まりと場所です。' }),
     h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: '#f9f9fb' } },
       h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' } }, pair(), pair(), pair(), pair()), pair()));
 }

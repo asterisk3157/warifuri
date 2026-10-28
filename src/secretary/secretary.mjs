@@ -31,6 +31,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { openLedger } from '../ledger/ledger.mjs';
 import { initHome, decodeText } from '../config.mjs';
+import { secretaryConfigured } from '../knowledge/profiles.mjs';
 import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME, BIN } from '../client/connect.mjs';
 import { JOBS, parseWhen, parseNight, inNight, localIso, showWhen } from './schedule.mjs';
 
@@ -203,6 +204,8 @@ export function enable(cfg, ctx = {}) {
   const file = writeMcpConfig(cfg.home, { url, key, platform });
   lines.push(`wrote the secretary's MCP config to ${file} (readable only by you; it holds the key)`);
   lines.push(`wrote WARIFURI_SECRETARY=on in ${setSetting(cfg, 'WARIFURI_SECRETARY', 'on')}`);
+  const plugins = setSecretaryPlugin(cfg.home, true);
+  if (plugins) lines.push(`wrote the secretary in ${plugins}, so agents' notes go to the inbox`);
   if (env.WARIFURI_SECRETARY && env.WARIFURI_SECRETARY !== 'on') lines.push(`note: WARIFURI_SECRETARY=${env.WARIFURI_SECRETARY} in the environment wins over the file`);
   lines.push(`schedule: ${describeSchedule(scheduleFrom(values))}`);
   lines.push(
@@ -215,9 +218,30 @@ export function enable(cfg, ctx = {}) {
   return { lines, problems: [] };
 }
 
+// The secretary's line in <home>/plugins.yaml, which turns agents' notes to the inbox (原則22):
+// added by enable, taken out by disable. Other lines stay. Returns the file when it changed.
+const SECRETARY_LINE = /^\s*(-\s*)?(name:\s*)?["']?secretary["']?\s*:?\s*(#.*)?$/;
+export function setSecretaryPlugin(home, on) {
+  const file = path.join(home, 'plugins.yaml');
+  let text = '';
+  try {
+    text = decodeText(fs.readFileSync(file)).text;
+  } catch {
+    text = '';
+  }
+  if (on === secretaryConfigured(home)) return null;
+  const next = on
+    ? `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text ? '' : '# 入れるプラグイン\n'}- secretary\n`
+    : text.split('\n').filter((l) => !SECRETARY_LINE.test(l)).join('\n');
+  fs.writeFileSync(file, next);
+  return file;
+}
+
 // `warifuri secretary disable`: the schedule off, and the secretary's key revoked.
 export function disable(cfg) {
   const lines = [`wrote WARIFURI_SECRETARY=off in ${setSetting(cfg, 'WARIFURI_SECRETARY', 'off')}`];
+  const plugins = setSecretaryPlugin(cfg.home, false);
+  if (plugins) lines.push(`took the secretary out of ${plugins}; agents' notes go straight to the knowledge again`);
   if (fs.existsSync(cfg.values.WARIFURI_DB)) {
     let ledger;
     try {
