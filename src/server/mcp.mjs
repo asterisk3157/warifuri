@@ -64,6 +64,8 @@ const guarded = (fn) => async (args) => {
 
 // The tools only the secretary may call: its reports, proposals and questions to the person,
 // and the autonomy that says how far it may act alone. Other agents read them but do not write.
+// What reply_options says back: the buttons are attached, the question is not written yet.
+const REPLY_OPTIONS_NEXT = 'ボタンを付けました。返事の本文に、ボタンで答える問いをそのまま書いてください。ボタンのことは書きません。';
 const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'reply_options', 'autonomy_outcome', 'autonomy_set']);
 // The tools that put, move or remove bookings. While the secretary runs, only it decides the
 // time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
@@ -741,12 +743,13 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'recommend first (it is shown as the main button). Pressing one sends its words as the person\'s message; the ' +
       'person may also just type. To offer a thread, give exactly ' +
       `「${THREAD_OPTION}」 and 「ここで続ける」: pressing ${THREAD_OPTION} opens a thread from your reply instead of ` +
-      'sending. Call it once per reply, before you finish; a later call replaces the buttons.',
+      'sending. The buttons only answer: your reply itself must still ask the question in full, in Japanese, and ' +
+      'never mention the buttons. Call it once per reply, before you finish; a later call replaces the buttons.',
     { options: z.array(z.string()), thread: z.string().min(1).optional() },
     async ({ options, thread: t }) => {
       const id = threadArg(t) ?? ledger.ensureThread('secretary', writer).id;
       const out = ledger.setReplyOptions(id, options, writer);
-      return result({ thread: out.id, options: JSON.parse(out.pending_options) });
+      return result({ thread: out.id, options: JSON.parse(out.pending_options), next: REPLY_OPTIONS_NEXT });
     },
   );
 

@@ -310,7 +310,9 @@ test('the ask and reply_options tools write as the calling device, in the thread
   const asked = await inThread.callTool({ name: 'ask', arguments: { questions: [Q()] } });
   assert.equal(asked.structuredContent.thread_id, sub.id);
   const buttons = await inThread.callTool({ name: 'reply_options', arguments: { options: ['スレッドで話す', 'ここで続ける'] } });
-  assert.deepEqual(buttons.structuredContent, { thread: sub.id, options: ['スレッドで話す', 'ここで続ける'] });
+  assert.deepEqual(buttons.structuredContent.options, ['スレッドで話す', 'ここで続ける']);
+  assert.equal(buttons.structuredContent.thread, sub.id);
+  assert.match(buttons.structuredContent.next, /返事の本文に、ボタンで答える問いをそのまま書いて/);
   assert.equal(ledger.getThread(main.id).pending_options, null);
   // A header naming no thread falls back to the secretary's conversation.
   const stray = await connect({ 'X-Warifuri-Thread': 'c_20261001000000_zzzzzz' });
