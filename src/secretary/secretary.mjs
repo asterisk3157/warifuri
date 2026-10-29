@@ -6,7 +6,7 @@
 //                                    device key of `secretary`. Owner-only (600), never printed
 //   <home>/secretary/run.lock        the pid of the run going on, so serve and
 //                                    `warifuri secretary run` never run two at once
-//   <home>/secretary/logs/<job>.log  claude's output of the last run (<job>.prev.log before it)
+//   <home>/secretary/logs/<job>.log  claude's output of the last run (<job>/<when>.log before it)
 //   <home>/secretary/chat/           the working directory of the conversation (chat.mjs), so
 //                                    that claude finds its sessions there again after a restart
 //   <home>/secretary/mcp-<thread>.json  the same config for a thread started from a message,
@@ -357,11 +357,22 @@ function lock(file) {
   return false;
 }
 
-// The log file of this run; the one before is kept as <job>.prev.log.
+// How many runs before the last one are kept, for each job.
+export const LOG_KEEP = 30;
+
+// The log file of this run. The runs before it are kept as <job>/<when it ended>.log, the
+// last LOG_KEEP of them, so a reply from yesterday can still be looked into.
 export function openLog(dir, job, platform) {
   ownerOnlyDir(dir, platform);
   const file = path.join(dir, `${job}.log`);
-  if (fs.existsSync(file)) fs.renameSync(file, path.join(dir, `${job}.prev.log`));
+  if (fs.existsSync(file)) {
+    const old = path.join(dir, job);
+    ownerOnlyDir(old, platform);
+    const at = fs.statSync(file).mtime.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+    fs.renameSync(file, path.join(old, `${at}.log`));
+    const kept = fs.readdirSync(old).filter((n) => n.endsWith('.log')).sort();
+    for (const n of kept.slice(0, Math.max(0, kept.length - LOG_KEEP))) fs.unlinkSync(path.join(old, n));
+  }
   const fd = fs.openSync(file, 'w', 0o600);
   if (platform !== 'win32') fs.chmodSync(file, 0o600);
   return { file, fd };
