@@ -17,7 +17,7 @@ import { openLedger } from '../src/ledger/ledger.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { parseWhen, parseNight, inNight, latestSlot, nextSlot, countSlots, localIso } from '../src/secretary/schedule.mjs';
 import { createScheduler } from '../src/secretary/scheduler.mjs';
-import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, writeClaudeSettings, readSecretaryKey, paths } from '../src/secretary/secretary.mjs';
+import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, writeClaudeSettings, readSecretaryKey, paths, openLog, LOG_KEEP } from '../src/secretary/secretary.mjs';
 import { decideTools, isReadTool } from '../src/secretary/tool-hook.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-secretary-'));
@@ -265,9 +265,11 @@ test('run starts claude with only warifuri tools, the connectors off, the key on
   if (process.platform !== 'win32') assert.equal(fs.statSync(logFile).mode & 0o777, 0o600);
   assert.ok(!fs.existsSync(paths(w.home).lock));
 
-  // A second run keeps the one before as nightly.prev.log.
+  // A second run keeps the one before under nightly/, named by when it ended.
   assert.equal(cli(['secretary', 'run', 'nightly'], { home: w.home, env: w.env }).status, 0);
-  assert.ok(fs.existsSync(path.join(paths(w.home).logs, 'nightly.prev.log')));
+  const kept = fs.readdirSync(path.join(paths(w.home).logs, 'nightly'));
+  assert.equal(kept.length, 1);
+  assert.match(kept[0], /^\d{8}T\d{6}Z\.log$/);
   assert.equal(cli(['secretary', 'run', 'lunch'], { home: w.home, env: w.env }).status, 2);
 });
 
@@ -437,4 +439,17 @@ test('enable turns the inbox on in plugins.yaml and disable takes it out, keepin
   const off = cli(['secretary', 'disable'], { home: w.home, env: w.env });
   assert.equal(off.status, 0, off.stderr);
   assert.equal(fs.readFileSync(path.join(w.home, 'plugins.yaml'), 'utf8'), '- calendar\n');
+});
+
+test('openLog keeps the last LOG_KEEP runs of a job, oldest dropped first', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-logs-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'chat'));
+  for (let i = 0; i < LOG_KEEP; i += 1) fs.writeFileSync(path.join(dir, 'chat', `20260101T0000${String(i).padStart(2, '0')}Z.log`), '');
+  fs.writeFileSync(path.join(dir, 'chat.log'), 'last run');
+  fs.closeSync(openLog(dir, 'chat', process.platform).fd);
+  const kept = fs.readdirSync(path.join(dir, 'chat')).sort();
+  assert.equal(kept.length, LOG_KEEP);
+  assert.ok(!kept.includes('20260101T000000Z.log'));
+  assert.equal(fs.readFileSync(path.join(dir, 'chat.log'), 'utf8'), '');
 });

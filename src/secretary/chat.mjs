@@ -25,7 +25,7 @@
 //   conversation; the main session takes digests in order, as soon as it is free, and a turn
 //   of digests alone shows no reply.
 // - claude runs in <home>/secretary/chat, so that it finds its sessions there after a restart.
-//   Its output goes to logs/chat.log (chat.prev.log before it), owner-only; the key is only
+//   Its output goes to logs/chat.log (chat/<when>.log before it), owner-only; the key is only
 //   in the MCP config files, as for the jobs.
 //
 // - 依頼: an agent on another device asks the secretary for something (ask_secretary: most often
