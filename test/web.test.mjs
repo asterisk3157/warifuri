@@ -181,6 +181,22 @@ test('endpoint shapes', async (t) => {
   assert.deepEqual([sec.items, sec.threads, sec.thread], [[], {}, null]);
 });
 
+test('秘書: a calendar under a reply is drawn from the bookings as they are now, with the changed ones to outline', async (t) => {
+  const { base, ledger } = await start(t);
+  const S = { actor: 'device-key', device: 'secretary' };
+  const { booking: b } = ledger.book({ kind: 'fixed', title: '定例会', starts_at: '2026-11-13T18:00:00+09:00', ends_at: '2026-11-13T21:00:00+09:00' }, S);
+  const thread = ledger.ensureThread('secretary', { actor: 'web' });
+  ledger.addMessage(thread.id, { role: 'secretary', body: '直しました。', data: { calendar: { from: '2026-11-11T15:00:00.000Z', to: '2026-11-18T15:00:00.000Z', marks: [b.id] } } }, S);
+  // Booked after the reply: shown too, since the calendar is read when the window asks.
+  ledger.book({ kind: 'fixed', title: 'ゼミ', starts_at: '2026-11-16T10:00:00+09:00', ends_at: '2026-11-16T12:00:00+09:00' }, S);
+  const [msg] = (await (await get(base, '/web/api/secretary')).json()).items;
+  assert.equal(msg.calendar.from, '2026-11-11T15:00:00.000Z');
+  assert.equal(msg.calendar.to, '2026-11-18T15:00:00.000Z');
+  assert.deepEqual(msg.calendar.marks, [b.id]);
+  assert.deepEqual(msg.calendar.bookings.map((x) => x.title), ['定例会', 'ゼミ']);
+  assert.ok(msg.calendar.profiles);
+});
+
 test('秘書: the conversation only, oldest first, with questions; reports, proposals and warifuri\'s calls stay out', async (t) => {
   const { base, ledger } = await start(t);
   const S = { actor: 'device-key', device: 'secretary' };
@@ -196,8 +212,9 @@ test('秘書: the conversation only, oldest first, with questions; reports, prop
   assert.deepEqual(out.secretary, { on: false, replying: false });
   assert.deepEqual(out.items.map((x) => [x.type, x.role ?? x.state]), [['message', 'secretary'], ['ask', 'open']]);
   const [msg, ask] = out.items;
-  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
+  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'calendar', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
   assert.equal(msg.body, '<b>おはようございます</b>', 'returned as the text it is; the page builds the DOM');
+  assert.equal(msg.calendar, null);
   assert.deepEqual([msg.steps, msg.options, msg.scheduled], [[{ kind: 'read', label: '予定を読みました' }], ['置いて'], 'morning']);
   assert.deepEqual(ask, {
     type: 'ask', id: a.id, state: 'open', created_at: a.created_at, answers: [null],

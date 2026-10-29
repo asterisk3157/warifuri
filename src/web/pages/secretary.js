@@ -14,6 +14,7 @@
 
 import { h, s, skel } from '../ui.js';
 import { renderMarkdown } from '../md.js';
+import { weekGrid, rangeLabel } from './calendar.js';
 
 const POLL_MS = 2500;
 const FILES_MAX = 4;
@@ -329,6 +330,32 @@ function requestCard(m) {
     }) : null);
 }
 
+// The calendar under a reply (show_calendar): its days as they are now, the changed bookings
+// outlined. The first time it is drawn, it scrolls to the first of them.
+const dayOf = (iso) => {
+  const d = new Date(iso);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+function replyCalendar(m) {
+  const c = m.calendar;
+  const from = dayOf(c.from);
+  const days = Math.max(1, Math.round((dayOf(Date.parse(c.to) - 1) - from) / 86400000) + 1);
+  const key = `reply-cal-${m.id}`;
+  if (c.marks.length && !view.seen.has(key)) {
+    view.seen.add(key);
+    requestAnimationFrame(() => {
+      const box = document.querySelector(`[data-scroll="${CSS.escape(key)}"]`);
+      const mark = box?.querySelector('.wf-ev-mark');
+      if (box && mark) box.scrollTop = Math.max(0, mark.offsetTop - 24);
+    });
+  }
+  return h('div', { class: 'wf-sec-cal' },
+    weekGrid({
+      from, days, shown: c, now: new Date(), marks: c.marks, key, label: 'カレンダー',
+      bar: h('div', { class: 'wf-week-bar' }, h('span', { class: 'wf-range', text: rangeLabel(from, days) })),
+    }));
+}
+
 function message(m, { where, last, threads }) {
   if (m.role === 'system' && m.request) return requestCard(m);
   if (m.role === 'system') return h('p', { class: 'wf-note', text: m.body });
@@ -364,6 +391,7 @@ function message(m, { where, last, threads }) {
     who(m.scheduled),
     steps(m.steps, false),
     h('div', { class: 'wf-bubble' }, words(m.body, false), options),
+    m.calendar ? replyCalendar(m) : null,
     h('span', { class: 'wf-foot' }, time, threadLink(t, m.id), startThread));
 }
 

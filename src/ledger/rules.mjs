@@ -62,6 +62,9 @@ export const ASK_DESCRIPTION_MAX = 200;
 // 返事の候補: 1–2 short replies under a reply that ends in a question.
 export const REPLY_OPTIONS_MAX = 2;
 export const REPLY_OPTION_MAX = 30;
+// カレンダー under a reply: at most two weeks, and a few bookings outlined.
+export const REPLY_CALENDAR_DAYS = 14;
+export const REPLY_CALENDAR_MARKS = 20;
 // The label of the reply button that opens a thread from the message instead of sending it.
 export const THREAD_OPTION = 'スレッドで話す';
 // The answers the person gives to a proposal, as autonomy outcomes (revoked comes later, after

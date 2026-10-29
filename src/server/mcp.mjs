@@ -21,7 +21,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import {
   STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
-  ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION,
+  ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION, REPLY_CALENDAR_DAYS, REPLY_CALENDAR_MARKS,
 } from '../ledger/rules.mjs';
 import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
@@ -66,7 +66,7 @@ const guarded = (fn) => async (args) => {
 // and the autonomy that says how far it may act alone. Other agents read them but do not write.
 // What reply_options says back: the buttons are attached, the question is not written yet.
 const REPLY_OPTIONS_NEXT = 'ボタンを付けました。返事の本文に、ボタンで答える問いをそのまま書いてください。ボタンのことは書きません。';
-const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'reply_options', 'autonomy_outcome', 'autonomy_set']);
+const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set']);
 // The tools that put, move or remove bookings. While the secretary runs, only it decides the
 // time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
 const BOOKING_TOOLS = new Set(['book', 'unbook']);
@@ -751,6 +751,22 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       const id = threadArg(t) ?? ledger.ensureThread('secretary', writer).id;
       const out = ledger.setReplyOptions(id, options, writer);
       return result({ thread: out.id, options: JSON.parse(out.pending_options), next: REPLY_OPTIONS_NEXT });
+    },
+  );
+
+  tool(
+    'show_calendar',
+    `Show the calendar of from–to (at most ${REPLY_CALENDAR_DAYS} days, ISO date-times with the offset) under the reply ` +
+      'you are writing now, as the window draws it: what is booked then, as it is when the person looks. Use it after you ' +
+      'booked, moved or removed something, or changed one of the person\'s calendar events, with the days around it ' +
+      `(a week from the day before is usual), and when the person asks to see a day or a week. marks: the ids of up to ${REPLY_CALENDAR_MARKS} ` +
+      'bookings to outline, the ones just changed. In the reply, say only what changed; do not read the calendar out. ' +
+      'Call it once per reply, before you finish; a later call replaces it.',
+    { from: z.string(), to: z.string(), marks: z.array(z.string()).optional(), thread: z.string().min(1).optional() },
+    async ({ from, to, marks, thread: t }) => {
+      const id = threadArg(t) ?? ledger.ensureThread('secretary', writer).id;
+      const out = ledger.setReplyCalendar(id, given({ from, to, marks }), writer);
+      return result({ thread: out.id, calendar: JSON.parse(out.pending_calendar) });
     },
   );
 

@@ -48,6 +48,8 @@ import {
   checkAsk,
   ASK_QUESTIONS_MAX,
   checkReplyOptions,
+  REPLY_CALENDAR_DAYS,
+  REPLY_CALENDAR_MARKS,
   checkAutonomy,
   checkStateExtra,
   AUTONOMY_KINDS,
@@ -96,7 +98,7 @@ const REPORT_COLUMNS = ['id', 'kind', 'title', 'body', 'device', 'created_at'];
 export const REPORTS_DEFAULT = 10;
 export const REPORTS_MAX = 50;
 const THREAD_COLUMNS = [
-  'id', 'kind', 'title', 'runner', 'session_id', 'seen_until', 'parent_id', 'read_until', 'pending_options', 'created_at', 'updated_at',
+  'id', 'kind', 'title', 'runner', 'session_id', 'seen_until', 'parent_id', 'read_until', 'pending_options', 'pending_calendar', 'created_at', 'updated_at',
 ];
 const MESSAGE_COLUMNS = [
   'id', 'thread_id', 'role', 'kind', 'body', 'title', 'autonomy_kind', 'about', 'state', 'answer', 'answered_at',
@@ -1293,10 +1295,11 @@ export function openLedger(path, options = {}) {
     const before = threadById(id);
     if (!before) throw new LedgerError([`${id} という会話はありません`]);
     const input = fields ?? {};
-    const problems = unknownFields(input, ['session_id', 'seen_until', 'runner', 'read_until', 'pending_options']);
+    const problems = unknownFields(input, ['session_id', 'seen_until', 'runner', 'read_until', 'pending_options', 'pending_calendar']);
     const next = { ...before, ...input };
     if (next.read_until !== null && messageRow(next.read_until)?.thread_id !== id) problems.push(`${next.read_until} はこの会話のメッセージではありません`);
     if (next.pending_options !== null && typeof next.pending_options !== 'string') problems.push('pending_options は JSON の文字列です');
+    if (next.pending_calendar !== null && typeof next.pending_calendar !== 'string') problems.push('pending_calendar は JSON の文字列です');
     if (!THREAD_RUNNERS.includes(next.runner)) problems.push(`runner は ${THREAD_RUNNERS.join(', ')} のどれかです`);
     if (next.session_id !== null && (typeof next.session_id !== 'string' || !/^[A-Za-z0-9-]{1,100}$/.test(next.session_id))) {
       problems.push('session_id は英数字と - で書きます');
@@ -1449,6 +1452,26 @@ export function openLedger(path, options = {}) {
     if (checked.problems) throw new LedgerError(checked.problems);
     if (!threadById(threadId)) throw new LedgerError([`${threadId} という会話はありません`]);
     return updateThread(threadId, { pending_options: JSON.stringify(checked.options) }, opts);
+  }
+
+  // カレンダー: the days to show under the reply the secretary is writing in a thread now,
+  // with the bookings to outline (what was just changed). The window draws them as they are
+  // when it is opened.
+  function setReplyCalendar(threadId, { from, to, marks = [] } = {}, opts) {
+    const problems = [];
+    const fromMs = parseBound(from, 'from', problems);
+    const toMs = parseBound(to, 'to', problems);
+    if (!problems.length && toMs <= fromMs) problems.push('to は from より後にします');
+    if (!problems.length && toMs - fromMs > REPLY_CALENDAR_DAYS * 86400000) problems.push(`見せる期間は${REPLY_CALENDAR_DAYS}日までです`);
+    if (!Array.isArray(marks) || marks.length > REPLY_CALENDAR_MARKS || marks.some((id) => typeof id !== 'string')) {
+      problems.push(`marks は予定の id を${REPLY_CALENDAR_MARKS}個まで並べます`);
+    } else {
+      for (const id of marks) if (!one('SELECT id FROM bookings WHERE id = ?', id)) problems.push(`${id} という予定はありません`);
+    }
+    if (!threadById(threadId)) problems.push(`${threadId} という会話はありません`);
+    if (problems.length) throw new LedgerError(problems);
+    const calendar = { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), marks: [...new Set(marks)] };
+    return updateThread(threadId, { pending_calendar: JSON.stringify(calendar) }, opts);
   }
 
   // 添付. A file the person uploaded, before the message it goes with.
@@ -2161,6 +2184,7 @@ export function openLedger(path, options = {}) {
     threadCounts,
     markThreadRead,
     setReplyOptions,
+    setReplyCalendar,
     addMessage,
     setMessageData,
     addAttachment,

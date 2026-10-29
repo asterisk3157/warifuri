@@ -436,13 +436,16 @@ export function createChat(ledger, cfg, ctx = {}) {
     }
     if (restarted) note(thread.id, '前の会話が見つからなかったので、新しく始めました。最近のやりとりは渡してあります。');
     const ok = !out.error && out.code === 0 && out.result && !out.result.isError;
-    let options = null;
-    try {
-      const pending = ledger.getThread(thread.id)?.pending_options;
-      options = pending ? JSON.parse(pending) : null;
-    } catch {
-      options = null;
-    }
+    const pendingJson = (field) => {
+      try {
+        const pending = ledger.getThread(thread.id)?.[field];
+        return pending ? JSON.parse(pending) : null;
+      } catch {
+        return null;
+      }
+    };
+    const options = pendingJson('pending_options');
+    const calendar = pendingJson('pending_calendar');
     let reply = null;
     if (!visible) {
       if (!ok) log(`secretary chat: a turn of digests ended with ${out.error ?? out.code ?? out.signal}`);
@@ -454,6 +457,7 @@ export function createChat(ledger, cfg, ctx = {}) {
       const steps = (out.steps ?? []).map((s) => ({ kind: s.kind, label: s.label }));
       if (steps.length) data.steps = steps.slice(0, 30);
       if (options?.length) data.options = options;
+      if (calendar) data.calendar = calendar;
       if (trigger?.data?.job) data.scheduled = trigger.data.job;
       reply = ledger.addMessage(thread.id, { role: 'secretary', body: text, data }, WRITER);
     } else if (ok) note(thread.id, '返事が空でした。もう一度送ってください。');
@@ -465,10 +469,10 @@ export function createChat(ledger, cfg, ctx = {}) {
       log(`secretary chat: claude ended with ${out.code ?? out.signal}; output in ${paths(cfg.home).logs}`);
       note(thread.id, '返事を作れませんでした。もう一度送ってください。');
     }
-    // A session that answered is kept; one that failed to start is not. The buttons asked for
-    // in this turn went with its reply (or are dropped with it).
+    // A session that answered is kept; one that failed to start is not. The buttons and the
+    // calendar asked for in this turn went with its reply (or are dropped with it).
     ledger.updateThread(thread.id, {
-      seen_until: lastId, pending_options: null, ...(ok ? { session_id: out.result.sessionId ?? sessionId } : {}),
+      seen_until: lastId, pending_options: null, pending_calendar: null, ...(ok ? { session_id: out.result.sessionId ?? sessionId } : {}),
     }, WRITER);
     live.delete(thread.id);
     emit({ type: 'done', thread: thread.id, message: reply?.id ?? null, fed: feed.map((m) => m.id) });

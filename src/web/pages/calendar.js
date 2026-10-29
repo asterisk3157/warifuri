@@ -75,7 +75,7 @@ function dayEvents(bookings, day) {
 
 const hourOf = (ms, day) => (ms - day.getTime()) / 3600000;
 
-function rangeLabel(from, days) {
+export function rangeLabel(from, days) {
   if (days === 1) return `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日（${WEEKDAYS[from.getDay()]}）`;
   const last = addDays(from, days - 1);
   const tail = last.getMonth() === from.getMonth() ? `${last.getDate()}日` : `${last.getMonth() + 1}月${last.getDate()}日`;
@@ -103,9 +103,10 @@ function toolbar(ctx, from, days) {
       h('span', { class: 'wf-seg-soon', 'aria-disabled': 'true', title: '準備中' }, '月', soonBadge())));
 }
 
-function grid(data, ctx) {
-  const { from, days, shown } = data;
-  const now = ctx.now;
+// The grid of some days: shown is what /web/api/calendar returns. sel and onPick (id or null)
+// for the booking picked; marks, the ids of bookings to outline; bar, what goes above the
+// days; key, the name of its scroll box (kept when the screen is drawn again).
+export function weekGrid({ from, days, shown, now, sel = null, onPick = null, marks = [], bar = null, key = 'cal', label }) {
   const today = dayStart(now);
   const colors = shown.profiles;
   const list = Array.from({ length: days }, (_, i) => addDays(from, i));
@@ -138,7 +139,7 @@ function grid(data, ctx) {
     ? h('div', { class: 'wf-grid wf-allday', style: { gridTemplateColumns: columns } }, h('span', { class: 'wf-allday-label', text: '終日' }),
       ...allDay.map((bs) => h('div', { class: 'wf-allday-cell' }, ...bs.map((b) => {
         const c = category(b, colors);
-        return h('button', { type: 'button', class: ['wf-allday-ev', view.sel === b.id && 'wf-ev-picked'], title: b.title, style: { background: tint(c.color) }, onclick: () => { view.sel = view.sel === b.id ? null : b.id; ctx.rerender(); } }, b.title);
+        return h('button', { type: 'button', class: ['wf-allday-ev', sel === b.id && 'wf-ev-picked', marks.includes(b.id) && 'wf-ev-mark'], title: b.title, style: { background: tint(c.color) }, onclick: onPick ? () => onPick(sel === b.id ? null : b.id) : null }, b.title);
       }))))
     : null;
   const cols = list.map((d, i) => {
@@ -150,12 +151,12 @@ function grid(data, ctx) {
       const ht = Math.max(18, ((x.e - x.s) / 3600000) * ROW - 4);
       const past = x.e <= now.getTime();
       const short = ht < SHORT;
-      const picked = view.sel === x.b.id;
+      const picked = sel === x.b.id;
       return h('button', {
-        type: 'button', class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short', picked && 'wf-ev-picked'], data: { key: `ev-${x.b.id}-${i}` },
+        type: 'button', class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short', picked && 'wf-ev-picked', marks.includes(x.b.id) && 'wf-ev-mark'], data: { key: `ev-${x.b.id}-${i}` },
         title: `${x.b.title}\n${withLabel(c, span(x.b))}`, 'aria-pressed': String(picked),
         style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color) },
-        onclick: () => { view.sel = picked ? null : x.b.id; ctx.rerender(); },
+        onclick: onPick ? () => onPick(picked ? null : x.b.id) : null,
       }, h('span', { class: 'wf-ev-title', text: x.b.title }));
     });
     const nowH = hourOf(now.getTime(), d);
@@ -164,11 +165,11 @@ function grid(data, ctx) {
       : null;
     return h('div', { class: ['wf-daycol', (d.getDay() === 0 || d.getDay() === 6) && 'wf-weekend'], style: { height: `${height}px` } }, ...lines, ...evs, line);
   });
-  return h('section', { class: 'wf-week wf-surface', 'aria-label': days > 1 ? '週の予定' : '日の予定' },
-    toolbar(ctx, from, days),
+  return h('section', { class: 'wf-week wf-surface', 'aria-label': label ?? (days > 1 ? '週の予定' : '日の予定') },
+    bar,
     head,
     allDayRow,
-    h('div', { class: 'wf-grid-scroll', data: { scroll: 'cal' } },
+    h('div', { class: 'wf-grid-scroll', data: { scroll: key } },
       h('div', { class: 'wf-grid wf-grid-body', style: { gridTemplateColumns: columns } }, h('div', { class: 'wf-hours' }, ...hours), ...cols)));
 }
 
@@ -232,6 +233,15 @@ function todayCard(data, ctx) {
   return h('section', { class: 'wf-today-card wf-surface' },
     h('div', { class: 'wf-today-head' }, h('h2', { text: '今日の予定' }), h('span', { class: 'wf-muted', text: mdw(today) })),
     rows.length ? rows : h('div', { class: 'wf-empty', text: '今日の予定はありません' }));
+}
+
+function grid(data, ctx) {
+  const { from, days, shown } = data;
+  const onPick = (id) => {
+    view.sel = id;
+    ctx.rerender();
+  };
+  return weekGrid({ from, days, shown, now: ctx.now, sel: view.sel, onPick, bar: toolbar(ctx, from, days) });
 }
 
 const selected = (data) => (view.sel ? [...data.shown.bookings, ...data.today.bookings].find((b) => b.id === view.sel) ?? null : null);

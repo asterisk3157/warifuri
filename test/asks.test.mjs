@@ -62,7 +62,7 @@ test('schema: a version 8 file keeps its thread, messages and proposals, and gai
   assert.throws(() => raw.prepare("INSERT INTO records (at, actor, entity, entity_id, action, changes) VALUES ('x', 'web', 'attachment', 'a1', 'create', '{}')").run(), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 10);
+  assert.equal(SCHEMA_VERSION, 11);
   const L = openLedger(file, { now: ticking() });
   const thread = L.getThread();
   assert.equal(thread.session_id, 's-1');
@@ -79,7 +79,7 @@ test('schema: a version 8 file keeps its thread, messages and proposals, and gai
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '10');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '11');
   for (const t of ['messages_v8', 'threads_v8', 'records_v8']) assert.equal(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(t), undefined);
   for (const i of ['messages_thread', 'messages_state', 'threads_kind', 'records_entity']) assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(i), i);
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);
@@ -350,7 +350,7 @@ test('the secretary\'s tools answer only the secretary\'s device, and nobody whi
   const refused = await laptop.callTool({ name: 'ask', arguments: { questions: [Q()] } });
   assert.equal(refused.isError, true);
   assert.match(refused.content[0].text, /ask は秘書だけが使えるツールです/);
-  for (const name of ['report', 'propose', 'proposal_done', 'reply_options', 'autonomy_outcome', 'autonomy_set']) {
+  for (const name of ['report', 'propose', 'proposal_done', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set']) {
     const out = await laptop.callTool({ name, arguments: {} });
     assert.equal(out.isError, true, name);
   }
