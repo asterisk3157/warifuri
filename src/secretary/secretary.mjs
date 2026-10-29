@@ -277,6 +277,9 @@ export function factLines(title, name, { now, schedule }) {
     `- 夜の時間帯: ${fmtNight(schedule.night).replace('-', '〜')}`,
     `- ${calendar}`,
     ...(tools.length ? [`- 使える外の道具: ${tools.join('、')}。この範囲の外のことはしません。`] : []),
+    ...(tools.length || schedule.connectors
+      ? ['- 外の道具は、起きた直後はまだ読み込み中で、ツールの一覧に出ていないことがあります。見えないときは ToolSearch で探してから使い、探しても見つからないときだけ、つながっていないとみなします。']
+      : []),
   ];
 }
 
