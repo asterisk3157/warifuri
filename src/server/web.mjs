@@ -32,6 +32,7 @@ import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../le
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
 import { calendarSvg } from '../calendar/image.mjs';
+import { readSettings, weekBands } from '../ledger/settings.mjs';
 import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
@@ -505,7 +506,9 @@ export function createWeb({
     }
     if (Date.parse(out.to) - Date.parse(out.from) > MAX_RANGE_MS) return res.status(400).json({ error: 'bad range', problems: ['期間は42日までです'] });
     const bookings = out.bookings.map(bookingOut);
-    return res.json({ now: nowIso(), from: out.from, to: out.to, bookings, profiles: profileColors(home, bookings.map((b) => b.profile)) });
+    const week = weekBands(readSettings(ledger).week.slots, Date.parse(out.from), Date.parse(out.to));
+    const names = [...bookings.map((b) => b.profile), ...week.map((w) => w.profile)];
+    return res.json({ now: nowIso(), from: out.from, to: out.to, bookings, week, profiles: profileColors(home, names) });
   });
 
   // The open tasks with their holds, and for each task the ones before it.

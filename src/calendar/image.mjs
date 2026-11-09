@@ -4,14 +4,17 @@
 
 import { spawn } from 'node:child_process';
 import { renderWeek, weekData } from './weekview.mjs';
+import { readSettings, weekBands } from '../ledger/settings.mjs';
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
-// The SVG of { from, to, marks } with the bookings of ledger.schedule as they are now.
+// The SVG of { from, to, marks } with the bookings of ledger.schedule as they are now, and the
+// week type of the settings.
 // colorsOf: the profile names → { name: '#rrggbb' }.
 export function calendarSvg(ledger, { from, to, marks = [] }, { colorsOf = () => ({}), now = new Date() } = {}) {
-  const { bookings } = ledger.schedule({ from, to });
-  const data = weekData({ from, to, bookings, colors: colorsOf(bookings.map((b) => b.profile)), marks });
+  const out = ledger.schedule({ from, to });
+  const bands = weekBands(readSettings(ledger).week.slots, Date.parse(out.from), Date.parse(out.to));
+  const data = weekData({ from, to, bookings: out.bookings, colors: colorsOf(out.bookings.map((b) => b.profile)), marks, bands });
   const today = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   return renderWeek({ ...data, today });
 }

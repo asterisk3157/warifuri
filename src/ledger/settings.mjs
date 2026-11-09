@@ -1,7 +1,8 @@
 // The person's settings that scheduling reads: life (生活: sleep, meals, fixed commitments,
 // written as plain rules), places (場所と移動時間), limits (上限: hours a day, the size of a
-// block, the hours when blocks may be placed) and calendar (カレンダー: the events not to take
-// in from the person's calendars). Each is a section of the settings table, one
+// block, the hours when blocks may be placed), calendar (カレンダー: the events not to take
+// in from the person's calendars) and week (週の型: where the person is at set times of the
+// week, and which profile's work goes there). Each is a section of the settings table, one
 // key per field (life.rules, places.places, places.travel, limits.day_max_hours, ...), the
 // value as JSON text, and each change is recorded as entity 'settings' with the section as
 // its id. Unset fields read as their defaults.
@@ -11,7 +12,7 @@
 
 import { LedgerError } from './ledger.mjs';
 
-export const SECTIONS = ['life', 'places', 'limits', 'calendar'];
+export const SECTIONS = ['life', 'places', 'limits', 'calendar', 'week'];
 
 export const RULES_MAX = 50;
 export const RULE_MAX = 200;
@@ -21,6 +22,8 @@ export const PLACE_NOTE_MAX = 200;
 export const SKIP_MAX = 50;
 export const SKIP_TITLE_MAX = 100;
 export const SKIP_CALENDAR_MAX = 200;
+export const WEEK_SLOTS_MAX = 50;
+export const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 // The defaults of the limits: a working day of 8 hours placed between 09:00 and 21:00, in
 // blocks of 30 to 120 minutes. A scheduler stays inside them until the person changes them.
@@ -37,6 +40,7 @@ const DEFAULTS = {
   places: { places: [], travel: [] },
   limits: LIMIT_DEFAULTS,
   calendar: { skip: [] },
+  week: { slots: [] },
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
@@ -159,6 +163,61 @@ function checkCalendar(value, problems) {
   };
 }
 
+// week: { slots: [{ days, start, end, place, profile? }] }: where the person is at set times
+// of every week. days is "daily", "weekdays" (月〜金) or a list such as ["月","木"]; start and
+// end are HH:MM on the same day; place a name (best one of places.places); profile the work
+// that goes there. Not busy time: a condition for placing work.
+function checkWeek(value, problems) {
+  if (!isObject(value)) return refuse(problems, 'week は { slots: [...] } の形です');
+  unknownKeys(value, ['slots'], 'week ', problems);
+  if (value.slots === undefined) return {};
+  if (!Array.isArray(value.slots)) return refuse(problems, 'week.slots は配列です');
+  if (value.slots.length > WEEK_SLOTS_MAX) problems.push(`week.slots は ${WEEK_SLOTS_MAX} 件までです`);
+  return {
+    slots: value.slots.map((x, i) => {
+      const label = `week.slots の ${i + 1} 件目`;
+      if (!isObject(x)) {
+        problems.push(`${label}は { days, start, end, place, profile? } の形です`);
+        return null;
+      }
+      unknownKeys(x, ['days', 'start', 'end', 'place', 'profile'], label, problems);
+      let days = x.days;
+      if (days !== 'daily' && days !== 'weekdays') {
+        if (!Array.isArray(days) || days.length === 0 || days.some((d) => !WEEKDAYS.includes(d)) || new Set(days).size !== days.length) {
+          problems.push(`${label}の days は "daily"、"weekdays" か、["月","木"] のような曜日の配列です`);
+          days = null;
+        } else days = WEEKDAYS.filter((d) => days.includes(d));
+      }
+      const times = [['start', x.start], ['end', x.end]];
+      for (const [k, v] of times) if (typeof v !== 'string' || !HHMM.test(v)) problems.push(`${label}の ${k} は HH:MM(00:00 から 24:00)で書きます`);
+      if (HHMM.test(x.start ?? '') && HHMM.test(x.end ?? '') && minutesOf(x.start) >= minutesOf(x.end)) problems.push(`${label}の start は end より前にします`);
+      const place = line(x.place, `${label}の place `, PLACE_NAME_MAX, problems);
+      const profile = x.profile === undefined || x.profile === null ? null : line(x.profile, `${label}の profile `, PLACE_NAME_MAX, problems);
+      return { days, start: x.start, end: x.end, place, ...(profile ? { profile } : {}) };
+    }),
+  };
+}
+
+// The slots of the week type laid on the local days of [fromMs, toMs): [{ starts_at, ends_at,
+// place, profile }] by start, as ISO times. slots: week.slots of readSettings.
+export function weekBands(slots, fromMs, toMs) {
+  const out = [];
+  const first = new Date(fromMs);
+  for (let d = new Date(first.getFullYear(), first.getMonth(), first.getDate()); d.getTime() < toMs; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const dow = WEEKDAYS[d.getDay()];
+    for (const slot of slots ?? []) {
+      const on = slot.days === 'daily' || (slot.days === 'weekdays' ? d.getDay() >= 1 && d.getDay() <= 5 : slot.days?.includes(dow));
+      if (!on) continue;
+      const at = (hhmm) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, minutesOf(hhmm)).getTime();
+      const s = at(slot.start);
+      const e = at(slot.end);
+      if (e <= fromMs || s >= toMs) continue;
+      out.push({ starts_at: new Date(s).toISOString(), ends_at: new Date(e).toISOString(), place: slot.place, profile: slot.profile ?? null });
+    }
+  }
+  return out.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+}
+
 // limits: the fields given are merged over the current ones (null puts a field back to its
 // default, and is returned as null so that it is unset), and the result must hold together.
 function checkLimits(value, current, problems) {
@@ -209,7 +268,7 @@ export function readSettings(ledger) {
   return out;
 }
 
-// Writes the sections given ({ life, places, limits, calendar }; a section given as null is put back to
+// Writes the sections given ({ life, places, limits, calendar, week }; a section given as null is put back to
 // its defaults). Every problem of every section is listed before anything is written. Limits
 // need byPerson. Returns readSettings afterwards.
 export function writeSettings(ledger, input, { byPerson = false } = {}, writer) {
@@ -233,7 +292,8 @@ export function writeSettings(ledger, input, { byPerson = false } = {}, writer) 
       section === 'life' ? checkLife(input.life, problems)
         : section === 'places' ? checkPlaces(input.places, now.places, problems)
           : section === 'calendar' ? checkCalendar(input.calendar, problems)
-            : checkLimits(input.limits, now.limits, problems);
+            : section === 'week' ? checkWeek(input.week, problems)
+              : checkLimits(input.limits, now.limits, problems);
     if (problems.length > before) continue;
     plan[section] = Object.fromEntries(Object.entries(checked).map(([k, v]) => [k, v === null ? null : JSON.stringify(v)]));
   }

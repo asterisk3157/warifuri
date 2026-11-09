@@ -159,11 +159,20 @@ export function weekGrid({ from, days, shown, now, sel = null, onPick = null, ba
         onclick: onPick ? () => onPick(picked ? null : x.b.id) : null,
       }, h('span', { class: 'wf-ev-title', text: x.b.title }));
     });
+    // The week type (where the person is then): a light band behind the bookings.
+    const dayEnd = addDays(d, 1).getTime();
+    const bands = (shown.week ?? [])
+      .map((w) => ({ w, s: Math.max(d.getTime(), Date.parse(w.starts_at)), e: Math.min(dayEnd, Date.parse(w.ends_at)) }))
+      .filter((x) => x.e > x.s)
+      .map((x) => h('div', {
+        class: 'wf-band', 'aria-label': `週の型 ${x.w.place}${x.w.profile ? ` · ${x.w.profile}` : ''}`,
+        style: { top: `${(hourOf(x.s, d) - h0) * ROW + 1}px`, height: `${((x.e - x.s) / 3600000) * ROW - 2}px` },
+      }, h('span', { text: x.w.profile ? `${x.w.place} · ${x.w.profile}` : x.w.place })));
     const nowH = hourOf(now.getTime(), d);
     const line = +d === +today && nowH >= h0 && nowH <= h1
       ? h('div', { class: 'wf-nowline', style: { top: `${(nowH - h0) * ROW}px` }, 'aria-label': `現在の時刻 ${fmt(now)}` }, h('span'))
       : null;
-    return h('div', { class: ['wf-daycol', (d.getDay() === 0 || d.getDay() === 6) && 'wf-weekend'], style: { height: `${height}px` } }, ...lines, ...evs, line);
+    return h('div', { class: ['wf-daycol', (d.getDay() === 0 || d.getDay() === 6) && 'wf-weekend'], style: { height: `${height}px` } }, ...lines, ...bands, ...evs, line);
   });
   return h('section', { class: 'wf-week wf-surface', 'aria-label': label ?? (days > 1 ? '週の予定' : '日の予定') },
     bar,

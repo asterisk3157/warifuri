@@ -139,6 +139,8 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-daycol.wf-weekend { background-color: #fcfcfc; }
 .wf-hline { position: absolute; left: 0; right: 0; height: 52px; box-sizing: border-box; border-bottom: 1px solid var(--hair); }
 .wf-ev { position: absolute; box-sizing: border-box; border-radius: 10px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; color: var(--ink); }
+.wf-band { position: absolute; left: 2px; right: 2px; box-sizing: border-box; border: 1px dashed #9ca3af; border-radius: 10px; background: #f3f4f6; pointer-events: none; display: flex; align-items: flex-end; justify-content: flex-end; padding: 4px 8px; overflow: hidden; }
+.wf-band span { font-size: 11px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wf-ev-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-ev-time { font-size: 13px; color: var(--sub); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wf-ev.wf-past { background: #f2f2f4 !important; color: var(--sub); }
