@@ -5,8 +5,11 @@
 // The secretary's replies go too while the person talks from Discord: when what the person
 // last wrote came from Discord (src/notify/discord-chat.mjs), within TALK_MS. Replies to what
 // was written on the screen stay on the screen.
-// Nothing goes in the night, but for a talk in Discord; what came then goes once the night is
-// over, oldest first.
+// With mirror (talking in Discord is on), Discord holds the whole conversation, as the screen
+// does: what the person writes on the screen is copied there, marked WEB_MARK, and the replies
+// to it go there too.
+// Nothing goes in the night, but while the person is talking; what came then goes once the
+// night is over, oldest first.
 //
 // The notifier reads the conversation after the last message it handled (kept in a file in
 // the data directory), so a restart neither loses nor repeats anything. The first time it
@@ -19,13 +22,19 @@ import { chunks, clip } from './discord.mjs';
 import { askComponents, askText, replyComponents } from './discord-chat.mjs';
 
 const BODY_MAX = 1500;
+// The first line of a copy of what the person wrote on the screen.
+export const WEB_MARK = '(Web から)';
 // How long after the person last wrote from Discord the secretary's replies go there too.
 export const TALK_MS = 30 * 60 * 1000;
 
 // The text to send for one message ({ text, mention, components }), or null when it is not
-// sent. talking: the person is talking from Discord now.
-export function noticeOf(m, link, { talking = false } = {}) {
+// sent. talking: the person is talking now (from Discord, or anywhere with mirror).
+export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   const tail = link ? `\n${link}` : '';
+  if (mirror && m.role === 'user' && m.actor !== 'discord') {
+    const words = m.body.trim() || (m.data?.attachments?.length ? 'ファイルを送りました' : '');
+    return words ? { text: `${WEB_MARK}\n${words}`, mention: false, whole: true } : null;
+  }
   if (m.kind === 'ask' && m.state === 'open') {
     return { text: `${askText(m)}${tail}`, mention: true, components: askComponents(m) };
   }
@@ -45,7 +54,8 @@ const personVia = (m) => (m.role === 'user' ? (m.actor === 'discord' ? 'discord'
 // discord: { post } (src/notify/discord.mjs). night: the secretary's night ({ start, end }).
 // picture(m): the PNG of the calendar under a message (show_calendar), or null; it goes with
 // the notice as a file.
-export function createNotifier({ ledger, discord, file, publicUrl = null, night = null, now = () => new Date(), log = () => {}, picture = async () => null }) {
+// mirror: Discord holds the whole conversation (see above).
+export function createNotifier({ ledger, discord, file, publicUrl = null, night = null, mirror = false, now = () => new Date(), log = () => {}, picture = async () => null }) {
   const link = publicUrl ? `${publicUrl.replace(/\/$/, '')}/secretary` : null;
   const read = () => {
     try {
@@ -63,7 +73,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
   // Sends what came since the last call. Resolves to the number sent.
   async function tick() {
     if (!discord || running) return 0;
-    const talkingAt = (state) => state.via === 'discord' && state.viaAt && now() - new Date(state.viaAt) < TALK_MS;
+    const talkingAt = (state) => (mirror || state.via === 'discord') && state.via && state.viaAt && now() - new Date(state.viaAt) < TALK_MS;
     const thread = ledger.getThread();
     if (!thread) return 0;
     running = true;
@@ -99,7 +109,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         if (m.role === 'secretary') state.failure = null;
         const failure = m.role === 'system' ? m.data?.failure ?? null : null;
         const talking = Boolean(talkingAt(state));
-        const notice = failure && failure === state.failure ? null : noticeOf(m, talking ? null : link, { talking });
+        const notice = failure && failure === state.failure ? null : noticeOf(m, talking ? null : link, { talking, mirror });
         if (notice) {
           try {
             const png = m.data?.calendar ? await picture(m).catch(() => null) : null;

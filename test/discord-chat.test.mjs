@@ -188,3 +188,26 @@ test('gateway: says who it is after hello, beats, and resumes after a drop', asy
   assert.equal(sockets.length, 2);
   assert.match(logs.at(-1), /トークンを受けつけませんでした/);
 });
+
+test('notifier: with Discord chat on, what is written on the screen and its reply go to Discord too', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-mirror-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let clock = new Date(2026, 10, 9, 20, 0);
+  const ledger = openLedger(':memory:', { now: () => clock });
+  t.after(() => ledger.close());
+  const thread = ledger.ensureThread('secretary', S);
+  const say = (role, body, writer, data) => ledger.addMessage(thread.id, { role, body, ...(data ? { data } : {}) }, writer);
+  const run = async (mirror) => {
+    const posts = [];
+    const notifier = createNotifier({ ledger, discord: { post: async (text, opts) => posts.push({ text, ...opts }) }, file: path.join(dir, `${mirror}.json`), publicUrl: 'https://w.example.com', mirror, now: () => clock });
+    await notifier.tick();
+    say('user', '明日の予定は？', { actor: 'web' });
+    say('secretary', '明日は2件です。', S);
+    say('user', '入れて', { actor: 'discord' });
+    say('secretary', '入れました。', S);
+    await notifier.tick();
+    return posts.map((p) => p.text);
+  };
+  assert.deepEqual(await run(true), ['(Web から)\n明日の予定は？', '明日は2件です。', '入れました。']);
+  assert.deepEqual(await run(false), ['入れました。'], 'without it, only the replies to Discord');
+});
