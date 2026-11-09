@@ -15,6 +15,8 @@ export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
 // cannot be undone) is never allowed, so no kind of it is here. A new kind is added here.
 export const AUTONOMY_KINDS = [
   { kind: 'reschedule_block', label: 'ずれた予定の組み直し', stage: 2 },
+  // Booking the blocks of the timetable the nightly run drafts for the next day (timetable.mjs).
+  { kind: 'plan_timetable', label: '時間割を組む', stage: 2 },
   { kind: 'tidy_inbox', label: '受信箱の整理', stage: 2 },
   // Writing warifuri's own task and habit bookings to the person's main calendar, and moving
   // the events warifuri wrote there (told apart by source and external_id). The person's own
