@@ -808,7 +808,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       '(allow_similar: true when they really are different people). Without id, makes one: name is needed; it goes ' +
       'in the profile (profiles: more of them, the secretary only). With id, changes only what is given; null ' +
       'clears a column. What can be a column goes in a column: fixed ones name, aliases (the whole list), email, ' +
-      'phone, affiliation (所属), role (役職、担当、できること), birthday (MM-DD, or YYYY-MM-DD with the year); and items: ' +
+      'phone, affiliation (所属), role (役職、担当、できること), birthday (YYYY-MM-DD when the year of birth is known, so the age follows from it; else MM-DD); and items: ' +
       '{ column: value } free columns of this profile (好きなもの, 得意なこと, ...), null removes one. No column whose value goes stale by itself (学年, 年齢): write what does not change (birthday) or how they relate to the person (role: 後輩, 上司). Use the column names ' +
       'people returns; a name close to one there (好きな物 for 好きなもの) is written as that one (renamed_labels). ' +
       'Everything else is a memo. add_memos: [{ text, kind?, mark?, learned_on? }]: kind やりとり (what happened), ' +

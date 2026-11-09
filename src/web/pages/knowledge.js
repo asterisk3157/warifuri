@@ -77,7 +77,7 @@ const memoList = (memos) => h('ul', { class: 'wf-know-notes' }, ...memos.map((f)
 // - the columns are the fixed ones, all of them, in one order (名前, 所属, 役職・担当, メール,
 //   電話, 誕生日), then the profile's free columns (the most filled first), then メモ;
 // - an empty cell is a faint —, never a missing column;
-// - a birthday is month/day (the year, when known, is in the opened row);
+// - a birthday is month/day, with the age when the year is known;
 // - a long value is cut with … (the whole of it on hover and in the opened row);
 // - the name stays put while the table scrolls sideways;
 // - the search, the 所属 filter and the count are always there.
@@ -85,13 +85,18 @@ const memoList = (memos) => h('ul', { class: 'wf-know-notes' }, ...memos.map((f)
 const people = { query: '', affiliation: '', sort: 'name', desc: false };
 const FIXED = [['name', '名前'], ['affiliation', '所属'], ['role', '役職・担当'], ['email', 'メール'], ['phone', '電話'], ['birthday', '誕生日']];
 const KINDS = ['やりとり', '接し方', 'その他'];
-const monthDay = (b) => {
+// Month/day, and the age today when the year is known: 11/20 or 3/2(22歳).
+function birthdayCell(b, now) {
   const m = MD.exec(b ?? '');
-  return m ? `${Number(m[2])}/${Number(m[3])}` : '';
-};
+  if (!m) return '';
+  const md = `${Number(m[2])}/${Number(m[3])}`;
+  if (!m[1]) return md;
+  const had = now.getMonth() + 1 > Number(m[2]) || (now.getMonth() + 1 === Number(m[2]) && now.getDate() >= Number(m[3]));
+  return `${md}(${now.getFullYear() - Number(m[1]) - (had ? 0 : 1)}歳)`;
+}
 
-function cell(p, key) {
-  if (key === 'birthday') return monthDay(p.birthday);
+function cell(p, key, now = new Date()) {
+  if (key === 'birthday') return birthdayCell(p.birthday, now);
   if (key.startsWith('item:')) return p.items.find((i) => i.label === key.slice(5))?.value ?? '';
   return p[key] ?? '';
 }
@@ -127,7 +132,7 @@ function peopleTable(list, ctx) {
         return h('th', { scope: 'row', class: 'wf-pcol-name' }, h('button', { type: 'button', class: 'wf-ptable-name', 'aria-expanded': String(open), data: { key: `person-${p.id}` }, onclick: toggle, text: p.name }));
       }
       if (k === 'memos') return h('td', { class: 'wf-pcol-memos', text: p.memos.length ? String(p.memos.length) : '—' });
-      const v = cell(p, k);
+      const v = cell(p, k, ctx.now);
       return h('td', { class: v ? '' : 'wf-ptable-blank', title: v && v.length > 12 ? v : null, text: v || '—' });
     }));
     if (!open) return [tr];
