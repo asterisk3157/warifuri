@@ -50,6 +50,7 @@ import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
+import { parseAliases } from './monitor/homelab.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
 import { JOBS } from './secretary/schedule.mjs';
@@ -388,6 +389,7 @@ function runServe(args) {
       // Only the secretary's device may use the secretary's tools; nobody while it is off.
       secretaryDevice: secretary.readSecretaryKey(cfg.home) ? secretary.deviceOf(values) : null,
       serverDevices: (values.WARIFURI_SERVER_DEVICES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+      monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES) } : null,
     });
   } catch (err) {
     chat.stop();
