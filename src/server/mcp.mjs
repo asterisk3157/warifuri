@@ -809,7 +809,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'in the profile (profiles: more of them, the secretary only). With id, changes only what is given; null ' +
       'clears a column. What can be a column goes in a column: fixed ones name, aliases (the whole list), email, ' +
       'phone, affiliation (所属), role (役職、担当、できること), birthday (MM-DD, or YYYY-MM-DD with the year); and items: ' +
-      '{ column: value } free columns of this profile (好きなもの, 学年, ...), null removes one. Use the column names ' +
+      '{ column: value } free columns of this profile (好きなもの, 得意なこと, ...), null removes one. No column whose value goes stale by itself (学年, 年齢): write what does not change (birthday) or how they relate to the person (role: 後輩, 上司). Use the column names ' +
       'people returns; a name close to one there (好きな物 for 好きなもの) is written as that one (renamed_labels). ' +
       'Everything else is a memo. add_memos: [{ text, kind?, mark?, learned_on? }]: kind やりとり (what happened), ' +
       '接し方 (how to deal with them) or その他 (default); mark 未確認 by default, 本人の言葉 for the person\'s own ' +

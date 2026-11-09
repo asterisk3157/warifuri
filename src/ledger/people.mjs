@@ -1,6 +1,6 @@
 // 人: one row per person (原則20, 21), kept as a table. What can be a column is a column: the
 // fixed ones every profile the person is in sees (name, the names they go by, email, phone,
-// affiliation, role, birthday), and per profile, free columns (好きなもの, 学年, ...). A free
+// affiliation, role, birthday), and per profile, free columns (好きなもの, 得意なこと, ...). A free
 // column's name is matched against the ones the profile already has (好きな物 is written as
 // 好きなもの), so one thing is one column. Everything else is a memo (メモ: what happened, how to
 // deal with them, or other), with where it came from; a memo can later become a column
@@ -540,7 +540,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
 
   // The columns of the scope: the fixed ones, then the free ones its people have, each with
   // how many people fill it and the values written there (up to COLUMN_VALUES, the most used
-  // first), so a new value is written the way the others are (B4, M1 rather than 4年).
+  // first), so a new value is written the way the others are (東京 rather than 東京都).
   function columns(scope) {
     const [cond, args] = memoCond(scope);
     const ids = new Set(rowsIn(scope).map((r) => r.id));

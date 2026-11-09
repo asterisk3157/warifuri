@@ -315,12 +315,12 @@ test('the table: one column per thing, close names meet, filters by column, and 
   assert.throws(() => ledger.people.list(CLUB, { where: { affiliation: 1 } }), /文字列です/);
 
   // Memos have a kind; one that is really a column moves there.
-  const withMemos = ledger.people.update(a.id, { add_memos: [{ text: '定例のあとに相談した', kind: 'やりとり' }, { text: '3年', kind: 'その他' }, { text: '朝は返事が遅い', kind: '接し方' }] }, CLUB, W);
+  const withMemos = ledger.people.update(a.id, { add_memos: [{ text: '定例のあとに相談した', kind: 'やりとり' }, { text: 'ギター', kind: 'その他' }, { text: '朝は返事が遅い', kind: '接し方' }] }, CLUB, W);
   assert.deepEqual(withMemos.memos.map((m) => m.kind), ['やりとり', 'その他', '接し方']);
   assert.throws(() => ledger.people.update(a.id, { add_memos: [{ text: 'x', kind: '気分' }] }, CLUB, W), /kind は やりとり/);
-  const grade = withMemos.memos.find((m) => m.text === '3年');
-  const promoted = ledger.people.update(a.id, { promote_memos: [{ id: grade.id, label: '学年' }] }, CLUB, W);
-  assert.deepEqual(promoted.items.find((i) => i.label === '学年'), { label: '学年', value: '3年' });
+  const grade = withMemos.memos.find((m) => m.text === 'ギター');
+  const promoted = ledger.people.update(a.id, { promote_memos: [{ id: grade.id, label: '得意なこと' }] }, CLUB, W);
+  assert.deepEqual(promoted.items.find((i) => i.label === '得意なこと'), { label: '得意なこと', value: 'ギター' });
   assert.deepEqual(promoted.memos.map((m) => m.text), ['定例のあとに相談した', '朝は返事が遅い']);
   const tip = promoted.memos.find((m) => m.kind === '接し方');
   assert.equal(ledger.people.update(a.id, { edit_memos: [{ id: tip.id, kind: 'その他' }] }, CLUB, W).memos.find((m) => m.id === tip.id).kind, 'その他');
@@ -331,8 +331,8 @@ test('the table: one column per thing, close names meet, filters by column, and 
 
 test('columns: each free column says how many fill it and the values written there, most used first', () => {
   const ledger = openLedger(':memory:');
-  for (const [name, grade] of [['一', 'M1'], ['二', 'B4'], ['三', 'M1'], ['四', 'D2']]) ledger.people.create({ name: `${name}さん`, items: { 学年: grade } }, LAB, W);
+  for (const [name, grade] of [['一', '東京'], ['二', '大阪'], ['三', '東京'], ['四', '福岡']]) ledger.people.create({ name: `${name}さん`, items: { 出身: grade } }, LAB, W);
   ledger.people.create({ name: '五さん' }, LAB, W);
-  assert.deepEqual(ledger.people.columns(LAB).free, [{ label: '学年', count: 4, values: ['M1', 'B4', 'D2'] }]);
+  assert.deepEqual(ledger.people.columns(LAB).free, [{ label: '出身', count: 4, values: ['東京', '大阪', '福岡'] }]);
   ledger.close();
 });
