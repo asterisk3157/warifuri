@@ -33,8 +33,9 @@ export function chunks(text, max = DISCORD_MAX) {
   return out;
 }
 
-// { post(content, { mention, files, components }), respond(interaction, body), typing() },
-// or null when the token or the channel is not set.
+// { post(content, { mention, files, components, channel }), respond(interaction, body),
+// typing(channel), startThread(message, name) }, or null when the token or the channel is not
+// set. channel: a thread of the channel to post in instead of the channel itself.
 export function createDiscord({ token, channel, user = null, fetch = globalThis.fetch }) {
   const key = botToken(token);
   if (!key || !channel) return null;
@@ -48,7 +49,7 @@ export function createDiscord({ token, channel, user = null, fetch = globalThis.
     return res.status === 204 ? {} : res.json().catch(() => ({}));
   };
   const json = (body) => ({ method: 'POST', headers: { Authorization: `Bot ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  async function post(content, { mention = false, files = [], components = [] } = {}) {
+  async function post(content, { mention = false, files = [], components = [], channel: to = channel } = {}) {
     const ping = mention && user;
     const text = clip((ping ? `<@${user}> ` : '') + content, DISCORD_MAX);
     const payload = { content: text, allowed_mentions: { parse: [], users: ping ? [String(user)] : [] }, ...(components.length ? { components } : {}) };
@@ -61,7 +62,7 @@ export function createDiscord({ token, channel, user = null, fetch = globalThis.
     } else {
       init = json(payload);
     }
-    return call(`${API}/channels/${encodeURIComponent(channel)}/messages`, init);
+    return call(`${API}/channels/${encodeURIComponent(to)}/messages`, init);
   }
   // The answer to a button pressed or a choice made (an interaction): body is Discord's
   // interaction response ({ type, data }). It needs no bot token: the interaction's own
@@ -70,9 +71,16 @@ export function createDiscord({ token, channel, user = null, fetch = globalThis.
     const url = `${API}/interactions/${encodeURIComponent(interaction.id)}/${encodeURIComponent(interaction.token)}/callback`;
     return call(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
-  // "Writing…" in the channel, for about ten seconds.
-  async function typing() {
-    return call(`${API}/channels/${encodeURIComponent(channel)}/typing`, { method: 'POST', headers: { Authorization: `Bot ${key}` } });
+  // "Writing…" in the channel (or a thread of it), for about ten seconds.
+  async function typing(to = channel) {
+    return call(`${API}/channels/${encodeURIComponent(to)}/typing`, { method: 'POST', headers: { Authorization: `Bot ${key}` } });
   }
-  return { post, respond, typing, channel: String(channel), user: user ? String(user) : null };
+  // A thread of the channel, started from a message of it, or on its own when message is null:
+  // resolves to the thread ({ id, … }).
+  async function startThread(message, name) {
+    const body = { name: clip(name || '秘書とのスレッド', 100), auto_archive_duration: 10080 };
+    if (!message) return call(`${API}/channels/${encodeURIComponent(channel)}/threads`, json({ ...body, type: 11 }));
+    return call(`${API}/channels/${encodeURIComponent(channel)}/messages/${encodeURIComponent(message)}/threads`, json(body));
+  }
+  return { post, respond, typing, startThread, channel: String(channel), user: user ? String(user) : null };
 }

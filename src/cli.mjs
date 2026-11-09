@@ -52,6 +52,7 @@ import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
 import { createGateway } from './notify/gateway.mjs';
 import { createDiscordChat } from './notify/discord-chat.mjs';
+import { createThreadMap } from './notify/discord-threads.mjs';
 import { parseAliases } from './monitor/detail.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
@@ -469,9 +470,12 @@ function startSecretary(cfg, chat, ledger) {
     return out;
   };
   const discord = createDiscord({ token: cfg.values.WARIFURI_DISCORD_TOKEN, channel: cfg.values.WARIFURI_DISCORD_CHANNEL, user: cfg.values.WARIFURI_DISCORD_USER });
+  const talking = cfg.values.WARIFURI_DISCORD_CHAT === 'on' && Boolean(discord?.user);
+  // Which Discord thread is which thread of the conversation (opened with スレッドで話す).
+  const threads = talking ? createThreadMap(path.join(secretary.paths(cfg.home).dir, 'discord-threads.json')) : null;
   const notifier = createNotifier({
     ledger, discord, file: path.join(secretary.paths(cfg.home).dir, 'discord.json'), publicUrl: cfg.values.WARIFURI_PUBLIC_URL ?? null,
-    night: ready.schedule.night, log, mirror: cfg.values.WARIFURI_DISCORD_CHAT === 'on' && Boolean(discord?.user),
+    night: ready.schedule.night, log, mirror: talking, threads,
     picture: (m) => svgToPng(calendarSvg(ledger, m.data.calendar, { colorsOf: (names) => profileColors(cfg.home, names) })),
   });
   if (discord) log('discord: the secretary\'s questions, the morning report and failures go to Discord');
@@ -483,7 +487,7 @@ function startSecretary(cfg, chat, ledger) {
     if (!discord.user) {
       log('discord: not listening: WARIFURI_DISCORD_USER is not set');
     } else {
-      const talk = createDiscordChat({ chat, ledger, discord, log });
+      const talk = createDiscordChat({ chat, ledger, discord, threads, log });
       gateway = createGateway({ token: cfg.values.WARIFURI_DISCORD_TOKEN, onEvent: talk.onEvent, log });
       gateway?.start();
       unsubscribe = chat.subscribe((e) => {
