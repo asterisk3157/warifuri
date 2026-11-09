@@ -17,7 +17,7 @@ test('weekData: the days, bookings cut to each day, all-day ones apart, colours 
     ],
   });
   assert.deepEqual(out.dates, ['2026-11-12', '2026-11-13', '2026-11-14']);
-  assert.deepEqual(out.allDay, [{ date: '2026-11-14', title: '旅行' }]);
+  assert.deepEqual(out.allDay, [{ date: '2026-11-14', title: '旅行', google: false }]);
   assert.deepEqual(out.entries.map((e) => [e.date, e.start, e.end, e.title, e.color, e.mark]), [
     ['2026-11-12', '10:00', '12:00', 'ゼミ', null, false],
     ['2026-11-13', '23:00', '24:00', '作業', '#a9a3ec', true],
@@ -37,6 +37,23 @@ test('renderWeek: today tinted, titles escaped, the legend has only what is draw
   assert.match(svg, /固定の予定/);
   assert.match(svg, /今回の変更/);
   assert.ok(!svg.includes('習慣'));
+});
+
+test('the Google "G": on what is in Google Calendar, and in the legend', () => {
+  const from = new Date(2026, 10, 12);
+  const to = new Date(2026, 10, 13);
+  const data = weekData({
+    from: from.toISOString(), to: to.toISOString(),
+    bookings: [
+      b('b1', 'ゼミ', new Date(2026, 10, 12, 10), new Date(2026, 10, 12, 12), { source: 'google-calendar', external_id: 'e1' }),
+      b('b2', '面談', new Date(2026, 10, 12, 14), new Date(2026, 10, 12, 15)),
+    ],
+  });
+  assert.deepEqual(data.entries.map((e) => [e.title, e.google]), [['ゼミ', true], ['面談', false]]);
+  const svg = renderWeek({ ...data, today: '2026-11-12' });
+  assert.equal((svg.match(/fill="#4285F4"/g) ?? []).length, 2, 'one on the booking, one in the legend');
+  assert.match(svg, /Google カレンダーにある/);
+  assert.ok(!renderWeek({ dates: ['2026-11-12'], today: '2026-11-12', entries: [{ date: '2026-11-12', start: '10:00', end: '11:00', title: 'x' }] }).includes('Google カレンダーにある'));
 });
 
 test('assignLanes: overlapping entries share the column', () => {

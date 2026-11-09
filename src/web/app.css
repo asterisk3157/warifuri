@@ -140,6 +140,9 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-hline { position: absolute; left: 0; right: 0; height: 52px; box-sizing: border-box; border-bottom: 1px solid var(--hair); }
 .wf-ev { position: absolute; box-sizing: border-box; border-radius: 10px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; color: var(--ink); }
 .wf-band { position: absolute; left: 2px; right: 2px; box-sizing: border-box; border: 1px dashed #9ca3af; border-radius: 10px; background: #f3f4f6; pointer-events: none; display: flex; align-items: flex-end; justify-content: flex-end; padding: 4px 8px; overflow: hidden; }
+.wf-ev-g { position: absolute; top: 6px; right: 6px; width: 11px; height: 11px; }
+.wf-ev:has(> .wf-ev-g) .wf-ev-title { padding-right: 12px; }
+.wf-allday-ev .wf-ev-g { position: static; margin-left: 4px; vertical-align: -1px; }
 .wf-band span { font-size: 11px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wf-ev-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-ev-time { font-size: 13px; color: var(--sub); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

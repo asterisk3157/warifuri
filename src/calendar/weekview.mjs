@@ -4,6 +4,8 @@
 // times) is a light band behind them. Bookings to point at (the ones just changed) get a thick
 // outline. Pure: data in, SVG text out (svgToPng in image.mjs makes a PNG).
 
+import { GOOGLE_G } from '../web/google-mark.js';
+
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const FONT = "'Noto Sans CJK JP', 'Hiragino Sans', 'Yu Gothic', sans-serif";
 const FIXED = { fill: '#E5E7EB', text: '#111827' };
@@ -20,6 +22,9 @@ const LEGEND_H = 38;
 
 export const toMin = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
 const hour = (time) => time.replace(/^0/, '');
+// The Google "G", size pixels wide, its top left at x, y.
+const gMark = (x, y, size) =>
+  `<g transform="translate(${x} ${y}) scale(${size / 48})">${GOOGLE_G.map(([fill, d]) => `<path fill="${fill}" d="${d}"/>`).join('')}</g>`;
 export const esc = (text) =>
   String(text).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
@@ -100,12 +105,12 @@ export function weekData({ from, to, bookings, colors = {}, marks = [], bands = 
       const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
       if (e <= dayStart || s >= dayEnd) continue;
       if (s <= dayStart && e >= dayEnd) {
-        allDay.push({ date: dateOf(day), title: b.title });
+        allDay.push({ date: dateOf(day), title: b.title, google: typeof b.source === 'string' && b.source.startsWith('google-calendar') });
         continue;
       }
       const from2 = new Date(Math.max(s, dayStart));
       const to2 = e >= dayEnd ? '24:00' : timeOf(new Date(e));
-      entries.push({ date: dateOf(day), start: timeOf(from2), end: to2, title: b.title, color, label, mark: marks.includes(b.id) });
+      entries.push({ date: dateOf(day), start: timeOf(from2), end: to2, title: b.title, color, label, mark: marks.includes(b.id), google: typeof b.source === 'string' && b.source.startsWith('google-calendar') });
     }
   }
   for (const band of bands) {
@@ -118,9 +123,10 @@ export function weekData({ from, to, bookings, colors = {}, marks = [], bands = 
 }
 
 // dates:   the columns, 'YYYY-MM-DD'
-// entries: { date, start, end, title, color?, label?, mark?, container? }; color absent for a
-//          fixed one; container: a band of the week type, behind the rest
-// allDay:  { date, title }
+// entries: { date, start, end, title, color?, label?, mark?, google?, container? }; color absent
+//          for a fixed one; google: it is in Google Calendar (the G at its top right);
+//          container: a band of the week type, behind the rest
+// allDay:  { date, title, google? }
 // today:   'YYYY-MM-DD'
 export function renderWeek({ dates, entries, allDay = [], today }) {
   const { first, last } = hourRange(entries);
@@ -155,12 +161,13 @@ export function renderWeek({ dates, entries, allDay = [], today }) {
     const items = allDay.filter((a) => a.date === date);
     items.slice(0, allDayRows).forEach((item, row) => {
       const more = row === allDayRows - 1 && items.length > allDayRows ? ` ほか${items.length - allDayRows}件` : '';
-      const text = clip(item.title, colW - 14 - textWidth(more, 12), 12) + more;
+      const text = clip(item.title, colW - 14 - (item.google ? 16 : 0) - textWidth(more, 12), 12) + more;
       const ty = HEAD_H + row * ALLDAY_ROW;
       out.push(
         `<rect x="${x(i) + 3}" y="${ty}" width="${colW - 6}" height="${ALLDAY_ROW - 3}" rx="3" fill="#F3F4F6"/>`,
         `<text x="${x(i) + 8}" y="${ty + 13}" font-size="12" fill="#374151">${esc(text)}</text>`,
       );
+      if (item.google) out.push(gMark(x(i) + colW - 17, ty + 2, 12));
     });
   });
 
@@ -198,8 +205,9 @@ export function renderWeek({ dates, entries, allDay = [], today }) {
       const fill = entry.color ?? FIXED.fill;
       const stroke = entry.mark ? ` stroke="${MARK}" stroke-width="4"` : '';
       out.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="5" fill="${fill}"${stroke}/>`);
+      if (entry.google) out.push(gMark(bx + bw - 16, by + 4, 12));
       const tx = bx + 7;
-      const room = bw - (entry.color ? 12 : 15);
+      const room = bw - (entry.color ? 12 : 15) - (entry.google ? 14 : 0);
       if (bh < 34) {
         out.push(`<text x="${tx}" y="${by + 14}" font-size="12" font-weight="700" fill="${FIXED.text}">${esc(clip(`${hour(entry.start)} ${entry.title}`, room, 12))}</text>`);
         continue;
@@ -219,12 +227,15 @@ export function renderWeek({ dates, entries, allDay = [], today }) {
     ...[...kinds].map(([label, fill]) => ({ label, fill })),
     ...(entries.some((e) => e.container) ? [{ label: '週の型', fill: '#F3F4F6', stroke: '#9CA3AF', dash: true }] : []),
     ...(entries.some((e) => e.mark) ? [{ label: '今回の変更', fill: '#FFFFFF', stroke: MARK }] : []),
+    ...(entries.some((e) => e.google) || allDay.some((a) => a.google) ? [{ label: 'Google カレンダーにある', google: true }] : []),
   ];
   let lx = GUTTER;
   const ly = top + gridH + 14;
   for (const item of legend) {
     out.push(
-      `<rect x="${lx}" y="${ly}" width="14" height="14" rx="3" fill="${item.fill}"${item.stroke ? ` stroke="${item.stroke}" stroke-width="${item.dash ? 1 : 3}"${item.dash ? ' stroke-dasharray="3 2"' : ''}` : ''}/>`,
+      item.google
+        ? gMark(lx + 1, ly + 1, 12)
+        : `<rect x="${lx}" y="${ly}" width="14" height="14" rx="3" fill="${item.fill}"${item.stroke ? ` stroke="${item.stroke}" stroke-width="${item.dash ? 1 : 3}"${item.dash ? ' stroke-dasharray="3 2"' : ''}` : ''}/>`,
       `<text x="${lx + 20}" y="${ly + 12}" font-size="13" fill="#374151">${esc(item.label)}</text>`,
     );
     lx += 20 + textWidth(item.label, 13) + 22;
