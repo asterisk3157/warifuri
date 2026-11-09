@@ -104,9 +104,9 @@ function toolbar(ctx, from, days) {
 }
 
 // The grid of some days: shown is what /web/api/calendar returns. sel and onPick (id or null)
-// for the booking picked; marks, the ids of bookings to outline; bar, what goes above the
-// days; key, the name of its scroll box (kept when the screen is drawn again).
-export function weekGrid({ from, days, shown, now, sel = null, onPick = null, marks = [], bar = null, key = 'cal', label }) {
+// for the booking picked; bar, what goes above the days; key, the name of its scroll box
+// (kept when the screen is drawn again).
+export function weekGrid({ from, days, shown, now, sel = null, onPick = null, bar = null, key = 'cal', label }) {
   const today = dayStart(now);
   const colors = shown.profiles;
   const list = Array.from({ length: days }, (_, i) => addDays(from, i));
@@ -139,7 +139,7 @@ export function weekGrid({ from, days, shown, now, sel = null, onPick = null, ma
     ? h('div', { class: 'wf-grid wf-allday', style: { gridTemplateColumns: columns } }, h('span', { class: 'wf-allday-label', text: '終日' }),
       ...allDay.map((bs) => h('div', { class: 'wf-allday-cell' }, ...bs.map((b) => {
         const c = category(b, colors);
-        return h('button', { type: 'button', class: ['wf-allday-ev', sel === b.id && 'wf-ev-picked', marks.includes(b.id) && 'wf-ev-mark'], title: b.title, style: { background: tint(c.color) }, onclick: onPick ? () => onPick(sel === b.id ? null : b.id) : null }, b.title);
+        return h('button', { type: 'button', class: ['wf-allday-ev', sel === b.id && 'wf-ev-picked'], title: b.title, style: { background: tint(c.color) }, onclick: onPick ? () => onPick(sel === b.id ? null : b.id) : null }, b.title);
       }))))
     : null;
   const cols = list.map((d, i) => {
@@ -153,7 +153,7 @@ export function weekGrid({ from, days, shown, now, sel = null, onPick = null, ma
       const short = ht < SHORT;
       const picked = sel === x.b.id;
       return h('button', {
-        type: 'button', class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short', picked && 'wf-ev-picked', marks.includes(x.b.id) && 'wf-ev-mark'], data: { key: `ev-${x.b.id}-${i}` },
+        type: 'button', class: ['wf-ev', past && 'wf-past', short && 'wf-ev-short', picked && 'wf-ev-picked'], data: { key: `ev-${x.b.id}-${i}` },
         title: `${x.b.title}\n${withLabel(c, span(x.b))}`, 'aria-pressed': String(picked),
         style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color) },
         onclick: onPick ? () => onPick(picked ? null : x.b.id) : null,

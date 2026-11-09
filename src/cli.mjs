@@ -50,6 +50,8 @@ import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
+import { calendarSvg, svgToPng } from './calendar/image.mjs';
+import { profileColors } from './server/web.mjs';
 import { JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -466,6 +468,7 @@ function startSecretary(cfg, chat, ledger) {
   const notifier = createNotifier({
     ledger, discord, file: path.join(secretary.paths(cfg.home).dir, 'discord.json'), publicUrl: cfg.values.WARIFURI_PUBLIC_URL ?? null,
     night: ready.schedule.night, log,
+    picture: (m) => svgToPng(calendarSvg(ledger, m.data.calendar, { colorsOf: (names) => profileColors(cfg.home, names) })),
   });
   if (discord) log('discord: the secretary\'s questions, the morning report and failures go to Discord');
   const scheduler = createScheduler({

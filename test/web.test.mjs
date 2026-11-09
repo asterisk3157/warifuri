@@ -181,7 +181,7 @@ test('endpoint shapes', async (t) => {
   assert.deepEqual([sec.items, sec.threads, sec.thread], [[], {}, null]);
 });
 
-test('秘書: a calendar under a reply is drawn from the bookings as they are now, with the changed ones to outline', async (t) => {
+test('秘書: a calendar under a reply is a picture drawn from the bookings as they are now, the changed ones outlined', async (t) => {
   const { base, ledger } = await start(t);
   const S = { actor: 'device-key', device: 'secretary' };
   const { booking: b } = ledger.book({ kind: 'fixed', title: '定例会', starts_at: '2026-11-13T18:00:00+09:00', ends_at: '2026-11-13T21:00:00+09:00' }, S);
@@ -190,11 +190,17 @@ test('秘書: a calendar under a reply is drawn from the bookings as they are no
   // Booked after the reply: shown too, since the calendar is read when the window asks.
   ledger.book({ kind: 'fixed', title: 'ゼミ', starts_at: '2026-11-16T10:00:00+09:00', ends_at: '2026-11-16T12:00:00+09:00' }, S);
   const [msg] = (await (await get(base, '/web/api/secretary')).json()).items;
-  assert.equal(msg.calendar.from, '2026-11-11T15:00:00.000Z');
-  assert.equal(msg.calendar.to, '2026-11-18T15:00:00.000Z');
-  assert.deepEqual(msg.calendar.marks, [b.id]);
-  assert.deepEqual(msg.calendar.bookings.map((x) => x.title), ['定例会', 'ゼミ']);
-  assert.ok(msg.calendar.profiles);
+  assert.deepEqual(msg.calendar, { image: `/web/api/secretary/calendar/${msg.id}`, from: '2026-11-11T15:00:00.000Z', to: '2026-11-18T15:00:00.000Z' });
+  const res = await get(base, msg.calendar.image);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /^image\/svg\+xml/);
+  assert.match(res.headers.get('content-security-policy'), /sandbox/);
+  const svg = await res.text();
+  assert.match(svg, /定例会/);
+  assert.match(svg, /ゼミ/);
+  assert.match(svg, /今回の変更/);
+  assert.match(svg, /stroke="#E91E63"/);
+  assert.equal((await get(base, '/web/api/secretary/calendar/m_none')).status, 404);
 });
 
 test('秘書: the conversation only, oldest first, with questions; reports, proposals and warifuri\'s calls stay out', async (t) => {
