@@ -81,7 +81,8 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_MONITOR_ALIASES` | 監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01) | なし |  |  | serve |
 | `WARIFURI_DISCORD_TOKEN` | 秘書の質問、朝の報告、失敗を Discord に送るボットのトークン。ファイル(_FILE)なら、トークンだけか DISCORD_BOT_TOKEN= の1行を置く。WARIFURI_DISCORD_CHANNEL と一緒に設定すると送る | なし |  | 秘密 | serve、secretary |
 | `WARIFURI_DISCORD_CHANNEL` | 送る先の Discord のチャンネルの id。本人だけが見るチャンネルにする | なし |  |  | serve、secretary |
-| `WARIFURI_DISCORD_USER` | 質問と失敗のときにメンションする、本人の Discord のユーザーの id。空ならメンションしない | なし |  |  | serve、secretary |
+| `WARIFURI_DISCORD_USER` | 本人の Discord のユーザーの id。質問と失敗のときにメンションし、Discord で話すときは、この人の書いたことだけを秘書に渡す | なし |  |  | serve、secretary |
+| `WARIFURI_DISCORD_CHAT` | Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る | `off` |  |  | serve、secretary |
 <!-- settings:end -->
 
 一覧はコードの中の1つの表から作っています。項目を足したり変えたりしたら、`node scripts/settings-table.mjs --write` でこの表を書き直します。食い違ったままだとテストが落ちます。

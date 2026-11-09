@@ -274,9 +274,17 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_DISCORD_USER',
     section: 'secretary',
-    about: '質問と失敗のときにメンションする、本人の Discord のユーザーの id。空ならメンションしない',
+    about: '本人の Discord のユーザーの id。質問と失敗のときにメンションし、Discord で話すときは、この人の書いたことだけを秘書に渡す',
     commands: SECRETARY,
     check: (v) => (/^\d{1,20}$/.test(v) ? null : 'must be a Discord user id (digits)'),
+  },
+  {
+    name: 'WARIFURI_DISCORD_CHAT',
+    section: 'secretary',
+    about: 'Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る',
+    def: 'off',
+    commands: SECRETARY,
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
 ];
 

@@ -50,6 +50,8 @@ import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
+import { createGateway } from './notify/gateway.mjs';
+import { createDiscordChat } from './notify/discord-chat.mjs';
 import { parseAliases } from './monitor/detail.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
@@ -473,6 +475,22 @@ function startSecretary(cfg, chat, ledger) {
     picture: (m) => svgToPng(calendarSvg(ledger, m.data.calendar, { colorsOf: (names) => profileColors(cfg.home, names) })),
   });
   if (discord) log('discord: the secretary\'s questions, the morning report and failures go to Discord');
+  // Talking in Discord: what the person writes there goes to the secretary, and each reply is
+  // sent as soon as it is written.
+  let gateway = null;
+  let unsubscribe = null;
+  if (discord && cfg.values.WARIFURI_DISCORD_CHAT === 'on') {
+    if (!discord.user) {
+      log('discord: not listening: WARIFURI_DISCORD_USER is not set');
+    } else {
+      const talk = createDiscordChat({ chat, ledger, discord, log });
+      gateway = createGateway({ token: cfg.values.WARIFURI_DISCORD_TOKEN, onEvent: talk.onEvent, log });
+      gateway?.start();
+      unsubscribe = chat.subscribe((e) => {
+        if (e.type === 'done') notifier.tick().catch((err) => log(`discord: ${err.message}`));
+      });
+    }
+  }
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
@@ -487,6 +505,8 @@ function startSecretary(cfg, chat, ledger) {
   return {
     stop() {
       scheduler.stop();
+      gateway?.stop();
+      unsubscribe?.();
       abort.abort();
     },
   };
