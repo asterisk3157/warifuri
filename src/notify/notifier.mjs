@@ -1,8 +1,12 @@
 // 呼び出し(原則17): what in the secretary's conversation needs the person, sent to Discord.
-// Three things go: the secretary's questions, the morning report, and the runs that failed.
-// A calendar under the message (show_calendar) goes with it as a picture.
-// Replies to what the person wrote are not sent: they are on the screen the person is using.
-// Nothing goes in the night; what came then goes once the night is over, oldest first.
+// Three things go: the secretary's questions (with their choices as buttons), the morning
+// report, and the runs that failed. A calendar under the message (show_calendar) goes with it
+// as a picture.
+// The secretary's replies go too while the person talks from Discord: when what the person
+// last wrote came from Discord (src/notify/discord-chat.mjs), within TALK_MS. Replies to what
+// was written on the screen stay on the screen.
+// Nothing goes in the night, but for a talk in Discord; what came then goes once the night is
+// over, oldest first.
 //
 // The notifier reads the conversation after the last message it handled (kept in a file in
 // the data directory), so a restart neither loses nor repeats anything. The first time it
@@ -11,23 +15,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { inNight } from '../secretary/schedule.mjs';
-import { clip } from './discord.mjs';
+import { chunks, clip } from './discord.mjs';
+import { askComponents, askText, replyComponents } from './discord-chat.mjs';
 
 const BODY_MAX = 1500;
+// How long after the person last wrote from Discord the secretary's replies go there too.
+export const TALK_MS = 30 * 60 * 1000;
 
-// The text to send for one message, or null when it is not sent.
-export function noticeOf(m, link) {
+// The text to send for one message ({ text, mention, components }), or null when it is not
+// sent. talking: the person is talking from Discord now.
+export function noticeOf(m, link, { talking = false } = {}) {
   const tail = link ? `\n${link}` : '';
   if (m.kind === 'ask' && m.state === 'open') {
-    const lines = (m.data?.questions ?? []).map((q) => `【${q.header}】${q.question}`);
-    return { text: `秘書から質問があります。\n${lines.join('\n')}${tail}`, mention: true };
+    return { text: `${askText(m)}${tail}`, mention: true, components: askComponents(m) };
   }
   if (m.role === 'secretary' && m.data?.scheduled === 'morning') {
-    return { text: `朝の報告です。\n${clip(m.body, BODY_MAX)}${tail}`, mention: false };
+    return { text: `朝の報告です。\n${clip(m.body, BODY_MAX)}${tail}`, mention: false, components: replyComponents(m) };
   }
   if (m.role === 'system' && m.data?.failure) return { text: `${m.body}${tail}`, mention: true };
+  if (talking && m.role === 'secretary' && m.kind === 'text' && m.body.trim()) {
+    return { text: m.body, mention: false, whole: true, components: replyComponents(m) };
+  }
   return null;
 }
+
+// What the person wrote: from Discord or not. Answers count; agents' requests do not.
+const personVia = (m) => (m.role === 'user' ? (m.actor === 'discord' ? 'discord' : 'screen') : null);
 
 // discord: { post } (src/notify/discord.mjs). night: the secretary's night ({ start, end }).
 // picture(m): the PNG of the calendar under a message (show_calendar), or null; it goes with
@@ -50,7 +63,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
   // Sends what came since the last call. Resolves to the number sent.
   async function tick() {
     if (!discord || running) return 0;
-    if (night && !night.error && inNight(night, now())) return 0;
+    const talkingAt = (state) => state.via === 'discord' && state.viaAt && now() - new Date(state.viaAt) < TALK_MS;
     const thread = ledger.getThread();
     if (!thread) return 0;
     running = true;
@@ -70,15 +83,35 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         write({ started: true, last: list.at(-1)?.id ?? null });
         return 0;
       }
+      // In the night, nothing goes unless the person is talking from Discord now (by what the
+      // person wrote last); then all of it goes, in order.
+      const newest = [...list].reverse().find((m) => personVia(m));
+      const now_ = newest ? { via: personVia(newest), viaAt: newest.created_at } : state;
+      if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) return 0;
+      const save = () => write({ started: true, last: state.last, failure: state.failure ?? null, via: state.via ?? null, viaAt: state.viaAt ?? null });
       for (const m of list) {
+        const via = personVia(m);
+        if (via) {
+          state.via = via;
+          state.viaAt = m.created_at;
+        }
         // The same failure again, with no reply in between, is not sent twice.
         if (m.role === 'secretary') state.failure = null;
         const failure = m.role === 'system' ? m.data?.failure ?? null : null;
-        const notice = failure && failure === state.failure ? null : noticeOf(m, link);
+        const talking = Boolean(talkingAt(state));
+        const notice = failure && failure === state.failure ? null : noticeOf(m, talking ? null : link, { talking });
         if (notice) {
           try {
             const png = m.data?.calendar ? await picture(m).catch(() => null) : null;
-            await discord.post(notice.text, { mention: notice.mention, files: png ? [{ name: 'calendar.png', data: png, type: 'image/png' }] : [] });
+            const parts = notice.whole ? chunks(notice.text) : [notice.text];
+            for (const [i, part] of parts.entries()) {
+              const lastPart = i === parts.length - 1;
+              await discord.post(part, {
+                mention: notice.mention && i === 0,
+                files: lastPart && png ? [{ name: 'calendar.png', data: png, type: 'image/png' }] : [],
+                components: lastPart ? notice.components ?? [] : [],
+              });
+            }
             sent += 1;
             if (failure) state.failure = failure;
           } catch (err) {
@@ -87,7 +120,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
           }
         }
         state.last = m.id;
-        write({ started: true, last: m.id, failure: state.failure ?? null });
+        save();
       }
       return sent;
     } finally {
