@@ -72,7 +72,7 @@ If it says `command not found: warifuri`, add the `bin` folder under the path th
 
 | Version | Date | Changes |
 |---|---|---|
-| v0.3.0 | 2026-11-09 | Talking to the secretary on Discord (notices, buttons, threads), the secretary editing events and planning a timetable, calendar images and the week pattern, people in knowledge and inbox sorting, the server screen, dark theme |
+| v0.3.0 | 2026-11-09 | Talking to the secretary on Discord (notices, buttons, threads), the secretary editing events and planning a timetable, calendar images and the week pattern, a people database and inbox sorting, setting things up in the first talk, a weekly check for finished tasks, the server screen, dark theme |
 | v0.2.0 | 2026-10-26 | Secretary (timed checks, the chat window, question cards), asking the secretary for time, outside tools, task order |
 | v0.1.0 | 2026-10-25 | Tasks, scheduling, Web UI, MCP, the task check |
 
