@@ -49,6 +49,39 @@ export const DISALLOWED = [
   'Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'NotebookRead', 'Read', 'Glob',
   'Grep', 'LS', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'TodoWrite', 'Skill', 'SlashCommand',
 ];
+// What claude says when its login is gone: the person has to log in again on the machine.
+export const LOGIN_EXPIRED = /Failed to authenticate|OAuth session expired|Please run \/login|Invalid API key|Not logged in/i;
+const LOGIN_TEXT = 'サーバーの機械の Claude のログインが切れています。サーバーの機械で claude を起動し、/login でログインし直してください。';
+
+// Why a run failed, for the person: { reason, text }, or null when it did not fail (or did
+// not run). out: what runJob or a turn of the conversation resolved to; said: what claude
+// wrote at the end (its log or its result).
+export function failureOf(out, said = '') {
+  if (!out || out.busy || out.skipped) return null;
+  if (out.error) return { reason: 'start', text: '秘書を起こせませんでした。サーバーの機械で warifuri secretary enable を確かめてください。' };
+  if (LOGIN_EXPIRED.test(said)) return { reason: 'login', text: `秘書を起こせませんでした。${LOGIN_TEXT}` };
+  if (out.timedOut) return { reason: 'timeout', text: '時間内に終わりませんでした。' };
+  if (out.code !== 0 && out.code !== undefined) return { reason: 'exit', text: `途中で止まりました。記録は ${out.logFile ?? 'ログ'} にあります。` };
+  return null;
+}
+
+// The end of a log file, where claude says why it stopped.
+export function logTail(file, bytes = 4096) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const buf = Buffer.alloc(Math.min(bytes, size));
+      fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+      return buf.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
 export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', morning: '朝の報告', inbox: '受信箱の整理', sync: 'カレンダーの同期' };
 
 export const paths = (home) => {

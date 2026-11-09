@@ -46,7 +46,7 @@ import { localIso, inNight } from './schedule.mjs';
 import { createStreamReader, UNSUPPORTED } from './stream.mjs';
 import {
   deviceOf, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, writeClaudeSettings, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
-  claudeEnv, factLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR,
+  claudeEnv, factLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR, failureOf,
 } from './secretary.mjs';
 
 // How many earlier messages a new session is given, and how much of each.
@@ -360,7 +360,7 @@ export function createChat(ledger, cfg, ctx = {}) {
     }
   }
 
-  const note = (threadId, body) => ledger.addMessage(threadId, { role: 'system', body }, WRITER);
+  const note = (threadId, body, data) => ledger.addMessage(threadId, { role: 'system', body, ...(data ? { data } : {}) }, WRITER);
   const mainThread = () => ledger.getThread(SECRETARY_THREAD.kind);
 
   // The files of the person's messages in the feed: pictures and words, and the rest by name.
@@ -463,11 +463,14 @@ export function createChat(ledger, cfg, ctx = {}) {
     } else if (ok) note(thread.id, '返事が空でした。もう一度送ってください。');
     else if (out.error) {
       log(`secretary chat: did not start: ${out.error}`);
-      note(thread.id, '秘書を起こせませんでした。サーバーの機械で warifuri secretary enable を確かめてください。');
-    } else if (out.timedOut) note(thread.id, '時間内に返事ができませんでした。もう一度送ってください。');
-    else {
+      note(thread.id, '秘書を起こせませんでした。サーバーの機械で warifuri secretary enable を確かめてください。', { failure: 'start' });
+    } else if (out.timedOut) note(thread.id, '時間内に返事ができませんでした。もう一度送ってください。', trigger ? { failure: 'timeout' } : undefined);
+    else if (failureOf(out, out.result?.text ?? '')?.reason === 'login') {
+      log('secretary chat: claude is not logged in');
+      note(thread.id, failureOf(out, out.result.text).text, { failure: 'login' });
+    } else {
       log(`secretary chat: claude ended with ${out.code ?? out.signal}; output in ${paths(cfg.home).logs}`);
-      note(thread.id, '返事を作れませんでした。もう一度送ってください。');
+      note(thread.id, '返事を作れませんでした。もう一度送ってください。', trigger ? { failure: 'exit' } : undefined);
     }
     // A session that answered is kept; one that failed to start is not. The buttons and the
     // calendar asked for in this turn went with its reply (or are dropped with it).
@@ -631,6 +634,13 @@ export function createChat(ledger, cfg, ctx = {}) {
     },
     kick,
     kickAll,
+    // A run of the clock failed (failureOf): said in the conversation, to be seen and sent.
+    failure({ reason, text }) {
+      const thread = mainThread() ?? ledger.ensureThread(SECRETARY_THREAD.kind, WRITER);
+      const m = note(thread.id, text, { failure: reason });
+      emit({ type: 'done', thread: thread.id, message: m.id, fed: [] });
+      return m;
+    },
     // Resolves when no turn is going in any thread.
     async idle() {
       while (running.size) await Promise.all([...running.values()]);

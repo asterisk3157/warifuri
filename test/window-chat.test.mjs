@@ -217,6 +217,24 @@ test('reply buttons asked for during a turn go with its reply, and are cleared f
   assert.equal(w.ledger.listMessages(w.main().id).at(-1).data?.options, undefined);
 });
 
+test('a lost login is said in the conversation as a failure, to be sent to the person', async (t) => {
+  const w = world(t);
+  w.claude.answerWith((call) => ({
+    stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed', session_id: call.session }),
+    code: 1,
+  }));
+  w.chat.send('今日の予定は？', WEB);
+  await w.chat.idle();
+  const last = w.ledger.listMessages(w.main().id).at(-1);
+  assert.equal(last.role, 'system');
+  assert.deepEqual(last.data, { failure: 'login' });
+  assert.match(last.body, /Claude のログインが切れています/);
+  // A run of the clock that failed is said the same way.
+  const m = w.chat.failure({ reason: 'exit', text: 'カレンダーの同期が失敗しました。' });
+  assert.deepEqual(w.ledger.listMessages(w.main().id).at(-1).data, { failure: 'exit' });
+  assert.equal(m.body, 'カレンダーの同期が失敗しました。');
+});
+
 test('a calendar asked for during a turn goes with its reply, and is cleared for the next', async (t) => {
   const w = world(t);
   const { booking: b } = w.ledger.book({ kind: 'fixed', title: '会議', starts_at: '2026-11-13T18:00:00+09:00', ends_at: '2026-11-13T21:00:00+09:00' }, SECRETARY);

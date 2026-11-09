@@ -48,6 +48,8 @@ import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger } from './secretary/chat.mjs';
+import { createDiscord } from './notify/discord.mjs';
+import { createNotifier } from './notify/notifier.mjs';
 import { JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -396,7 +398,7 @@ function runServe(args) {
     ledger.close();
     process.exitCode = 1;
   });
-  const sched = startSecretary(cfg, chat);
+  const sched = startSecretary(cfg, chat, ledger);
   server.listen(Number(values.WARIFURI_PORT), values.WARIFURI_HOST, () => {
     const addr = server.address();
     const host = addr.family === 'IPv6' ? `[${addr.address}]` : addr.address;
@@ -438,7 +440,7 @@ function runServe(args) {
 // not a run of its own: it is a call into the conversation (chat.trigger), answered by the
 // secretary of the conversation. Each check also looks for calls written by
 // `warifuri secretary run morning` from another process.
-function startSecretary(cfg, chat) {
+function startSecretary(cfg, chat, ledger) {
   if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
   const ready = secretary.readyToSchedule(cfg);
   if (ready.problem) {
@@ -447,11 +449,33 @@ function startSecretary(cfg, chat) {
   }
   const abort = new AbortController();
   const log = (line) => process.stdout.write(`warifuri: ${line}\n`);
+  // A run that failed is said in the conversation, once until a run goes well again.
+  let failed = null;
+  const runJob = async (job) => {
+    const out = await secretary.runJob(job, cfg, { signal: abort.signal, scheduled: true });
+    if (abort.signal.aborted || out?.busy || out?.skipped) return out;
+    const f = secretary.failureOf(out, out?.logFile ? secretary.logTail(out.logFile) : '');
+    if (!f) failed = null;
+    else if (f.reason !== failed) {
+      failed = f.reason;
+      chat.failure({ reason: f.reason, text: `${secretary.JOB_TITLES[job]}が失敗しました。${f.text}` });
+    }
+    return out;
+  };
+  const discord = createDiscord({ token: cfg.values.WARIFURI_DISCORD_TOKEN, channel: cfg.values.WARIFURI_DISCORD_CHANNEL, user: cfg.values.WARIFURI_DISCORD_USER });
+  const notifier = createNotifier({
+    ledger, discord, file: path.join(secretary.paths(cfg.home).dir, 'discord.json'), publicUrl: cfg.values.WARIFURI_PUBLIC_URL ?? null,
+    night: ready.schedule.night, log,
+  });
+  if (discord) log('discord: the secretary\'s questions, the morning report and failures go to Discord');
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
-    run: (job) => (job === 'morning' ? chat.trigger(job) : secretary.runJob(job, cfg, { signal: abort.signal, scheduled: true })),
-    onTick: () => chat.kick(),
+    run: (job) => (job === 'morning' ? chat.trigger(job) : runJob(job)),
+    onTick: () => {
+      chat.kick();
+      notifier.tick().catch((err) => log(`discord: ${err.message}`));
+    },
   });
   scheduler.start();
   log(`secretary on: ${secretary.describeSchedule(ready.schedule)}; logs in ${secretary.paths(cfg.home).logs}`);
