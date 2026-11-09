@@ -45,16 +45,17 @@ const gb = (bytes) => {
 };
 const kwh = (wh) => (wh === null || wh === undefined ? '—' : `${(wh / 1000).toFixed(1)} kWh`);
 
-// The colours of the graphs of Windows' task manager, so the view reads as one.
-const COLOR = { cpu: '#117dbb', memory: '#8b12ae', disk: '#4da60c', gpu: '#117dbb', power: '#a74f01' };
+// The colours of the graphs of Windows' task manager, so the view reads as one; brighter on
+// dark (app.css).
+const COLOR = { cpu: 'var(--g-cpu)', memory: 'var(--g-memory)', disk: 'var(--g-disk)', gpu: 'var(--g-cpu)', power: 'var(--g-power)' };
 
 // A line over the last hour, filled below it, scaled to max (100 for percentages).
 function graph(series, color, { max = 100, cls = 'wf-tm-graph' } = {}) {
   const data = series && series.length > 1 ? series : [0, 0];
   const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - (Math.min(max, Math.max(0, v)) / max) * 30}`);
-  return s('svg', { class: cls, viewBox: '0 0 100 30', preserveAspectRatio: 'none', 'aria-hidden': 'true' },
-    s('polygon', { points: `0,30 ${pts.join(' ')} 100,30`, fill: color, 'fill-opacity': '0.1' }),
-    s('polyline', { points: pts.join(' '), fill: 'none', stroke: color, 'stroke-width': '1.2', 'vector-effect': 'non-scaling-stroke' }));
+  return s('svg', { class: cls, viewBox: '0 0 100 30', preserveAspectRatio: 'none', 'aria-hidden': 'true', style: { color } },
+    s('polygon', { points: `0,30 ${pts.join(' ')} 100,30`, fill: 'currentColor', 'fill-opacity': '0.1' }),
+    s('polyline', { points: pts.join(' '), fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'vector-effect': 'non-scaling-stroke' }));
 }
 
 // A bar with its number, coloured when it comes near the limit.
@@ -282,7 +283,7 @@ function devices(data, ctx) {
     return h('button', { type: 'button', class: 'wf-row wf-row-dev', title: 'このデバイスについて', data: { key: `dev-${d.name}` }, onclick: (e) => ctx.openAbout({ type: 'device', device: d }, e.currentTarget) },
       h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', ok && 'wf-fresh'], 'aria-hidden': 'true' }),
         h('span', { class: 'wf-cell' }, h('b', { text: d.name }), h('span', { class: 'wf-muted', text: how(d) }))),
-      h('span', { style: { color: ok ? '#1d1d1f' : '#8e8e93' }, text: ago(d.last_seen_at, ctx.now) }),
+      h('span', { style: { color: ok ? 'var(--ink)' : 'var(--off)' }, text: ago(d.last_seen_at, ctx.now) }),
       h('span', { class: 'wf-cell' },
         d.holds.length ? d.holds.map((x) => h('span', { class: 'wf-hold' }, h('b', { text: x.title }),
           h('span', { class: 'wf-hold-sub' }, profileChip(x.profile, data.profiles), h('span', { class: 'wf-ellipsis', text: `· ${x.path ?? x.place_name ?? '作業フォルダの外'}` }))))

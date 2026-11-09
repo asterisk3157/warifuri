@@ -171,6 +171,11 @@ test('endpoint shapes', async (t) => {
   assert.deepEqual(st.apps.map((a) => [a.client_name, a.device]), [['Test Agent', 'desk']]);
   assert.match(st.apps[0].last_token_at, /^\d{4}-/);
   assert.deepEqual(st.places.map((p) => p.name).sort(), ['misc', 'thesis']);
+  // The secretary's autonomy, to look at: every kind, at ask until approvals raise it.
+  assert.equal(st.autonomy.secretary, false);
+  assert.equal(st.autonomy.streak, 3);
+  assert.ok(st.autonomy.kinds.length > 0);
+  assert.ok(st.autonomy.kinds.every((k) => k.level === 'ask' && k.approvals_in_row === 0 && [2, 3].includes(k.stage) && typeof k.label === 'string'));
 
   const profile = await (await get(base, '/web/api/profile')).json();
   assert.deepEqual(profile, { name: null, bio: '', color: '#8cc4ea', github: null });
