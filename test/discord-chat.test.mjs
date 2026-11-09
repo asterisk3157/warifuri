@@ -5,14 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { chunks } from '../src/notify/discord.mjs';
-import { createDiscordChat, askComponents, replyComponents } from '../src/notify/discord-chat.mjs';
+import { createDiscordChat, askComponents, askMessages, replyComponents } from '../src/notify/discord-chat.mjs';
 import { createGateway, INTENTS } from '../src/notify/gateway.mjs';
 import { createNotifier } from '../src/notify/notifier.mjs';
+import { createThreadMap } from '../src/notify/discord-threads.mjs';
 
 const S = { actor: 'device-key', device: 'secretary' };
 const PERSON = '456';
 
-function world(t) {
+function world(t, { threads = null } = {}) {
   const ledger = openLedger(':memory:');
   t.after(() => ledger.close());
   const thread = ledger.ensureThread('secretary', S);
@@ -20,10 +21,10 @@ function world(t) {
   let on = true;
   // The secretary's conversation as discord-chat uses it: stores what is written.
   const chat = {
-    send(text, writer) {
+    send(text, writer, opts) {
       if (!on) throw new LedgerError(['秘書が止まっているので、送れません']);
-      sent.push({ text, writer });
-      return ledger.addMessage(thread.id, { role: 'user', body: text }, writer);
+      sent.push({ text, writer, ...(opts ? { opts } : {}) });
+      return ledger.addMessage(opts?.thread ?? thread.id, { role: 'user', body: text }, writer);
     },
     answer: (id, fields, writer) => ledger.answerAsk(id, fields, writer),
   };
@@ -32,9 +33,13 @@ function world(t) {
     channel: '123', user: PERSON,
     post: async (text, opts) => calls.push({ post: text, ...opts }),
     respond: async (i, body) => calls.push({ respond: i.id, ...body }),
-    typing: async () => calls.push({ typing: true }),
+    typing: async (channel) => calls.push({ typing: channel ?? true }),
+    startThread: async (message, name) => {
+      calls.push({ startThread: message, name });
+      return { id: `th-${message}` };
+    },
   };
-  const talk = createDiscordChat({ chat, ledger, discord });
+  const talk = createDiscordChat({ chat, ledger, discord, threads });
   return { ledger, thread, talk, sent, calls, off: () => { on = false; } };
 }
 
@@ -96,12 +101,54 @@ test('discord chat: a question as buttons and a menu; pressing answers it', asyn
   assert.deepEqual(w.ledger.getMessage(q.id).data.answers[0].picked, ['そのまま']);
 });
 
-test('discord chat: a reply button sends its words; the thread pair is not offered', async (t) => {
+test('discord chat: a question with two questions goes as a message per question, each with its own buttons', async (t) => {
+  const w = world(t);
+  const q = ask(w.ledger);
+  const msgs = askMessages(q);
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[0].text, '秘書から質問が2つあります。\n\n質問1【期日】延ばしますか？');
+  assert.equal(msgs[1].text, '質問2【分野】どれに入れますか？');
+  const ids = (m) => m.components.flatMap((r) => r.components.map((c) => c.custom_id));
+  assert.deepEqual(ids(msgs[0]), [`wf:a:${q.id}:0:0`, `wf:a:${q.id}:0:1`], 'the first holds only its own buttons');
+  assert.deepEqual(ids(msgs[1]), [`wf:a:${q.id}:1`, `wf:l:${q.id}`], 'まとめてあとで goes under the last');
+  assert.equal(msgs[1].components[1].components[0].label, 'まとめてあとで');
+  // One question: one message with あとで, as before.
+  const one = { id: 'm_x', state: 'open', data: { questions: [{ header: '期日', question: '延ばしますか？', options: [{ label: '延ばす' }, { label: 'そのまま' }] }] } };
+  assert.equal(askMessages(one).length, 1);
+  assert.equal(askMessages(one)[0].components.at(-1).components[0].label, 'あとで');
+  // Pressing on the first message rewrites it with its own question only.
+  const press = (m, custom_id, extra = {}) => w.talk.onEvent('INTERACTION_CREATE', { id: 'i1', token: 'tk', type: 3, user: { id: PERSON }, message: { content: m.text, components: m.components }, data: { custom_id, ...extra } });
+  await press(msgs[0], `wf:a:${q.id}:0:0`);
+  assert.deepEqual(w.calls.at(-1).data.components.flatMap((r) => r.components.map((c) => [c.custom_id, c.style])), [[`wf:a:${q.id}:0:0`, 3], [`wf:a:${q.id}:0:1`, 2]]);
+  assert.equal(w.calls.at(-1).data.content, msgs[0].text);
+  // まとめてあとで on the last one: it keeps its menu, あとで goes.
+  await press(msgs[1], `wf:l:${q.id}`);
+  assert.equal(w.ledger.getMessage(q.id).state, 'later');
+  assert.deepEqual(w.calls.at(-1).data.components.flatMap((r) => r.components.map((c) => c.custom_id)), [`wf:a:${q.id}:1`]);
+});
+
+test('notifier: a question with two questions is posted as two messages, the person pinged once', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-ask-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const ledger = openLedger(':memory:');
+  t.after(() => ledger.close());
+  ledger.ensureThread('secretary', S);
+  const posts = [];
+  const notifier = createNotifier({ ledger, discord: { post: async (text, opts) => posts.push({ text, ...opts }) }, file: path.join(dir, 'd.json'), publicUrl: 'https://w.example.com' });
+  await notifier.tick();
+  const q = ask(ledger);
+  assert.equal(await notifier.tick(), 1);
+  assert.deepEqual(posts.map((p) => p.mention), [true, false]);
+  assert.match(posts[0].text, /^秘書から質問が2つあります。/);
+  assert.match(posts[1].text, /^質問2【分野】.*\nhttps:\/\/w\.example\.com\/secretary$/);
+  assert.equal(posts[1].components.at(-1).components[0].custom_id, `wf:l:${q.id}`);
+});
+
+test('discord chat: a reply button sends its words', async (t) => {
   const w = world(t);
   const m = w.ledger.addMessage(w.thread.id, { role: 'secretary', body: '入れますか？', data: { options: ['入れて', 'やめる'] } }, S);
   const rows = replyComponents(m);
   assert.deepEqual(rows[0].components.map((b) => b.label), ['入れて', 'やめる']);
-  assert.deepEqual(replyComponents({ id: 'x', data: { options: ['スレッドで話す', 'ここで続ける'] } }), []);
   await w.talk.onEvent('INTERACTION_CREATE', { id: 'i1', token: 'tk', type: 3, user: { id: PERSON }, message: { content: '入れますか？' }, data: { custom_id: `wf:r:${m.id}:0` } });
   assert.deepEqual(w.sent.map((x) => x.text), ['入れて']);
   assert.deepEqual(w.calls.at(-1).data, { content: '入れますか？\n→ 入れて', components: [] });
@@ -210,4 +257,109 @@ test('notifier: with Discord chat on, what is written on the screen and its repl
   };
   assert.deepEqual(await run(true), ['(Web から)\n明日の予定は？', '明日は2件です。', '入れました。']);
   assert.deepEqual(await run(false), ['入れました。'], 'without it, only the replies to Discord');
+});
+
+test('discord chat: スレッドで話す opens a Discord thread tied to the thread; what is said there goes both ways', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-threads-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const threads = createThreadMap(path.join(dir, 'discord-threads.json'));
+  const w = world(t, { threads });
+  const reply = w.ledger.addMessage(w.thread.id, { role: 'secretary', body: '来週の計画を立てましょうか', data: { options: ['スレッドで話す', 'ここで続ける'] } }, S);
+  assert.deepEqual(replyComponents(reply)[0].components.map((b) => b.label), ['スレッドで話す', 'ここで続ける'], 'the thread pair is offered');
+  const notifier = createNotifier({ ledger: w.ledger, discord: { post: async (text, opts) => w.calls.push({ post: text, ...opts }) }, file: path.join(dir, 'd.json'), threads });
+  await notifier.tick();
+  // Pressing スレッドで話す: a Discord thread from the message the button is on.
+  const press = () => w.talk.onEvent('INTERACTION_CREATE', { id: 'i1', token: 'tk', type: 3, user: { id: PERSON }, message: { id: 'dm1', content: reply.body }, data: { custom_id: `wf:r:${reply.id}:0` } });
+  await press();
+  const sub = w.ledger.threadCounts()[reply.id];
+  assert.ok(sub, 'the thread of the conversation is opened');
+  assert.deepEqual(w.calls.find((c) => c.startThread), { startThread: 'dm1', name: '来週の計画を立てましょうか' });
+  assert.equal(threads.thread('th-dm1'), sub.id);
+  assert.deepEqual(w.calls.find((c) => c.respond)?.data, { content: '来週の計画を立てましょうか\n→ スレッドで話す', components: [] });
+  assert.equal(w.calls.at(-1).channel, 'th-dm1');
+  assert.equal(w.sent.length, 0, 'スレッドで話す is not sent as words');
+  // Pressed again: the same thread, shown only to the person.
+  await press();
+  assert.equal(w.calls.filter((c) => c.startThread).length, 1);
+  assert.equal(w.calls.at(-1).data.content, 'スレッドはこちらです: <#th-dm1>');
+  // What the person writes in the Discord thread goes into the thread; elsewhere, nowhere.
+  await w.talk.onEvent('MESSAGE_CREATE', { channel_id: 'th-dm1', content: '月曜から考えたい', author: { id: PERSON } });
+  await w.talk.onEvent('MESSAGE_CREATE', { channel_id: 'th-other', content: '別のスレッド', author: { id: PERSON } });
+  assert.deepEqual(w.sent.map((x) => [x.text, x.opts?.thread]), [['月曜から考えたい', sub.id]]);
+  assert.ok(w.calls.some((c) => c.typing === 'th-dm1'));
+  // The secretary's reply in the thread, and what is written there on the screen, go to the
+  // Discord thread; what came from Discord does not come back.
+  const before = w.calls.length;
+  w.ledger.addMessage(sub.id, { role: 'secretary', body: '月曜は空いています', data: { options: ['入れて', 'やめる'] } }, S);
+  w.ledger.addMessage(sub.id, { role: 'user', body: '火曜も見て' }, { actor: 'web', device: null });
+  w.ledger.addMessage(w.thread.id, { role: 'secretary', body: '本題の返事' }, S);
+  await notifier.tick();
+  const posts = w.calls.slice(before).filter((c) => c.post);
+  assert.deepEqual(posts.map((c) => [c.post, c.channel]), [['月曜は空いています', 'th-dm1'], ['(Web から)\n火曜も見て', 'th-dm1']]);
+  // A reply button in the thread answers in the thread.
+  const button = posts[0].components[0].components[0].custom_id;
+  await w.talk.onEvent('INTERACTION_CREATE', { id: 'i3', token: 'tk', type: 3, user: { id: PERSON }, channel_id: 'th-dm1', message: { id: 'dm2', content: '月曜は空いています' }, data: { custom_id: button } });
+  assert.deepEqual(w.sent.at(-1), { text: '入れて', writer: { actor: 'discord', device: null }, opts: { thread: sub.id } });
+  // Sent once: across a restart too.
+  const again = createNotifier({ ledger: w.ledger, discord: { post: async (text, opts) => w.calls.push({ post: text, ...opts }) }, file: path.join(dir, 'd.json'), threads: createThreadMap(path.join(dir, 'discord-threads.json')) });
+  const n = w.calls.length;
+  await again.tick();
+  assert.equal(w.calls.slice(n).filter((c) => c.post && c.channel === 'th-dm1').length, 0);
+});
+
+test('notifier: a thread opened on the screen gets a Discord thread once something is said in it', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-webthread-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const ledger = openLedger(':memory:');
+  t.after(() => ledger.close());
+  const main = ledger.ensureThread('secretary', S);
+  const W = { actor: 'web', device: null };
+  // A thread of before: left alone.
+  const old = ledger.addMessage(main.id, { role: 'secretary', body: '前の話' }, S);
+  const oldThread = ledger.openThread(old.id, W);
+  ledger.addMessage(oldThread.id, { role: 'user', body: '前のスレッド' }, W);
+  await new Promise((r) => setTimeout(r, 5));
+  const threads = createThreadMap(path.join(dir, 'discord-threads.json'));
+  const calls = [];
+  let n = 0;
+  const discord = {
+    post: async (text, opts) => {
+      calls.push({ post: text, ...opts });
+      n += 1;
+      return { id: `dm${n}` };
+    },
+    startThread: async (message, name) => {
+      calls.push({ startThread: message, name });
+      return { id: `th${calls.length}` };
+    },
+  };
+  const notifier = createNotifier({ ledger, discord, file: path.join(dir, 'd.json'), mirror: true, threads });
+  await notifier.tick();
+  await new Promise((r) => setTimeout(r, 5));
+  // A reply that went to Discord; a thread opened from it on the screen.
+  ledger.addMessage(main.id, { role: 'user', body: '計画は？' }, W);
+  const reply = ledger.addMessage(main.id, { role: 'secretary', body: '来週の計画です' }, S);
+  await notifier.tick();
+  assert.equal(threads.posted(reply.id), 'dm2');
+  const sub = ledger.openThread(reply.id, W);
+  await notifier.tick();
+  assert.equal(threads.channelOf(sub.id), null, 'not until something is said in it');
+  ledger.addMessage(sub.id, { role: 'user', body: 'テストです' }, W);
+  ledger.addMessage(sub.id, { role: 'secretary', body: '届いています' }, S);
+  await notifier.tick();
+  assert.deepEqual(calls.find((c) => c.startThread), { startThread: 'dm2', name: '来週の計画です' });
+  const channel = threads.channelOf(sub.id);
+  assert.ok(channel);
+  assert.deepEqual(calls.filter((c) => c.channel === channel).map((c) => c.post), ['(Web から)\nテストです', '届いています']);
+  assert.equal(threads.channelOf(oldThread.id), null, 'a thread of before is left alone');
+  // From a message that did not go to Discord: a thread of its own, the message quoted.
+  const quiet = ledger.addMessage(main.id, { role: 'secretary', kind: 'text', body: '画面だけの発言' }, S);
+  const sub2 = ledger.openThread(quiet.id, W);
+  ledger.addMessage(sub2.id, { role: 'user', body: 'こちらも' }, W);
+  const before = calls.length;
+  await notifier.tick();
+  const after = calls.slice(before);
+  assert.deepEqual(after.find((c) => 'startThread' in c), { startThread: null, name: '画面だけの発言' });
+  const channel2 = threads.channelOf(sub2.id);
+  assert.deepEqual(after.filter((c) => c.channel === channel2).map((c) => c.post), ['秘書のこの発言から始まったスレッドです。\n> 画面だけの発言', '(Web から)\nこちらも']);
 });
