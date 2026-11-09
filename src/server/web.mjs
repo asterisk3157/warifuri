@@ -487,6 +487,23 @@ export function createWeb({
     }
   });
 
+  const bookingOut = (b) => ({
+    id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note, location: b.location ?? null, organizer: b.organizer ?? null,
+    task: b.task, habit: b.habit, goal: b.goal, profile: b.profile,
+  });
+
+  // The calendar under a secretary's reply (show_calendar): its days as they are now.
+  const replyCalendar = (c) => {
+    try {
+      const out = ledger.schedule({ from: c.from, to: c.to });
+      const bookings = out.bookings.map(bookingOut);
+      return { from: out.from, to: out.to, marks: Array.isArray(c.marks) ? c.marks : [], bookings, profiles: profileColors(home, bookings.map((b) => b.profile)) };
+    } catch (err) {
+      if (err instanceof LedgerError) return null;
+      throw err;
+    }
+  };
+
   api.get('/calendar', (req, res) => {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
@@ -498,10 +515,7 @@ export function createWeb({
       throw err;
     }
     if (Date.parse(out.to) - Date.parse(out.from) > MAX_RANGE_MS) return res.status(400).json({ error: 'bad range', problems: ['期間は42日までです'] });
-    const bookings = out.bookings.map((b) => ({
-      id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note, location: b.location ?? null, organizer: b.organizer ?? null,
-      task: b.task, habit: b.habit, goal: b.goal, profile: b.profile,
-    }));
+    const bookings = out.bookings.map(bookingOut);
     return res.json({ now: nowIso(), from: out.from, to: out.to, bookings, profiles: profileColors(home, bookings.map((b) => b.profile)) });
   });
 
@@ -610,6 +624,7 @@ export function createWeb({
       type: 'message', id: m.id, role: m.role, kind: m.kind, body: m.body, created_at: m.created_at,
       steps: (d.steps ?? []).map((x) => ({ kind: x.kind, label: x.label })),
       options: d.options ?? [],
+      calendar: d.calendar ? replyCalendar(d.calendar) : null,
       scheduled: d.scheduled ?? null,
       files: (d.attachments ?? []).map((a) => ({
         name: a.name, type: a.type, size: a.size,

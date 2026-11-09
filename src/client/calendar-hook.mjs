@@ -43,7 +43,7 @@ export function calendarDenyReason(toolName) {
   return (
     `warifuri: 秘書が有効なので、予定は秘書が決めます(原則23)。${toolName} でカレンダーに直接書かず、` +
     'MCP の warifuri の ask_secretary に、何に(task_id)、どれくらい(minutes)、いつまでに(by)、希望(prefer)を渡して頼んでください。' +
-    '本人が日時を決めているときは starts_at と ends_at で渡します。カレンダーを読むのはかまいません。'
+    '本人が日時を決めているときは starts_at と ends_at で渡します。本人の予定を直してほしいと本人に頼まれたときも、ask_secretary の text に、どの予定をどう直すかを書いて頼みます。カレンダーを読むのはかまいません。'
   );
 }
 

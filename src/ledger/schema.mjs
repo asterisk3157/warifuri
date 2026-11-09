@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -514,6 +514,12 @@ export const MIGRATIONS = [
   `
   ALTER TABLE bookings ADD COLUMN location TEXT;
   ALTER TABLE bookings ADD COLUMN organizer TEXT;
+  `,
+
+  // 10 -> 11: the calendar the secretary asked to show under the reply it is writing (from,
+  // to and the bookings to outline, as JSON), moved onto its reply like pending_options.
+  `
+  ALTER TABLE threads ADD COLUMN pending_calendar TEXT;
   `,
 ];
 

@@ -217,6 +217,27 @@ test('reply buttons asked for during a turn go with its reply, and are cleared f
   assert.equal(w.ledger.listMessages(w.main().id).at(-1).data?.options, undefined);
 });
 
+test('a calendar asked for during a turn goes with its reply, and is cleared for the next', async (t) => {
+  const w = world(t);
+  const { booking: b } = w.ledger.book({ kind: 'fixed', title: '会議', starts_at: '2026-11-13T18:00:00+09:00', ends_at: '2026-11-13T21:00:00+09:00' }, SECRETARY);
+  w.claude.answerWith((call) => {
+    if (w.claude.calls.length === 1) w.ledger.setReplyCalendar(w.main().id, { from: '2026-11-12T00:00:00+09:00', to: '2026-11-19T00:00:00+09:00', marks: [b.id] }, SECRETARY);
+    return { stdout: streamed('会議を 18:00 からにしました。', call.session) };
+  });
+  w.chat.send('会議を直して', WEB);
+  await w.chat.idle();
+  const reply = w.ledger.listMessages(w.main().id).at(-1);
+  assert.deepEqual(reply.data.calendar, { from: '2026-11-11T15:00:00.000Z', to: '2026-11-18T15:00:00.000Z', marks: [b.id] });
+  assert.equal(w.main().pending_calendar, null);
+  w.chat.send('ありがとう', WEB);
+  await w.chat.idle();
+  assert.equal(w.ledger.listMessages(w.main().id).at(-1).data?.calendar, undefined);
+  // Two weeks at most, and only bookings that are there.
+  assert.throws(() => w.ledger.setReplyCalendar(w.main().id, { from: '2026-11-01', to: '2026-11-20' }, SECRETARY), /見せる期間は14日までです/);
+  assert.throws(() => w.ledger.setReplyCalendar(w.main().id, { from: '2026-11-12', to: '2026-11-13', marks: ['b_none'] }, SECRETARY), /b_none という予定はありません/);
+  assert.throws(() => w.ledger.setReplyCalendar(w.main().id, { from: '2026-11-13', to: '2026-11-12' }, SECRETARY), /to は from より後にします/);
+});
+
 test('answers: an answer starts a turn and comes in the prompt; a changed answer asks to undo the old one first', async (t) => {
   const w = world(t);
   const a = w.ledger.ask({ questions: [{ header: 'タスク整理', question: '「調べもの」はどうしますか？', options: [{ label: '残す' }, { label: '閉じる' }], kind: 'close_forgotten' }] }, SECRETARY);

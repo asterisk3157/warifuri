@@ -367,6 +367,9 @@ test('outside tools are given with a scope: allowed by name, described in the pr
   assert.equal(args[args.indexOf('--settings') + 1], file);
   assert.ok(!args.includes('--strict-mcp-config'));
   assert.match(buildPrompt('nightly', { schedule: s }), /使える外の道具: `mcp__claude_ai_Gmail`\(読むだけ\)、`mcp__notion`\(読む、書く\(外に出すときは毎回本人に聞く\)\)/);
+  // Connectors load after the start: the secretary looks for the tools before giving up on them.
+  assert.match(buildPrompt('nightly', { schedule: s }), /見えないときは ToolSearch で探してから使い/);
+  assert.doesNotMatch(buildPrompt('nightly', { schedule: scheduleFrom({}) }), /ToolSearch/);
   // Nothing to set: no file is given.
   assert.equal(writeClaudeSettings(home, scheduleFrom({})), null);
   assert.ok(!claudeArgs({ mcpFile: '/x/mcp.json', schedule: scheduleFrom({}) }).includes('--settings'));
