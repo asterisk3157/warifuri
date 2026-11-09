@@ -1,7 +1,8 @@
 // `warifuri connect`: sets up a machine that uses a warifuri server. It finds the harnesses
 // on PATH (Claude Code, Codex), registers the server's MCP endpoint in each, puts this
 // machine's device key in its file (issuing it when the server's ledger is on this machine),
-// wires the start gate hook (`warifuri hook gate`) and copies the package's skills.
+// wires the start gate hook (`warifuri hook gate`), the end-of-work reminder (`warifuri hook
+// stop`) and the calendar hook, and copies the package's skills.
 //
 // Every step looks at what is already there first, so running it again changes nothing.
 // A harness file that is changed is copied next to itself first (<file>.bak-warifuri-<time>);
@@ -139,6 +140,7 @@ function writeWithBackup(file, text, now) {
 const isHook = (which) => (h) => !!h && typeof h.command === 'string' && new RegExp(`warifuri(?:\\.mjs|\\.cmd)?"?\\s+hook\\s+${which}\\b`).test(h.command);
 export const isGateHook = isHook('gate');
 export const isCalendarHook = isHook('calendar');
+export const isStopHook = isHook('stop');
 
 // The hooks JSON with exactly one start gate in PreToolUse: { changed, json }. Other hooks,
 // other events and other keys are kept as they are.
@@ -146,13 +148,14 @@ export function mergeGateHook(json, { matcher, handler }) {
   return mergeHook(json, { matcher, handler, isOurs: isGateHook });
 }
 
-// The same for any of warifuri's hooks: isOurs tells its handlers from the others.
-export function mergeHook(json, { matcher, handler, isOurs }) {
+// The same for any of warifuri's hooks: isOurs tells its handlers from the others. event: the
+// hook event (PreToolUse by default); with no matcher, the group has none (Stop takes none).
+export function mergeHook(json, { event = 'PreToolUse', matcher, handler, isOurs }) {
   const out = structuredClone(json ?? {});
   if (out.hooks !== undefined && (typeof out.hooks !== 'object' || Array.isArray(out.hooks))) throw new Error('"hooks" is not an object');
   out.hooks ??= {};
-  const groups = out.hooks.PreToolUse ?? [];
-  if (!Array.isArray(groups)) throw new Error('"hooks.PreToolUse" is not a list');
+  const groups = out.hooks[event] ?? [];
+  if (!Array.isArray(groups)) throw new Error(`"hooks.${event}" is not a list`);
   const ours = [];
   groups.forEach((g, gi) => (Array.isArray(g?.hooks) ? g.hooks : []).forEach((h, hi) => isOurs(h) && ours.push({ g, gi, hi, h })));
   if (ours.length === 1 && ours[0].g.matcher === matcher && JSON.stringify(ours[0].h) === JSON.stringify(handler)) {
@@ -167,8 +170,8 @@ export function mergeHook(json, { matcher, handler, isOurs }) {
     const rest = g.hooks.filter((h) => !isOurs(h));
     if (rest.length) kept.push({ ...g, hooks: rest });
   }
-  kept.push({ matcher, hooks: [handler] });
-  out.hooks.PreToolUse = kept;
+  kept.push(matcher === undefined ? { hooks: [handler] } : { matcher, hooks: [handler] });
+  out.hooks[event] = kept;
   return { changed: true, json: out };
 }
 
@@ -176,7 +179,7 @@ export function mergeHook(json, { matcher, handler, isOurs }) {
 // npm also puts a warifuri.ps1 there, which PowerShell may refuse to run under its execution
 // policy. Otherwise node and this package's bin.
 export function gateCommand({ env, platform, home, homeIsDefault, which = 'gate' }) {
-  // which: 'gate', or 'calendar <harness>'.
+  // which: 'gate', 'stop', or 'calendar <harness>'.
   const q = (s) => `"${s}"`;
   const onPath = findOnPath('warifuri', env, platform) ? (platform === 'win32' ? 'warifuri.cmd' : 'warifuri') : null;
   const head = onPath ?? `${q(process.execPath)} ${q(BIN)}`;
@@ -336,6 +339,7 @@ export function connect(cfg, opts, ctx = {}) {
   }
 
   const command = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true });
+  const stopCommand = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: 'stop' });
   const calendarCommand = (harness) => gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: `calendar ${harness}` });
   const skills = opts.skills ? packageSkills(ctx.packageRoot) : [];
   const skillTargets = new Set();
@@ -352,13 +356,14 @@ export function connect(cfg, opts, ctx = {}) {
 
     const dir = h.name === 'claude' ? env.CLAUDE_CONFIG_DIR || path.join(home, '.claude') : env.CODEX_HOME || path.join(home, '.codex');
 
-    // The start gate and the calendar hook, in one write of the file.
+    // The start gate, the end-of-work reminder and the calendar hook, in one write of the file.
     if (opts.hook) {
       const file = h.name === 'claude' ? path.join(dir, 'settings.json') : path.join(dir, 'hooks.json');
       const handler = (cmd, status) =>
         h.name === 'claude' ? { type: 'command', command: cmd, timeout: HOOK_TIMEOUT } : { type: 'command', command: cmd, timeout: HOOK_TIMEOUT, statusMessage: status };
       const hooks = [
         { what: 'the start gate', matcher: h.name === 'claude' ? CLAUDE_MATCHER : CODEX_MATCHER, handler: handler(command, 'warifuri: checking the held task'), isOurs: isGateHook },
+        { what: 'the stop reminder', event: 'Stop', handler: handler(stopCommand, 'warifuri: checking the held task'), isOurs: isStopHook },
         { what: 'the calendar hook', matcher: CALENDAR_MATCHER, handler: handler(calendarCommand(h.name), 'warifuri: checking the calendar'), isOurs: isCalendarHook },
       ];
       const read = readJson(file);
@@ -373,7 +378,7 @@ export function connect(cfg, opts, ctx = {}) {
             if (out.changed) {
               json = out.json;
               any = true;
-              say(`${h.name}: put ${k.what} in ${file} (PreToolUse, ${k.matcher})`);
+              say(`${h.name}: put ${k.what} in ${file} (${k.event ?? 'PreToolUse'}${k.matcher ? `, ${k.matcher}` : ''})`);
             } else lines.push(`${h.name}: kept ${k.what} in ${file}`);
           }
           if (any) {

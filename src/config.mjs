@@ -145,6 +145,14 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_STOP',
+    section: 'client',
+    about: '作業の終わりの確認。エージェントが作業を終えるとき、持ったままのタスクがあれば、会話ごとに一度だけ、閉じるか手放すよう伝える。off にすると伝えない',
+    def: 'on',
+    commands: ['hook'],
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
     name: 'WARIFURI_CALENDAR_CLAUDE',
     section: 'client',
     about: 'この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う',
