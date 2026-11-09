@@ -471,7 +471,7 @@ function startSecretary(cfg, chat, ledger) {
   const discord = createDiscord({ token: cfg.values.WARIFURI_DISCORD_TOKEN, channel: cfg.values.WARIFURI_DISCORD_CHANNEL, user: cfg.values.WARIFURI_DISCORD_USER });
   const notifier = createNotifier({
     ledger, discord, file: path.join(secretary.paths(cfg.home).dir, 'discord.json'), publicUrl: cfg.values.WARIFURI_PUBLIC_URL ?? null,
-    night: ready.schedule.night, log,
+    night: ready.schedule.night, log, mirror: cfg.values.WARIFURI_DISCORD_CHAT === 'on' && Boolean(discord?.user),
     picture: (m) => svgToPng(calendarSvg(ledger, m.data.calendar, { colorsOf: (names) => profileColors(cfg.home, names) })),
   });
   if (discord) log('discord: the secretary\'s questions, the morning report and failures go to Discord');

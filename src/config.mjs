@@ -281,7 +281,7 @@ export const SETTINGS = [
   {
     name: 'WARIFURI_DISCORD_CHAT',
     section: 'secretary',
-    about: 'Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る',
+    about: 'Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。画面で書いたことも Discord に写す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る',
     def: 'off',
     commands: SECRETARY,
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
