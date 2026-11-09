@@ -12,10 +12,10 @@ export const DETAIL_QUERIES = Object.freeze({
   instant: {
     memTotal: 'node_memory_MemTotal_bytes',
     memAvailable: 'node_memory_MemAvailable_bytes',
-    read: `rate(node_disk_read_bytes_total{${DISKS}}[2m])`,
-    write: `rate(node_disk_written_bytes_total{${DISKS}}[2m])`,
+    read: `max by (host, device) (rate(node_disk_read_bytes_total{${DISKS}}[2m]))`,
+    write: `max by (host, device) (rate(node_disk_written_bytes_total{${DISKS}}[2m]))`,
     diskInfo: `node_disk_info{${DISKS}}`,
-    cpuInfo: 'count by (host, model_name) (node_cpu_info)',
+    cpuInfo: 'count by (host, model_name) (max by (host, model_name, cpu) (node_cpu_info))',
     temp: 'max by (host) (node_hwmon_temp_celsius{chip=~"platform_coretemp.*"})',
     boot: 'node_boot_time_seconds',
     gpuInfo: 'nvidia_gpu_temperature_celsius',
@@ -38,13 +38,13 @@ export const DETAIL_QUERIES = Object.freeze({
     rootFull: '100 - 100 * node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}',
   },
   range: {
-    cores: '100 * (1 - rate(node_cpu_seconds_total{mode="idle"}[2m]))',
-    memory: '100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)',
-    busy: `100 * rate(node_disk_io_time_seconds_total{${DISKS}}[2m])`,
-    gpuUtil: 'nvidia_gpu_utilization_percent',
-    gpuTemp: 'nvidia_gpu_temperature_celsius',
-    gpuMemory: '100 * nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes',
-    gpuPower: 'nvidia_gpu_power_watts',
+    cores: 'max by (host, cpu) (100 * (1 - rate(node_cpu_seconds_total{mode="idle"}[2m])))',
+    memory: 'max by (host) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))',
+    busy: `max by (host, device) (100 * rate(node_disk_io_time_seconds_total{${DISKS}}[2m]))`,
+    gpuUtil: 'max by (host) (nvidia_gpu_utilization_percent)',
+    gpuTemp: 'max by (host) (nvidia_gpu_temperature_celsius)',
+    gpuMemory: 'max by (host) (100 * nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes)',
+    gpuPower: 'max by (host) (nvidia_gpu_power_watts)',
     power: 'tapo_power_watts',
   },
 });
@@ -153,7 +153,10 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
     })
     .sort((a, b) => a.host.localeCompare(b.host) || (a.vmid ?? 0) - (b.vmid ?? 0));
 
-  const hosts = [...new Set(list(instant.memTotal).map((r) => r?.labels?.host).filter(Boolean))].sort();
+  // The machines are the hosts node_exporter reports, less the guests that run one of their own
+  // (a VM or container whose name is a host): those are in the list of guests, not machines.
+  const guestNames = new Set(guests.map((g) => g.name));
+  const hosts = [...new Set(list(instant.memTotal).map((r) => r?.labels?.host).filter(Boolean))].filter((h) => !guestNames.has(h)).sort();
   const machines = hosts.map((host) => {
     const node = (l) => l.host === host;
     const totalBytes = whole(pick('memTotal', node));

@@ -53,3 +53,14 @@ test('a guest has the GPU use only when it reports the GPU itself', () => {
   const gpu = Object.fromEntries(data.guests.map((g) => [g.name, g.gpu]));
   assert.deepEqual(gpu, { web: 37, db: null });
 });
+
+test('a guest that reports its own numbers is a guest, not a machine', () => {
+  const data = detailData({
+    instant: {
+      guests: [row({ host: 'node-a', id: 'qemu/100', name: 'web' }, 1)],
+      memTotal: [row({ host: 'node-a' }, 64), row({ host: 'web' }, 8)],
+    },
+    window: { start: 0, end: 60, step: 60 },
+  });
+  assert.deepEqual(data.machines.map((m) => m.host), ['node-a']);
+});
