@@ -36,10 +36,24 @@ test('unset settings read as their defaults, and say which fields are unset', (t
   assert.deepEqual(s.places, { places: [], travel: [] });
   assert.deepEqual(s.limits, { day_max_hours: 8, block_min_minutes: 30, block_max_minutes: 120, earliest: '09:00', latest: '21:00' });
   assert.deepEqual(s.limits, LIMIT_DEFAULTS);
-  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS) });
+  assert.deepEqual(s.calendar, { skip: [] });
+  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'] });
   // The profile written by the Web screen is a different section and is not touched.
   L.setSettings('profile', { name: 'Aoi' }, AGENT);
   assert.deepEqual(readSettings(L).life, { rules: [] });
+});
+
+test('calendar: the events not taken in, by title and calendar, checked and recorded', (t) => {
+  const L = fresh(t);
+  const out = writeSettings(L, { calendar: { skip: [{ title: ' 不在 ', calendar: 'work@example.com' }, { title: 'メモ' }] } }, {}, AGENT);
+  assert.deepEqual(out.calendar.skip, [{ title: '不在', calendar: 'work@example.com' }, { title: 'メモ' }]);
+  assert.deepEqual(out.defaults.calendar, []);
+  assert.deepEqual(L.records('calendar').map((r) => [r.entity, r.action]), [['settings', 'update']]);
+  assert.throws(() => writeSettings(L, { calendar: { skip: [{ title: '' }] } }, {}, AGENT), /calendar.skip の 1 件目の title が空です/);
+  assert.throws(() => writeSettings(L, { calendar: { skip: [{ title: 'A' }, { title: 'A' }] } }, {}, AGENT), /calendar.skip の 2 件目は、前と同じ組です/);
+  assert.throws(() => writeSettings(L, { calendar: { skip: [{ title: 'A', when: 'x' }] } }, {}, AGENT), /when は書けません/);
+  assert.throws(() => writeSettings(L, { calendar: { skip: 'x' } }, {}, AGENT), /calendar.skip は配列です/);
+  assert.deepEqual(writeSettings(L, { calendar: null }, {}, AGENT).calendar, { skip: [] });
 });
 
 test('life and places are written by an agent, checked, and recorded', (t) => {
