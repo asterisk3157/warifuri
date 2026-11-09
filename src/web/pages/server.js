@@ -208,11 +208,12 @@ function given(percent, used, total, unit, warn) {
     h('span', { class: 'wf-muted', text: amount ?? '' }));
 }
 
-// The machine's own line above its guests; its GPU, shared by all of them, is shown here.
+// The machine's own line above its guests. The monitoring knows the GPU only as a whole, so its
+// use is shown here, in the GPU column, and the guests show none.
 function hostRow(host, machine) {
   const gpu = machine?.gpu;
-  return h('div', { class: 'wf-tm-hostrow' }, h('span', { text: host }),
-    gpu ? h('span', { class: 'wf-tm-num' }, `GPU `, h('b', { text: or(gpu.utilization, '%') })) : null);
+  return h('div', { class: 'wf-row-vm wf-tm-hostrow' }, h('span', { text: host }), h('span'), h('span'), h('span'), h('span'),
+    h('span', { class: 'wf-tm-num' }, gpu ? h('b', { text: or(gpu.utilization, '%') }) : null), h('span'));
 }
 
 function guestList(detail) {
@@ -221,6 +222,8 @@ function guestList(detail) {
     return known.length ? `${Math.round(known.reduce((a, b) => a + b, 0) / known.length)}%` : '—';
   };
   const hosts = [...new Set(detail.guests.map((g) => g.host))];
+  const gpus = detail.machines.map((m) => m.gpu?.utilization).filter((v) => v !== null && v !== undefined);
+  const gpuAvg = gpus.length ? `${Math.round(gpus.reduce((a, b) => a + b, 0) / gpus.length)}%` : '—';
   const cpu = (g) => given(g.cpu, g.cpuUsedCores === null ? null : g.cpuUsedCores.toFixed(1), g.cpuCores === null ? null : coresText(g.cpuCores), 'コア', 80);
   const mem = (g) => given(g.memory, gb(g.memoryUsedBytes), gb(g.memoryTotalBytes), 'GB', 90);
   const disk = (g) => given(g.disk, gb(g.diskUsedBytes), gb(g.diskTotalBytes), 'GB', 85);
@@ -228,6 +231,7 @@ function guestList(detail) {
     h('div', { class: 'wf-cols wf-cols-vm' }, h('span', { text: '名前' }), h('span', { text: '種類' }), h('span', { text: '状態' }),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('cpu') }), h('br'), 'CPU'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('memory') }), h('br'), 'メモリ'),
+      h('span', { class: 'wf-tm-num' }, h('b', { text: gpuAvg }), h('br'), 'GPU'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('disk') }), h('br'), 'ディスク')),
     ...hosts.flatMap((host) => [
       hostRow(host, detail.machines.find((m) => m.host === host)),
@@ -235,7 +239,7 @@ function guestList(detail) {
         h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', g.up && 'wf-fresh', !g.up && g.always && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { class: 'wf-ellipsis', text: g.name })),
         h('span', { class: 'wf-muted', text: `${g.type === 'lxc' ? 'LXC' : 'VM'} ${g.vmid ?? ''}` }),
         h('span', { class: !g.up && g.always ? 'wf-bad' : '', text: g.up ? '稼働中' : g.always ? '止まっています' : '停止' }),
-        cpu(g), mem(g), disk(g))),
+        cpu(g), mem(g), given(null, null, null, '', 100), disk(g))),
     ]),
     detail.guests.length ? null : h('div', { class: 'wf-empty', text: 'VM とコンテナは見つかりませんでした' }));
 }
