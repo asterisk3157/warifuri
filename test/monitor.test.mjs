@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { summarize, fetchHomelab, parseAliases, QUERIES } from '../src/monitor/homelab.mjs';
 import { localMachine, secretaryJobs } from '../src/monitor/local.mjs';
+import { detailData } from '../src/monitor/detail.mjs';
 
 const row = (labels, value) => ({ labels, value: String(value) });
 const empty = () => Object.fromEntries(Object.keys(QUERIES).map((k) => [k, []]));
@@ -69,4 +70,19 @@ test('localMachine and secretaryJobs: this machine, and the last run of each job
   const jobs = secretaryJobs(home);
   assert.deepEqual(jobs.map((j) => [j.job, j.ok]), [['nightly', false], ['sync', true]]);
   assert.match(jobs[0].problem, /ログインが切れています/);
+});
+
+test('a guest has the GPU use only when it reports the GPU itself', () => {
+  const row = (labels, value) => ({ labels, value: String(value) });
+  const guest = (id, name) => row({ host: 'node-a', id, name }, 1);
+  const data = detailData({
+    instant: {
+      guests: [guest('qemu/100', 'web'), guest('lxc/102', 'db')],
+      up: [row({ host: 'node-a', id: 'qemu/100' }, 1), row({ host: 'node-a', id: 'lxc/102' }, 1)],
+      gpuUtil: [row({ host: 'web' }, 37), row({ host: 'node-a' }, 12)],
+    },
+    window: { start: 0, end: 60, step: 60 },
+  });
+  const gpu = Object.fromEntries(data.guests.map((g) => [g.name, g.gpu]));
+  assert.deepEqual(gpu, { web: 37, db: null });
 });

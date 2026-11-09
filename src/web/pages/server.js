@@ -208,14 +208,6 @@ function given(percent, used, total, unit, warn) {
     h('span', { class: 'wf-muted', text: amount ?? '' }));
 }
 
-// The machine's own line above its guests. The monitoring knows the GPU only as a whole, so its
-// use is shown here, in the GPU column, and the guests show none.
-function hostRow(host, machine) {
-  const gpu = machine?.gpu;
-  return h('div', { class: 'wf-row-vm wf-tm-hostrow' }, h('span', { text: host }), h('span'), h('span'), h('span'), h('span'),
-    h('span', { class: 'wf-tm-num' }, gpu ? h('b', { text: or(gpu.utilization, '%') }) : null), h('span'));
-}
-
 function guestList(detail) {
   const avg = (key) => {
     const known = detail.guests.map((g) => g[key]).filter((v) => v !== null);
@@ -234,12 +226,12 @@ function guestList(detail) {
       h('span', { class: 'wf-tm-num' }, h('b', { text: gpuAvg }), h('br'), 'GPU'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('disk') }), h('br'), 'ディスク')),
     ...hosts.flatMap((host) => [
-      hostRow(host, detail.machines.find((m) => m.host === host)),
+      h('div', { class: 'wf-tm-hostrow', text: host }),
       ...detail.guests.filter((g) => g.host === host).map((g) => h('div', { class: ['wf-row', 'wf-row-vm', !g.up && 'wf-row-off'] },
         h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', g.up && 'wf-fresh', !g.up && g.always && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { class: 'wf-ellipsis', text: g.name })),
         h('span', { class: 'wf-muted', text: `${g.type === 'lxc' ? 'LXC' : 'VM'} ${g.vmid ?? ''}` }),
         h('span', { class: !g.up && g.always ? 'wf-bad' : '', text: g.up ? '稼働中' : g.always ? '止まっています' : '停止' }),
-        cpu(g), mem(g), given(null, null, null, '', 100), disk(g))),
+        cpu(g), mem(g), given(g.gpu, null, null, '', 90), disk(g))),
     ]),
     detail.guests.length ? null : h('div', { class: 'wf-empty', text: 'VM とコンテナは見つかりませんでした' }));
 }

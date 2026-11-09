@@ -144,6 +144,9 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
         memory: up ? percentOf(memUsed, memSize) : null,
         memoryTotalBytes: whole(memSize),
         memoryUsedBytes: up ? whole(memUsed) : null,
+        // A GPU shows up under a guest only when the guest reports it itself (a GPU passed through
+        // to a VM). One the host keeps, shared by containers, is known only as a whole.
+        gpu: up ? whole(pick('gpuUtil', (x) => x.host === l.name)) : null,
         disk: diskPercent,
         diskTotalBytes: whole(diskSize),
         diskUsedBytes: diskPercent !== null && diskSize !== null ? round((diskPercent / 100) * diskSize) : null,
