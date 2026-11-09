@@ -31,6 +31,7 @@ import { LedgerError, SECRETARY_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
+import { calendarSvg } from '../calendar/image.mjs';
 import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
@@ -132,7 +133,7 @@ export function machineInfo() {
 }
 
 // The colour of each profile named: profile.yaml's `color`, a default, or the neutral one.
-function profileColors(home, names) {
+export function profileColors(home, names) {
   const out = {};
   for (const name of names) {
     if (typeof name !== 'string' || name === '' || name in out) continue;
@@ -492,18 +493,6 @@ export function createWeb({
     task: b.task, habit: b.habit, goal: b.goal, profile: b.profile,
   });
 
-  // The calendar under a secretary's reply (show_calendar): its days as they are now.
-  const replyCalendar = (c) => {
-    try {
-      const out = ledger.schedule({ from: c.from, to: c.to });
-      const bookings = out.bookings.map(bookingOut);
-      return { from: out.from, to: out.to, marks: Array.isArray(c.marks) ? c.marks : [], bookings, profiles: profileColors(home, bookings.map((b) => b.profile)) };
-    } catch (err) {
-      if (err instanceof LedgerError) return null;
-      throw err;
-    }
-  };
-
   api.get('/calendar', (req, res) => {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
@@ -624,7 +613,8 @@ export function createWeb({
       type: 'message', id: m.id, role: m.role, kind: m.kind, body: m.body, created_at: m.created_at,
       steps: (d.steps ?? []).map((x) => ({ kind: x.kind, label: x.label })),
       options: d.options ?? [],
-      calendar: d.calendar ? replyCalendar(d.calendar) : null,
+      // The calendar under a reply (show_calendar), as a picture drawn when it is opened.
+      calendar: d.calendar ? { image: `/web/api/secretary/calendar/${encodeURIComponent(m.id)}`, from: d.calendar.from, to: d.calendar.to } : null,
       scheduled: d.scheduled ?? null,
       files: (d.attachments ?? []).map((a) => ({
         name: a.name, type: a.type, size: a.size,
@@ -804,6 +794,26 @@ export function createWeb({
   // 'done' ({ thread, message }). A comment every PING_MS keeps the connection open.
   // A picture sent with a message, for its bubble: only pictures, only ones that went with a
   // message, read from the owner-only folder, never as anything the browser could run.
+  // The picture of the calendar under a secretary's reply: its days with the bookings as they
+  // are now, the changed ones outlined. SVG, drawn by the server; no script runs in it.
+  api.get('/secretary/calendar/:id', (req, res) => {
+    const m = /^[A-Za-z0-9_-]+$/.test(req.params.id) ? ledger.getMessage(req.params.id) : null;
+    const c = m?.data?.calendar;
+    if (!c) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    let svg;
+    try {
+      svg = calendarSvg(ledger, { from: c.from, to: c.to, marks: Array.isArray(c.marks) ? c.marks : [] }, { colorsOf: (names) => profileColors(home, names), now: new Date(now()) });
+    } catch (err) {
+      if (err instanceof LedgerError) return res.status(404).json({ error: 'not found' });
+      throw err;
+    }
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'Cache-Control': 'no-store' });
+    return res.send(svg);
+  });
+
   api.get('/secretary/files/:id', (req, res) => {
     const a = home ? ledger.getAttachment(req.params.id) : null;
     const file = a ? path.join(secretaryPaths(home).uploads, a.id) : null;

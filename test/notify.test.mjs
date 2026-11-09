@@ -35,6 +35,13 @@ test('discord: the token from its file, and only the person can be pinged', asyn
     return calls[2].init.body;
   })())).content;
   assert.equal([...long].length, 2000);
+  // A picture goes as a file of a multipart message.
+  await d.post('朝の報告です。', { files: [{ name: 'calendar.png', data: Buffer.from('png'), type: 'image/png' }] });
+  const form = calls.at(-1).init.body;
+  assert.ok(form instanceof FormData);
+  assert.equal(calls.at(-1).init.headers['Content-Type'], undefined);
+  assert.deepEqual(JSON.parse(form.get('payload_json')).attachments, [{ id: 0, filename: 'calendar.png' }]);
+  assert.equal(form.get('files[0]').name, 'calendar.png');
   const failing = createDiscord({ token: 't', channel: '1', fetch: async () => ({ ok: false, status: 401, json: async () => ({ message: '401: Unauthorized' }) }) });
   await assert.rejects(failing.post('x'), /Discord: 401 401: Unauthorized/);
 });
@@ -59,7 +66,8 @@ function world(t, { night = null } = {}) {
   let down = false;
   const discord = { post: async (text, opts) => { if (down) throw new Error('Discord: 503'); posts.push({ text, ...opts }); } };
   let clock = new Date(2026, 10, 9, 12, 0);
-  const notifier = createNotifier({ ledger, discord, file: path.join(dir, 'discord.json'), publicUrl: 'https://w.example.com/', night, now: () => clock });
+  const picture = async (m) => Buffer.from(`PNG of ${m.data.calendar.from}`);
+  const notifier = createNotifier({ ledger, discord, file: path.join(dir, 'discord.json'), publicUrl: 'https://w.example.com/', night, now: () => clock, picture });
   const thread = ledger.ensureThread('secretary', W);
   return { ledger, notifier, posts, thread, set: (d) => { clock = d; }, down: (v) => { down = v; } };
 }
@@ -86,6 +94,14 @@ test('notifier: from now on, the questions, the morning report and failures; not
   ledger_say(w, 'secretary', '直りました。');
   w.ledger.addMessage(w.thread.id, { role: 'system', body: '毎晩の見張りが失敗しました。', data: { failure: 'login' } }, S);
   assert.equal(await w.notifier.tick(), 1);
+});
+
+test('notifier: a calendar under the morning report goes with it as a picture', async (t) => {
+  const w = world(t);
+  await w.notifier.tick();
+  ledger_say(w, 'secretary', '今日は2件です。', { scheduled: 'morning', calendar: { from: '2026-11-09T00:00:00+09:00', to: '2026-11-16T00:00:00+09:00', marks: [] } });
+  assert.equal(await w.notifier.tick(), 1);
+  assert.deepEqual(w.posts[0].files, [{ name: 'calendar.png', data: Buffer.from('PNG of 2026-11-09T00:00:00+09:00'), type: 'image/png' }]);
 });
 
 test('notifier: nothing in the night, all of it once the night is over; tried again when Discord is down', async (t) => {

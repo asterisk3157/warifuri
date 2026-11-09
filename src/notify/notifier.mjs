@@ -1,5 +1,6 @@
 // 呼び出し(原則17): what in the secretary's conversation needs the person, sent to Discord.
 // Three things go: the secretary's questions, the morning report, and the runs that failed.
+// A calendar under the message (show_calendar) goes with it as a picture.
 // Replies to what the person wrote are not sent: they are on the screen the person is using.
 // Nothing goes in the night; what came then goes once the night is over, oldest first.
 //
@@ -29,7 +30,9 @@ export function noticeOf(m, link) {
 }
 
 // discord: { post } (src/notify/discord.mjs). night: the secretary's night ({ start, end }).
-export function createNotifier({ ledger, discord, file, publicUrl = null, night = null, now = () => new Date(), log = () => {} }) {
+// picture(m): the PNG of the calendar under a message (show_calendar), or null; it goes with
+// the notice as a file.
+export function createNotifier({ ledger, discord, file, publicUrl = null, night = null, now = () => new Date(), log = () => {}, picture = async () => null }) {
   const link = publicUrl ? `${publicUrl.replace(/\/$/, '')}/secretary` : null;
   const read = () => {
     try {
@@ -74,7 +77,8 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         const notice = failure && failure === state.failure ? null : noticeOf(m, link);
         if (notice) {
           try {
-            await discord.post(notice.text, { mention: notice.mention });
+            const png = m.data?.calendar ? await picture(m).catch(() => null) : null;
+            await discord.post(notice.text, { mention: notice.mention, files: png ? [{ name: 'calendar.png', data: png, type: 'image/png' }] : [] });
             sent += 1;
             if (failure) state.failure = failure;
           } catch (err) {

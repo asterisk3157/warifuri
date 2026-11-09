@@ -21,14 +21,21 @@ export const clip = (text, max) => {
 export function createDiscord({ token, channel, user = null, fetch = globalThis.fetch }) {
   const key = botToken(token);
   if (!key || !channel) return null;
-  async function post(content, { mention = false } = {}) {
+  // files: [{ name, data (Buffer), type }], attached to the message.
+  async function post(content, { mention = false, files = [] } = {}) {
     const ping = mention && user;
     const text = clip((ping ? `<@${user}> ` : '') + content, DISCORD_MAX);
-    const res = await fetch(`${API}/channels/${encodeURIComponent(channel)}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bot ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: text, allowed_mentions: { parse: [], users: ping ? [String(user)] : [] } }),
-    });
+    const payload = { content: text, allowed_mentions: { parse: [], users: ping ? [String(user)] : [] } };
+    let init;
+    if (files.length) {
+      const form = new FormData();
+      form.append('payload_json', JSON.stringify({ ...payload, attachments: files.map((f, i) => ({ id: i, filename: f.name })) }));
+      files.forEach((f, i) => form.append(`files[${i}]`, new Blob([f.data], { type: f.type }), f.name));
+      init = { method: 'POST', headers: { Authorization: `Bot ${key}` }, body: form };
+    } else {
+      init = { method: 'POST', headers: { Authorization: `Bot ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
+    }
+    const res = await fetch(`${API}/channels/${encodeURIComponent(channel)}/messages`, init);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(`Discord: ${res.status} ${body.message ?? ''}`.trim());
