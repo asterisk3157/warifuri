@@ -302,18 +302,24 @@ const TABS = [['perf', 'パフォーマンス'], ['list', '一覧'], ['warifuri'
 function render(data, ctx) {
   const { server, monitor } = data;
   const lab = monitor?.configured ? monitor : null;
+  // Without a monitoring server there is nothing to show under パフォーマンス and 一覧, so those
+  // stay in view but cannot be opened, and the page opens on warifuri.
   if (!view.tab || (!lab && view.tab !== 'warifuri')) view.tab = lab ? 'perf' : 'warifuri';
-  const tabs = lab
-    ? h('div', { class: 'wf-seg', role: 'group', 'aria-label': '表示' }, ...TABS.map(([key, label]) => h('button', {
-      type: 'button', 'aria-pressed': String(view.tab === key), data: { key: `tab-${key}` }, onclick: () => { view.tab = key; ctx.rerender(); }, text: label,
-    })))
-    : null;
+  const tabs = h('div', { class: 'wf-seg', role: 'group', 'aria-label': '表示' }, ...TABS.map(([key, label]) => {
+    const off = !lab && key !== 'warifuri';
+    return h('button', {
+      type: 'button', 'aria-pressed': String(view.tab === key), disabled: off, title: off ? '監視サーバーが登録されていません' : null,
+      data: { key: `tab-${key}` }, onclick: () => { view.tab = key; ctx.rerender(); }, text: label,
+    });
+  }));
   let body;
   if (view.tab === 'warifuri') {
     body = [serverCard(server, ctx), jobsCard(server.jobs, ctx), devices(server, ctx),
-      lab ? null : h('p', { class: 'wf-muted wf-tm-hint', text: '自宅サーバーの監視(Prometheus)の URL を設定すると、自宅サーバーの機械と VM も出ます' })];
+      lab ? null : h('p', { class: 'wf-muted wf-tm-hint', text: '監視サーバーが登録されていないため、パフォーマンスと一覧は使えません' })];
   } else if (lab.detail?.error) {
-    body = [h('section', { class: 'wf-surface wf-table' }, h('div', { class: 'wf-empty wf-bad', text: lab.detail.error }))];
+    body = [h('section', { class: 'wf-surface wf-table' },
+      h('div', { class: 'wf-empty' }, h('b', { class: 'wf-bad', text: lab.detail.error }), h('br'),
+        h('span', { class: 'wf-muted', text: '監視サーバーが止まっているか、ネットワークにつながっていません' })))];
   } else {
     body = [view.tab === 'perf' ? performance(lab.detail, ctx) : guestList(lab.detail)];
   }

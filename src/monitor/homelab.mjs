@@ -144,7 +144,7 @@ export async function fetchHomelab(url, { fetchFn = globalThis.fetch, aliases = 
     const data = Object.fromEntries(names.map((n, i) => [n, results[i]]));
     return { at: new Date(now()).toISOString(), ...summarize(data, { aliases, nowSeconds: now() / 1000 }) };
   } catch (err) {
-    return { at: new Date(now()).toISOString(), error: `監視から数字を読めませんでした(${err.message})` };
+    return { at: new Date(now()).toISOString(), error: '監視サーバーに接続できません', reason: err.message };
   }
 }
 

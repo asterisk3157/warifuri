@@ -236,6 +236,6 @@ export async function fetchDetail(url, { fetchFn = globalThis.fetch, aliases = {
     const range = Object.fromEntries(rnames.map((n, i) => [n, ranswers[i]]));
     return detailData({ instant, range, window, aliases, now: new Date(now()).toISOString() });
   } catch (err) {
-    return { at: new Date(now()).toISOString(), error: `監視から数字を読めませんでした(${err.message})` };
+    return { at: new Date(now()).toISOString(), error: '監視サーバーに接続できません', reason: err.message };
   }
 }

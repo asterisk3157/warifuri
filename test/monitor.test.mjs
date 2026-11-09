@@ -53,7 +53,8 @@ test('fetchHomelab: every query asked, and an error said in words when the monit
   assert.equal(out.level, 'ok');
   assert.equal(out.at, '2026-11-09T00:00:00.000Z');
   const down = await fetchHomelab('http://mon.example:9090', { fetchFn: async () => { throw new Error('connect refused'); } });
-  assert.match(down.error, /監視から数字を読めませんでした\(connect refused\)/);
+  assert.equal(down.error, '監視サーバーに接続できません');
+  assert.equal(down.reason, 'connect refused');
   assert.deepEqual(parseAliases('nas=nas-01, a = b,bad'), { nas: 'nas-01', a: 'b' });
 });
 
