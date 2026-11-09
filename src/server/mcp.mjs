@@ -32,7 +32,7 @@ import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../ledge
 import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
 import { timetableFor, TIMETABLE_MAX_DAYS } from '../ledger/timetable.mjs';
 import {
-  readContext, writeNote, noteRecordChanges, secretaryConfigured, readProfileDefaults, writeProfileDefaults, profileFolders, PROFILE_FIELDS, RECORD_TEXT_CHARS,
+  readContext, writeNote, noteRecordChanges, secretaryConfigured, finishPeopleImport, readProfileDefaults, writeProfileDefaults, profileFolders, PROFILE_FIELDS, RECORD_TEXT_CHARS,
 } from '../knowledge/profiles.mjs';
 import { listEntries, sortInbox, splitKnowledge, markStale, SPLIT_LINES } from '../knowledge/tidy.mjs';
 import { profileColors } from './web.mjs';
@@ -76,6 +76,8 @@ const SECRETARY_TOOLS = new Set([
   // Tidying the knowledge: moving the inbox in, splitting, marking stale (原則22). Agents' notes
   // reach the knowledge only through the secretary, so only it rewrites those files.
   'sort_inbox', 'split_knowledge', 'mark_stale',
+  // people.md, once imported into the people.
+  'finish_people_import',
 ]);
 // The tools that put, move or remove bookings. While the secretary runs, only it decides the
 // time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
@@ -212,8 +214,9 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     'context',
     {
       description:
-        "Read a profile's knowledge before working: people.md and knowledge.md as text, and the file names in " +
-        'knowledge/ and procedures/. place: the place id or the directory you work in (its place gives the profile); ' +
+        "Read a profile's knowledge before working: knowledge.md as text, the file names in knowledge/ and " +
+        'procedures/, and people: a short line per person of the profile (read one in full with people). people_md ' +
+        'is the old people.md, if it is still there: what to import into people, not where people are kept. place: the place id or the directory you work in (its place gives the profile); ' +
         'profile: that profile (wins over place). name: one of the returned file names (such as procedures/release.md), ' +
         'to read that file instead. Text past 64 KiB is cut (truncated: true). Notes marked 未確認 are guesses, not facts. ' +
         "inbox is the profile's inbox.md: agents' notes waiting for the secretary to sort, not yet knowledge.",
@@ -227,7 +230,8 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ place, profile, name }) => {
       const home = knowledgeHome(knowledge);
       const p = profileFor(ledger, device.name, { place, profile }, 'context');
-      return result(readContext(home, p, { name }));
+      if (name !== undefined) return result(readContext(home, p, { name }));
+      return result({ ...readContext(home, p), people: ledger.people.list({ profile: p }) });
     }),
   );
 
@@ -379,10 +383,18 @@ function profileFor(ledger, device, { place, profile }, tool) {
   return p.profile;
 }
 
+// A memo about a person, into the ledger's people (people.mjs): to the person named, or to the
+// one the text starts with, or else waiting for a person. Its record keeps no text.
+function addPersonMemo(ledger, profile, { text, kind, memoKind, task, person }, device, writer) {
+  const mark = kind === 'human' ? '本人の言葉' : '未確認';
+  const out = ledger.people.learn({ profile, text, kind: memoKind, mark, source: [device.name, task].filter(Boolean).join(' / '), person }, writer);
+  return { profile, to: 'people', memo: out.memo, person: out.person, mark };
+}
+
 // Appends a note to a profile's files and records it in the ledger as entity 'knowledge'.
-function addNote(ledger, knowledge, profile, { text, kind, task, people = false, sorted = false }, device, writer) {
+function addNote(ledger, knowledge, profile, { text, kind, task, sorted = false }, device, writer) {
   const from = { device: device.name, task };
-  const note = writeNote(knowledge.home, profile, { text, kind, people, sorted, secretary: kind === 'agent' && secretaryOn(knowledge), from });
+  const note = writeNote(knowledge.home, profile, { text, kind, sorted, secretary: kind === 'agent' && secretaryOn(knowledge), from });
   ledger.recordNote(profile, noteRecordChanges({ kind, file: note.file, mark: note.mark, text, from }), writer);
   return note;
 }
@@ -568,8 +580,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'with a reason. A held task is let go; next may leave a line for whoever reopens it. learned: what the work ' +
       'taught that is worth keeping, in 1–3 lines; it is kept in the record of this close and also written as an ' +
       "agent's note to the profile of the goal or task (as note with kind agent does). learned_people: what the work " +
-      'taught about people (who they are, their role, what they want; each line begins with their name), written ' +
-      'to the people of that profile (as note with people: true). noted says where each went.',
+      'taught about people (who they are, their role, what they want; one line each, beginning with their name), ' +
+      'each line written to the people of that profile (as note with people: true). noted says where each went.',
     {
       id: z.string().min(1),
       state: z.enum(['done', 'discarded']),
@@ -583,23 +595,38 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       const closed = ledger.setState(id, state, given(extra), writer);
       const out = { ...closed };
       if (extra.learned !== undefined) out.noted = noteLearned(id, extra.learned);
-      if (learnedPeople !== undefined && learnedPeople.trim() !== '') out.noted_people = noteLearned(id, learnedPeople, { people: true });
+      if (learnedPeople !== undefined && learnedPeople.trim() !== '') out.noted_people = notePeople(id, learnedPeople);
       return result(out);
     },
   );
 
   // The close is already written, so a note that cannot be written is reported, not thrown.
-  function noteLearned(id, text, { people = false } = {}) {
+  function noteLearned(id, text) {
     const profile = ledger.get(id)?.profile ?? null;
     if (!knowledge?.home) return { skipped: 'このサーバーには、プロフィールのフォルダが設定されていません。閉じたときの記録にだけ残しました' };
     if (!profile) return { skipped: 'プロフィールが分からないので、閉じたときの記録にだけ残しました' };
     try {
-      const n = addNote(ledger, knowledge, profile, { text, kind: 'agent', task: id, people }, device, writer);
+      const n = addNote(ledger, knowledge, profile, { text, kind: 'agent', task: id }, device, writer);
       return { profile, file: n.file, mark: n.mark };
     } catch (err) {
       const why = err instanceof LedgerError ? err.problems.join('。') : err.message;
       return { skipped: `ナレッジに書けなかったので、閉じたときの記録にだけ残しました(${why})` };
     }
+  }
+
+  // Each line of learned_people is one memo, put on the person it begins with.
+  function notePeople(id, text) {
+    const profile = ledger.get(id)?.profile ?? null;
+    if (!profile) return { skipped: 'プロフィールが分からないので、閉じたときの記録にだけ残しました' };
+    return text.split(/\r?\n/).map((l) => l.replace(/^\s*[-*]\s+/, '').trim()).filter(Boolean).map((line) => {
+      try {
+        const n = addPersonMemo(ledger, profile, { text: line, kind: 'agent', task: id }, device, writer);
+        return { profile, memo: n.memo, person: n.person };
+      } catch (err) {
+        const why = err instanceof LedgerError ? err.problems.join('。') : err.message;
+        return { skipped: `人に書けませんでした(${why})` };
+      }
+    });
   }
 
   tool(
@@ -608,7 +635,11 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'conversation; they go straight into knowledge.md marked 本人の言葉. kind agent: your own insight; it goes ' +
       "to the profile's inbox.md for the secretary to sort, or, with no secretary, into knowledge.md marked 未確認. " +
       'people: true when it is about a person (who they are, their role, what they like, what came of talking with ' +
-      'them; begin with their name): it goes straight to people.md, never through the inbox (an agent\'s marked 未確認). ' +
+      'them; begin with their name): it becomes a memo of that person in the people tool, never through the inbox ' +
+      '(an agent\'s marked 未確認). person: the id of the person (from people); without it, the person whose name the ' +
+      'text begins with, or else it waits with no person for the secretary to place. memo_kind: やりとり (what ' +
+      'happened), 接し方 (how to deal with them) or その他 (default). Something that fits a column (email, role, ' +
+      'birthday, 好きなもの) goes in that column with person instead. ' +
       'Write what you learn about people as you work, without being asked: the participants of a meeting, a client\'s ' +
       'wishes, who does what. ' +
       'The secretary\'s own notes are already sorted and go where they belong, not to the inbox. ' +
@@ -620,10 +651,15 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       text: z.string(),
       kind: z.enum(['human', 'agent']),
       people: z.boolean().optional(),
+      person: z.string().min(1).optional(),
+      memo_kind: z.enum(['やりとり', '接し方', 'その他']).optional(),
     },
-    async ({ profile, place, text, kind, people }) => {
-      knowledgeHome(knowledge);
+    async ({ profile, place, text, kind, people, person, memo_kind: memoKind }) => {
       const p = profileFor(ledger, device.name, { place, profile }, 'note');
+      if (people === true || person !== undefined || memoKind !== undefined) {
+        return result(addPersonMemo(ledger, p, { text, kind, memoKind, person }, device, writer));
+      }
+      knowledgeHome(knowledge);
       const sorted = secretaryDevice !== undefined && secretaryDevice !== null && device.name === secretaryDevice;
       const n = addNote(ledger, knowledge, p, { text, kind, people: people === true, sorted }, device, writer);
       return result({ profile: p, file: n.file, mark: n.mark, entry: n.entry });
@@ -641,15 +677,19 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     const chars = [...text];
     return chars.length <= RECORD_TEXT_CHARS ? text : `${chars.slice(0, 200).join('')}…(${chars.length} 文字)`;
   };
+  // What went to people keeps no text in the record (people can be forgotten; records stay).
   const recordTidy = (p, action, out, items) =>
-    ledger.recordKnowledge(p, action, { ...out, [items]: out[items].map((m) => ({ ...m, ...(m.from ? { from: m.from.map(kept) } : {}), ...(m.text ? { text: kept(m.text) } : {}) })) }, writer);
+    ledger.recordKnowledge(p, action, { ...out, [items]: out[items].map((m) => (m.to === 'people'
+      ? { to: 'people', entries: m.entries, memo: m.memo, person: m.person?.id ?? null }
+      : { ...m, ...(m.from ? { from: m.from.map(kept) } : {}), ...(m.text ? { text: kept(m.text) } : {}) })) }, writer);
   const entryIds = z.array(z.string().min(1));
 
   tool(
     'sort_inbox',
     "Sort a profile's inbox (agents' notes) into its knowledge, as the weekly tidy does. Without moves, lists the " +
       'inbox entries with their ids. moves: [{ entries: [ids], to, text?, checked?, reason? }]; to is knowledge ' +
-      '(knowledge.md), people (people.md), knowledge/<topic>.md, or drop (left out; reason needed). The entry is ' +
+      '(knowledge.md), people (a fact about a person: person gives the id, else the person its text begins with), ' +
+      'knowledge/<topic>.md, or drop (left out; reason needed). The entry is ' +
       'written as "- <today> 「未確認」 <text>": one entry keeps its own words and source; text gives the wording, ' +
       'needed when several entries are merged into one. checked: true leaves out 未確認, only for what the person ' +
       'confirmed. The entries named leave the inbox; the rest stay. Any problem refuses the whole call. Follow your ' +
@@ -664,13 +704,15 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
           text: z.string().optional(),
           checked: z.boolean().optional(),
           reason: z.string().optional(),
+          person: z.string().min(1).optional(),
         }))
         .optional(),
     },
     async ({ profile, place, moves }) => {
       const p = tidyProfile(place, profile, 'sort_inbox');
       if (moves === undefined) return result(listEntries(knowledge.home, p, 'inbox.md'));
-      const out = sortInbox(knowledge.home, p, { moves, device: device.name });
+      const toPeople = (memo) => ledger.people.learn({ profile: p, ...memo }, writer);
+      const out = sortInbox(knowledge.home, p, { moves, device: device.name, toPeople });
       recordTidy(p, 'sort', out, 'moved');
       return result(out);
     },
@@ -736,6 +778,146 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       defaults: PROFILE_FIELDS.filter((f) => d[f] === null),
     };
   };
+  // 人 (people.mjs), kept as a table. A caller names a profile (profile, or place for its
+  // profile) and sees the people in it, with that profile's free columns and memos. The
+  // secretary may name none and see everyone, and may put people in other profiles.
+  const isSecretary = secretaryDevice === undefined || device.name === secretaryDevice;
+  const readOnly = { readOnlyHint: true, openWorldHint: false };
+  const peopleScope = (place, profile, name) => {
+    if (place === undefined && profile === undefined) {
+      if (isSecretary) return { all: true };
+      throw new LedgerError([`${name} には place か profile を渡します`]);
+    }
+    return { profile: profileFor(ledger, device.name, { place, profile }, name), ...(isSecretary ? { secretary: true } : {}) };
+  };
+  const linkRef = z.array(z.object({ kind: z.enum(['goal', 'task', 'booking']), id: z.string().min(1) }));
+  const memoKind = z.enum(['やりとり', '接し方', 'その他']);
+  const memoMark = z.enum(['本人の言葉', '未確認']).nullable();
+  const memoIn = z.object({ text: z.string(), kind: memoKind.optional(), mark: memoMark.optional(), learned_on: z.string().optional() });
+  const where = { profile: z.string().min(1).optional(), place: z.string().min(1).optional() };
+
+  tool(
+    'people',
+    'Read the people of a profile as a table (人: one row per person). profile, or place for its profile; the ' +
+      'secretary may give neither and see everyone. Without id: columns (the fixed ones, and the free ones the ' +
+      "profile's people have, with how many fill each and the values written there: reuse these names, and write " +
+      'a value the way the others are), one row per person (name, aliases, ' +
+      'email, phone, affiliation, role, birthday, items: the free columns, memos: how many), and unassigned (memos ' +
+      'with no person yet, for the secretary to put on someone with person assign_memos). query: rows where any ' +
+      'column contains it. where: { column: text }, rows whose column (a fixed one such as affiliation, or a free ' +
+      'one) contains the text; "" for "filled". id: one person in full, with memos (kind, text, mark, source, date) ' +
+      'and links (goals, tasks, bookings). birthdays_within: days; adds birthdays, the people whose birthday comes ' +
+      'within that many days, soonest first. Read only the people you need.',
+    {
+      ...where,
+      id: z.string().min(1).optional(),
+      query: z.string().optional(),
+      where: z.record(z.string(), z.string()).optional(),
+      birthdays_within: z.number().int().min(0).max(366).optional(),
+    },
+    async ({ place, profile, id, query, where: filter, birthdays_within: within }) => {
+      const scope = peopleScope(place, profile, 'people');
+      const out = id !== undefined ? ledger.people.get(id, scope) : ledger.people.list(scope, { query, where: filter });
+      return result(within === undefined ? out : { ...out, birthdays: ledger.people.birthdays(scope, { within }) });
+    },
+    readOnly,
+  );
+
+  tool(
+    'person',
+    'Make or change one person (one row of the people table). Read people first, so the same person is not made ' +
+      'twice; a new person whose name, other name or email matches someone in the profile is refused ' +
+      '(allow_similar: true when they really are different people). Without id, makes one: name is needed; it goes ' +
+      'in the profile (profiles: more of them, the secretary only). With id, changes only what is given; null ' +
+      'clears a column. What can be a column goes in a column: fixed ones name, aliases (the whole list), email, ' +
+      'phone, affiliation (所属), role (役職、担当、できること), birthday (YYYY-MM-DD when the year of birth is known, so the age follows from it; else MM-DD); and items: ' +
+      '{ column: value } free columns of this profile (好きなもの, 得意なこと, ...), null removes one. No column whose value goes stale by itself (学年, 年齢): write what does not change (birthday) or how they relate to the person (role: 後輩, 上司). Use the column names ' +
+      'people returns; a name close to one there (好きな物 for 好きなもの) is written as that one (renamed_labels). ' +
+      'Everything else is a memo. add_memos: [{ text, kind?, mark?, learned_on? }]: kind やりとり (what happened), ' +
+      '接し方 (how to deal with them) or その他 (default); mark 未確認 by default, 本人の言葉 for the person\'s own ' +
+      'words, null for what was checked; learned_on YYYY-MM-DD (default today, for memos imported from people.md). ' +
+      'source says where they came from (default: your device). edit_memos: [{ id, text?, kind?, mark? }]. ' +
+      'promote_memos: [{ id, label, value? }]: a memo that is really a column becomes that column (value: its text ' +
+      'unless given) and leaves the memos. assign_memos: ids of unassigned memos about this person. link, unlink: ' +
+      '[{ kind: goal | task | booking, id }]. add_profiles, remove_profiles: the profiles the person is in. Never ' +
+      'keep numbers that open accounts or prove who someone is (My Number, cards, accounts, passwords), nor health ' +
+      'or beliefs: such column names and long digit runs are refused.',
+    {
+      ...where,
+      id: z.string().min(1).optional(),
+      name: z.string().optional(),
+      aliases: z.array(z.string()).nullable().optional(),
+      email: clearable,
+      phone: clearable,
+      affiliation: clearable,
+      role: clearable,
+      birthday: clearable,
+      profiles: z.array(z.string().min(1)).optional(),
+      add_profiles: z.array(z.string().min(1)).optional(),
+      remove_profiles: z.array(z.string().min(1)).optional(),
+      items: z.record(z.string(), z.string().nullable()).optional(),
+      add_memos: z.array(memoIn).optional(),
+      edit_memos: z.array(z.object({ id: z.number().int(), text: z.string().optional(), kind: memoKind.optional(), mark: memoMark.optional() })).optional(),
+      promote_memos: z.array(z.object({ id: z.number().int(), label: z.string(), value: z.string().optional() })).optional(),
+      assign_memos: z.array(z.number().int()).optional(),
+      link: linkRef.optional(),
+      unlink: linkRef.optional(),
+      source: z.string().min(1).optional(),
+      allow_similar: z.boolean().optional(),
+    },
+    async ({ place, profile, id, source, ...input }) => {
+      const scope = peopleScope(place, profile, 'person');
+      const args = { ...given(input), source: source ?? device.name, profile: scope.profile };
+      if (args.add_memos) args.add_memos = args.add_memos.map((f) => ({ ...f, mark: f.mark === undefined ? '未確認' : f.mark }));
+      return result(id === undefined ? ledger.people.create(args, scope, writer) : ledger.people.update(id, args, scope, writer));
+    },
+  );
+
+  tool(
+    'finish_people_import',
+    "Once every entry of a profile's old people.md is in people (person, with learned_on from its dates), rename " +
+      'the file people.imported.md so context stops offering it. Call it only after the person said the import may ' +
+      'run. The file is kept: tell the person it can be deleted by hand once they have checked the people.',
+    { ...where },
+    async ({ place, profile }) => {
+      const p = profileFor(ledger, device.name, { place, profile }, 'finish_people_import');
+      const out = finishPeopleImport(knowledgeHome(knowledge), p);
+      ledger.recordKnowledge(p, 'people_imported', { renamed: out.renamed, to: out.to }, writer);
+      return result(out);
+    },
+  );
+
+  tool(
+    'merge_people',
+    'Put two rows for the same person into one: from goes into into and is gone. Its name and other names become ' +
+      "names into goes by, a column into lacks is taken from it, and its profiles, free columns, memos and links " +
+      "move over. kept_both lists the columns both had with different values (into's kept; fix them with person " +
+      'if needed). profile, or place for its profile; both must be in it (the secretary may give neither).',
+    { ...where, into: z.string().min(1), from: z.string().min(1) },
+    async ({ place, profile, into, from }) => result(ledger.people.merge(into, from, peopleScope(place, profile, 'merge_people'), writer)),
+  );
+
+  tool(
+    'forget_person',
+    'Forget for good. person: the id of someone the person asked to be forgotten; everything about them goes, in ' +
+      'every profile, and cannot be brought back (by_person: true is needed: only the person decides this). memos: ' +
+      'ids of memos to delete (wrong or no longer wanted), of this profile. The ledger keeps no copy; backups taken ' +
+      'before keep theirs until they are rotated out.',
+    {
+      ...where,
+      person: z.string().min(1).optional(),
+      memos: z.array(z.number().int()).optional(),
+      by_person: z.boolean().optional(),
+    },
+    async ({ place, profile, person, memos, by_person: byPerson }) => {
+      if (person !== undefined && byPerson !== true) {
+        return refusal(['人をまるごと消すのは、本人が消してと言ったときだけです。本人がこの会話でそう言ったなら by_person: true を付けます']);
+      }
+      return result(ledger.people.forget({ person, memos }, peopleScope(place, profile, 'forget_person'), writer));
+    },
+    { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  );
+
   tool(
     'profile',
     "Read or write a profile's defaults: human_led (whether its goals are led by the person, 原則8: the first value " +

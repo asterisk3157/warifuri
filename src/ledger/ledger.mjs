@@ -18,6 +18,7 @@ import { checkEnvelope, prepareSnapshot } from './snapshot.mjs';
 import { comparablePath, deepestContaining } from './paths.mjs';
 import { renderFlow } from './flow.mjs';
 import { oauthStore } from './oauth.mjs';
+import { peopleStore } from './people.mjs';
 import {
   STATES,
   CLOSED_STATES,
@@ -213,6 +214,8 @@ export function openLedger(path, options = {}) {
   let open = true;
   try {
     db.exec('PRAGMA foreign_keys = ON');
+    // Deleted rows are overwritten, so a person forgotten does not linger in free pages.
+    db.exec('PRAGMA secure_delete = ON');
     if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
     migrate(db);
   } catch (err) {
@@ -2066,6 +2069,7 @@ export function openLedger(path, options = {}) {
   // OAuth storage (oauth.mjs). Writes from the command line or the consent page name who
   // wrote them, like every other write.
   const store = oauthStore({ db, one, all, transaction, record, now });
+  const people = peopleStore({ db, one, all, transaction, record, now, LedgerError, requireWriter });
   // revokeDevice runs only inside revokeKey.
   const { revokeDevice: _revokeDevice, ...storeApi } = store;
   const oauth = {
@@ -2222,6 +2226,7 @@ export function openLedger(path, options = {}) {
     schedule,
     activity,
     oauth,
+    people,
     // A flag of its own: DatabaseSync#isOpen is newer than the Node versions warifuri runs on.
     close: () => {
       if (!open) return;
