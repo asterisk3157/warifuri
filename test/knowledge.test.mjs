@@ -145,6 +145,23 @@ test('writeNote appends, keeps what is there, and marks each kind', () => {
   assert.throws(() => writeNote(home, 'hobby', { text: 'x', kind: 'guess' }), /kind は/);
 });
 
+test('writeNote: a note about a person goes to people.md, or to the inbox marked 人のこと; the secretary\'s sorted notes skip the inbox', () => {
+  const home = freshHome();
+  const now = new Date(2026, 10, 9, 12);
+  writeNote(home, '研究', { text: '田中先生: 前提の違いを先に聞く', kind: 'human', people: true, now });
+  writeNote(home, '研究', { text: '田中先生は朝が早い', kind: 'agent', people: true, secretary: true, now });
+  writeNote(home, '研究', { text: '田中先生は図を先に見る', kind: 'agent', people: true, secretary: true, sorted: true, from: { device: 'secretary' }, now });
+  writeNote(home, '研究', { text: '発表は15分', kind: 'agent', secretary: true, sorted: true, now });
+  const dir = profileDir(home, '研究');
+  assert.equal(
+    fs.readFileSync(path.join(dir, 'people.md'), 'utf8'),
+    '- 2026-11-09 「本人の言葉」 田中先生: 前提の違いを先に聞く\n- 2026-11-09 「未確認」 田中先生は図を先に見る (secretary)\n',
+  );
+  assert.equal(fs.readFileSync(path.join(dir, 'inbox.md'), 'utf8'), '- 2026-11-09 「人のこと」 田中先生は朝が早い\n');
+  assert.equal(fs.readFileSync(path.join(dir, 'knowledge.md'), 'utf8'), '- 2026-11-09 「未確認」 発表は15分\n');
+  assert.match(readContext(home, '研究').people.text, /田中先生: 前提の違いを先に聞く/);
+});
+
 test('secretaryConfigured reads plugins.yaml', () => {
   const home = freshHome();
   assert.equal(secretaryConfigured(home), false);
@@ -239,6 +256,11 @@ test('note: with a secretary, an agent note goes to inbox.md and human words sti
   assert.equal((await call('note', { profile: '研究', text: 'a guess', kind: 'agent' })).data.file, 'inbox.md');
   assert.equal((await call('note', { profile: '研究', text: 'said so', kind: 'human' })).data.file, 'knowledge.md');
   assert.match(fs.readFileSync(path.join(dir, 'inbox.md'), 'utf8'), /^- \d{4}-\d{2}-\d{2} a guess \(laptop\)\n$/);
+
+  // About a person: the person's words to people.md, an agent's to the inbox marked 人のこと.
+  assert.equal((await call('note', { profile: '研究', text: '田中先生: 図を先に見る', kind: 'human', people: true })).data.file, 'people.md');
+  const inbox = await call('note', { profile: '研究', text: '田中先生は朝が早い', kind: 'agent', people: true });
+  assert.deepEqual([inbox.data.file, inbox.data.mark], ['inbox.md', '人のこと']);
 
   // The secretary option of createApp wins over plugins.yaml.
   const off = await start(t, { home, secretary: false });

@@ -349,9 +349,9 @@ function profileFor(ledger, device, { place, profile }, tool) {
 }
 
 // Appends a note to a profile's files and records it in the ledger as entity 'knowledge'.
-function addNote(ledger, knowledge, profile, { text, kind, task }, device, writer) {
+function addNote(ledger, knowledge, profile, { text, kind, task, people = false, sorted = false }, device, writer) {
   const from = { device: device.name, task };
-  const note = writeNote(knowledge.home, profile, { text, kind, secretary: kind === 'agent' && secretaryOn(knowledge), from });
+  const note = writeNote(knowledge.home, profile, { text, kind, people, sorted, secretary: kind === 'agent' && secretaryOn(knowledge), from });
   ledger.recordNote(profile, noteRecordChanges({ kind, file: note.file, mark: note.mark, text, from }), writer);
   return note;
 }
@@ -562,6 +562,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     "Write to a profile's knowledge; it only appends. kind human: the person's own words, said in this " +
       'conversation; they go straight into knowledge.md marked 本人の言葉. kind agent: your own insight; it goes ' +
       "to the profile's inbox.md for the secretary to sort, or, with no secretary, into knowledge.md marked 未確認. " +
+      'people: true when it is about a person (who they are, their role, what they like, what came of talking with ' +
+      'them; begin with their name): it goes to people.md instead of knowledge.md (in the inbox it is marked 人のこと). ' +
+      'The secretary\'s own notes are already sorted and go where they belong, not to the inbox. ' +
       'Write facts and rules of the area in 1–3 lines, not progress. profile, or place (the place id or the directory ' +
       'you work in) to use its profile. At most 4000 characters.',
     {
@@ -569,11 +572,13 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       place: z.string().min(1).optional(),
       text: z.string(),
       kind: z.enum(['human', 'agent']),
+      people: z.boolean().optional(),
     },
-    async ({ profile, place, text, kind }) => {
+    async ({ profile, place, text, kind, people }) => {
       knowledgeHome(knowledge);
       const p = profileFor(ledger, device.name, { place, profile }, 'note');
-      const n = addNote(ledger, knowledge, p, { text, kind }, device, writer);
+      const sorted = secretaryDevice !== undefined && secretaryDevice !== null && device.name === secretaryDevice;
+      const n = addNote(ledger, knowledge, p, { text, kind, people: people === true, sorted }, device, writer);
       return result({ profile: p, file: n.file, mark: n.mark, entry: n.entry });
     },
   );

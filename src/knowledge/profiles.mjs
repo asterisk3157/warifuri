@@ -32,6 +32,7 @@ const MAX_FOLDER_BYTES = 255;
 // The marks a note carries in knowledge.md (原則22).
 export const MARK_HUMAN = '本人の言葉';
 export const MARK_UNCONFIRMED = '未確認';
+export const MARK_PERSON = '人のこと';
 
 // Windows reserves these names, with or without an extension, in any case.
 const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i;
@@ -169,17 +170,20 @@ export function checkNoteText(text) {
 
 // Appends a note to the profile and says where it went. kind 'human': the person's own
 // words, straight into knowledge.md marked 本人の言葉. kind 'agent': an agent's insight, into
-// inbox.md when a secretary is configured, else into knowledge.md marked 未確認. from
-// ({ device, task }) is written after the text, so the secretary knows where it came from.
+// inbox.md when a secretary is configured, else into knowledge.md marked 未確認. people: it is
+// about a person, so people.md instead of knowledge.md (in inbox.md it is marked 人のこと, for
+// the secretary to sort there). sorted: the secretary writing what it has sorted, which goes
+// where it belongs rather than back to the inbox. from ({ device, task }) is written after the
+// text, so the secretary knows where it came from.
 // The entry is one list item: "- <date> 「<mark>」 <text> (<from>)", later lines indented.
-export function writeNote(home, profile, { text, kind, secretary = false, from = {}, now = new Date() }) {
+export function writeNote(home, profile, { text, kind, people = false, sorted = false, secretary = false, from = {}, now = new Date() }) {
   const problems = checkNoteText(text);
   if (!['human', 'agent'].includes(kind)) problems.push('kind は human(本人の言葉)か agent(エージェントの気づき)です');
   if (problems.length) throw new LedgerError(problems);
   const dir = profileDir(home, profile);
-  const toInbox = kind === 'agent' && secretary;
-  const file = toInbox ? 'inbox.md' : 'knowledge.md';
-  const mark = kind === 'human' ? MARK_HUMAN : toInbox ? null : MARK_UNCONFIRMED;
+  const toInbox = kind === 'agent' && secretary && !sorted;
+  const file = toInbox ? 'inbox.md' : people ? 'people.md' : 'knowledge.md';
+  const mark = kind === 'human' ? MARK_HUMAN : toInbox ? (people ? MARK_PERSON : null) : MARK_UNCONFIRMED;
   const body = text.trim().replace(/\r\n?/g, '\n').split('\n').join('\n  ');
   const source = [from.device, from.task].filter(Boolean).join(' / ');
   const entry = `- ${localDate(now)}${mark ? ` 「${mark}」` : ''} ${body}${source ? ` (${source})` : ''}\n`;
