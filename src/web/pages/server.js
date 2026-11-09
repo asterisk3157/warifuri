@@ -208,6 +208,13 @@ function given(percent, used, total, unit, warn) {
     h('span', { class: 'wf-muted', text: amount ?? '' }));
 }
 
+// The machine's own line above its guests; its GPU, shared by all of them, is shown here.
+function hostRow(host, machine) {
+  const gpu = machine?.gpu;
+  return h('div', { class: 'wf-tm-hostrow' }, h('span', { text: host }),
+    gpu ? h('span', { class: 'wf-tm-num' }, `GPU `, h('b', { text: or(gpu.utilization, '%') })) : null);
+}
+
 function guestList(detail) {
   const avg = (key) => {
     const known = detail.guests.map((g) => g[key]).filter((v) => v !== null);
@@ -223,7 +230,7 @@ function guestList(detail) {
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('memory') }), h('br'), 'メモリ'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('disk') }), h('br'), 'ディスク')),
     ...hosts.flatMap((host) => [
-      h('div', { class: 'wf-tm-hostrow', text: host }),
+      hostRow(host, detail.machines.find((m) => m.host === host)),
       ...detail.guests.filter((g) => g.host === host).map((g) => h('div', { class: ['wf-row', 'wf-row-vm', !g.up && 'wf-row-off'] },
         h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', g.up && 'wf-fresh', !g.up && g.always && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { class: 'wf-ellipsis', text: g.name })),
         h('span', { class: 'wf-muted', text: `${g.type === 'lxc' ? 'LXC' : 'VM'} ${g.vmid ?? ''}` }),
