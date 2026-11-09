@@ -494,15 +494,17 @@ function askCard(a, where) {
 function timeline(items, where, { threads, liveId, replying }) {
   const out = [];
   let day = null;
-  // Reply buttons stay under the secretary's replies until the person says something.
+  // Reply buttons stay under the newest reply of the secretary only, until the person says
+  // something: an older reply's buttons would answer a question that was asked again since.
   const lastPerson = items.findLastIndex((x) => x.type === 'message' && x.role === 'user');
+  const lastReply = items.findLastIndex((x) => x.type === 'message' && x.role === 'secretary');
   items.forEach((it, n) => {
     if (it.type === 'ask') return;
     if (dayKey(it.created_at) !== day) {
       day = dayKey(it.created_at);
       out.push(h('div', { class: 'wf-day', role: 'separator', 'aria-label': dayLabel(it.created_at) }, h('span'), dayLabel(it.created_at), h('span')));
     }
-    out.push(message(it, { where, last: lastPerson < n && !view.live.has(liveId), threads }));
+    out.push(message(it, { where, last: n === lastReply && lastPerson < n && !view.live.has(liveId), threads }));
   });
   const l = view.live.get(liveId);
   if (l) out.push(liveMessage(l));
