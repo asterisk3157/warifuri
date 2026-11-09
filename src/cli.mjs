@@ -15,6 +15,7 @@
 //   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
 //                    [--no-hook] [--no-skills] [--force] [--dry-run]
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
+//   warifuri hook stop               (the end-of-work reminder; a Stop hook, JSON on stdin)
 //   warifuri hook calendar [claude|codex]  (stops calendar writes while the secretary runs, and
 //                                    every calendar tool of a harness on the gcp route)
 //   warifuri hook tools <tool> ...   (the secretary's: stops all but the reads of the tools given)
@@ -44,6 +45,7 @@ import { PROFILES_DIR } from './knowledge/profiles.mjs';
 import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
 import { decideCalendar } from './client/calendar-hook.mjs';
+import { decideStop, STATE_FILE as STOP_STATE_FILE } from './client/stop-hook.mjs';
 import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
@@ -75,6 +77,7 @@ const USAGE = [
   '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
   '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
   '       warifuri hook gate',
+  '       warifuri hook stop',
   '       warifuri hook calendar [claude|codex]',
   '       warifuri secretary enable|disable',
   '       warifuri secretary run <nightly|morning|inbox>',
@@ -101,11 +104,12 @@ const USAGE = [
   'connect sets up this machine to use a server (--url, or WARIFURI_SERVER_URL; a server on',
   'this machine when neither is given): it registers the MCP server in Claude Code and Codex,',
   'puts the device key in WARIFURI_DEVICE_KEY_FILE (issued here when the ledger is on this',
-  'machine), wires the start gate and calendar hooks and copies the skills. --dry-run only',
-  'shows the plan. hook gate is the start gate: it reads the harness JSON on stdin and stops',
-  'an edit in a place where this device holds no task. hook calendar stops a write to a',
-  'calendar through the agent\'s own MCP while the secretary runs. Both let the call through',
-  'whenever they cannot ask.',
+  'machine), wires the start gate, stop and calendar hooks and copies the skills. --dry-run',
+  'only shows the plan. hook gate is the start gate: it reads the harness JSON on stdin and',
+  'stops an edit in a place where this device holds no task. hook stop reminds an agent',
+  'ending its turn, once per conversation, to close or release the task it still holds.',
+  'hook calendar stops a write to a calendar through the agent\'s own MCP while the',
+  'secretary runs. All of them let the call through whenever they cannot ask.',
   '',
   'secretary enable, on the server machine, gives the secretary (claude -p, logged in by you)',
   'its key and MCP config and turns its schedule on (WARIFURI_SECRETARY=on); serve then wakes',
@@ -630,7 +634,7 @@ async function runHook(args) {
     await new Promise((resolve) => (out ? process.stdout.write(`${out}\n`, resolve) : resolve()));
     process.exit(0);
   }
-  const which = args[0] === 'calendar' ? decideCalendar : decide;
+  const which = args[0] === 'calendar' ? decideCalendar : args[0] === 'stop' ? decideStop : decide;
   // hook calendar names the harness it runs in (claude or codex), for its calendar route.
   const harness = args[0] === 'calendar' && ['claude', 'codex'].includes(args[1]) ? args[1] : null;
   const rest = args.slice(harness ? 2 : 1);
@@ -650,6 +654,7 @@ async function runHook(args) {
       output = await which(payload, {
         url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE,
         ...(setting ? { route: v[setting], setting } : {}),
+        ...(args[0] === 'stop' ? { stop: v.WARIFURI_STOP, stateFile: path.join(cfg.home, STOP_STATE_FILE) } : {}),
       });
     }
   } catch {
@@ -677,7 +682,7 @@ function main(argv) {
     return undefined;
   }
   if (command === 'hook') {
-    if (!['gate', 'calendar', 'tools'].includes(rest[0])) return usage('hook takes gate, calendar or tools');
+    if (!['gate', 'stop', 'calendar', 'tools'].includes(rest[0])) return usage('hook takes gate, stop, calendar or tools');
     runHook(rest);
     return undefined;
   }
