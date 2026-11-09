@@ -30,7 +30,11 @@ import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
 import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
-import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
+import {
+  readContext, writeNote, noteRecordChanges, secretaryConfigured, readProfileDefaults, writeProfileDefaults, profileFolders, PROFILE_FIELDS, RECORD_TEXT_CHARS,
+} from '../knowledge/profiles.mjs';
+import { listEntries, sortInbox, splitKnowledge, markStale, SPLIT_LINES } from '../knowledge/tidy.mjs';
+import { profileColors } from './web.mjs';
 
 // The version the MCP server reports: the package's.
 const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
@@ -66,7 +70,12 @@ const guarded = (fn) => async (args) => {
 // and the autonomy that says how far it may act alone. Other agents read them but do not write.
 // What reply_options says back: the buttons are attached, the question is not written yet.
 const REPLY_OPTIONS_NEXT = 'ボタンを付けました。返事の本文に、ボタンで答える問いをそのまま書いてください。ボタンのことは書きません。';
-const SECRETARY_TOOLS = new Set(['report', 'propose', 'proposal_done', 'ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set']);
+const SECRETARY_TOOLS = new Set([
+  'report', 'propose', 'proposal_done', 'ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set',
+  // Tidying the knowledge: moving the inbox in, splitting, marking stale (原則22). Agents' notes
+  // reach the knowledge only through the secretary, so only it rewrites those files.
+  'sort_inbox', 'split_knowledge', 'mark_stale',
+]);
 // The tools that put, move or remove bookings. While the secretary runs, only it decides the
 // time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
 const BOOKING_TOOLS = new Set(['book', 'unbook']);
@@ -397,7 +406,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   tool(
     'create_goal',
     'Create a goal. Search first, so the same goal is not made twice. A goal that takes a person\'s time ' +
-      '(mode human or human_with_ai) needs an outcome and a due date the person set; due_provisional marks a date nobody set.',
+      '(mode human or human_with_ai) needs an outcome and a due date the person set; due_provisional marks a date nobody set. ' +
+      "Without human_led, a goal with a profile starts with that profile's default (the profile tool).",
     {
       title: z.string(),
       outcome: z.string().optional(),
@@ -407,7 +417,15 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       human_led: z.boolean().optional(),
       profile: z.string().optional(),
     },
-    async (args) => result(ledger.createGoal(given(args), writer)),
+    async (args) => {
+      // 原則8: a goal of a profile starts with the profile's default for human_led.
+      const input = given(args);
+      if (input.human_led === undefined && input.profile && knowledge?.home) {
+        const led = readProfileDefaults(knowledge.home, input.profile).human_led;
+        if (led !== null) input.human_led = led;
+      }
+      return result(ledger.createGoal(input, writer));
+    },
   );
 
   tool(
@@ -587,6 +605,150 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       const sorted = secretaryDevice !== undefined && secretaryDevice !== null && device.name === secretaryDevice;
       const n = addNote(ledger, knowledge, p, { text, kind, people: people === true, sorted }, device, writer);
       return result({ profile: p, file: n.file, mark: n.mark, entry: n.entry });
+    },
+  );
+
+  // Tidying a profile's knowledge (原則22). Called with no moves or marks, each tool only
+  // lists the entries of its file with their ids. What a change took away or wrote is kept
+  // in the ledger's record, so it can be put back by hand.
+  const tidyProfile = (place, profile, name) => {
+    knowledgeHome(knowledge);
+    return profileFor(ledger, device.name, { place, profile }, name);
+  };
+  const kept = (text) => {
+    const chars = [...text];
+    return chars.length <= RECORD_TEXT_CHARS ? text : `${chars.slice(0, 200).join('')}…(${chars.length} 文字)`;
+  };
+  const recordTidy = (p, action, out, items) =>
+    ledger.recordKnowledge(p, action, { ...out, [items]: out[items].map((m) => ({ ...m, ...(m.from ? { from: m.from.map(kept) } : {}), ...(m.text ? { text: kept(m.text) } : {}) })) }, writer);
+  const entryIds = z.array(z.string().min(1));
+
+  tool(
+    'sort_inbox',
+    "Sort a profile's inbox (agents' notes) into its knowledge, as the weekly tidy does. Without moves, lists the " +
+      'inbox entries with their ids. moves: [{ entries: [ids], to, text?, checked?, reason? }]; to is knowledge ' +
+      '(knowledge.md), people (people.md), knowledge/<topic>.md, or drop (left out; reason needed). The entry is ' +
+      'written as "- <today> 「未確認」 <text>": one entry keeps its own words and source; text gives the wording, ' +
+      'needed when several entries are merged into one. checked: true leaves out 未確認, only for what the person ' +
+      'confirmed. The entries named leave the inbox; the rest stay. Any problem refuses the whole call. Follow your ' +
+      'autonomy for add_knowledge and tidy_inbox. profile, or place to use its profile.',
+    {
+      profile: z.string().min(1).optional(),
+      place: z.string().min(1).optional(),
+      moves: z
+        .array(z.object({
+          entries: entryIds,
+          to: z.string().min(1),
+          text: z.string().optional(),
+          checked: z.boolean().optional(),
+          reason: z.string().optional(),
+        }))
+        .optional(),
+    },
+    async ({ profile, place, moves }) => {
+      const p = tidyProfile(place, profile, 'sort_inbox');
+      if (moves === undefined) return result(listEntries(knowledge.home, p, 'inbox.md'));
+      const out = sortInbox(knowledge.home, p, { moves, device: device.name });
+      recordTidy(p, 'sort', out, 'moved');
+      return result(out);
+    },
+  );
+
+  tool(
+    'split_knowledge',
+    `Split a profile's knowledge.md by topic into knowledge/<topic>.md, when it grows past about ${SPLIT_LINES} lines. ` +
+      'Without moves, lists the entries of knowledge.md with their ids and its line count. moves: [{ entries: [ids], ' +
+      'to: knowledge/<topic>.md }]: the entries go as they are, in their order, to the end of that file (made if ' +
+      'absent) and leave knowledge.md. Any problem refuses the whole call. Follow your autonomy for split_knowledge. ' +
+      'profile, or place to use its profile.',
+    {
+      profile: z.string().min(1).optional(),
+      place: z.string().min(1).optional(),
+      moves: z.array(z.object({ entries: entryIds, to: z.string().min(1) })).optional(),
+    },
+    async ({ profile, place, moves }) => {
+      const p = tidyProfile(place, profile, 'split_knowledge');
+      if (moves === undefined) {
+        const list = listEntries(knowledge.home, p, 'knowledge.md');
+        return result({ ...list, split_lines: SPLIT_LINES, over: list.lines > SPLIT_LINES });
+      }
+      const out = splitKnowledge(knowledge.home, p, { moves });
+      recordTidy(p, 'split', out, 'moved');
+      return result(out);
+    },
+  );
+
+  tool(
+    'mark_stale',
+    'Mark knowledge that is no longer true with the date it was valid until; the entry stays, so what was true can ' +
+      'still be read. file: knowledge.md (default), people.md or knowledge/<topic>.md. Without marks, lists the ' +
+      'entries of the file with their ids. marks: [{ id, until (YYYY-MM-DD), why? (one line) }]: each list item gets ' +
+      'a line under it, "「古い」 <until> まで有効。<why>". Any problem refuses the whole call. Follow your autonomy ' +
+      'for mark_stale_knowledge. profile, or place to use its profile.',
+    {
+      profile: z.string().min(1).optional(),
+      place: z.string().min(1).optional(),
+      file: z.string().min(1).optional(),
+      marks: z.array(z.object({ id: z.string().min(1), until: z.string(), why: z.string().optional() })).optional(),
+    },
+    async ({ profile, place, file = 'knowledge.md', marks }) => {
+      const p = tidyProfile(place, profile, 'mark_stale');
+      if (marks === undefined) {
+        if (file === 'inbox.md') return refusal(['受信箱には古い印を付けません。sort_inbox で整理します']);
+        return result(listEntries(knowledge.home, p, file));
+      }
+      const out = markStale(knowledge.home, p, { file, marks });
+      recordTidy(p, 'stale', out, 'marked');
+      return result(out);
+    },
+  );
+
+  // A profile's defaults (原則8, 20). Reading is for anyone; writing is the person's decision,
+  // as with the limits of settings.
+  const profileView = (name) => {
+    const d = readProfileDefaults(knowledge.home, name);
+    return {
+      profile: name,
+      human_led: d.human_led ?? false,
+      color: d.color ?? profileColors(knowledge.home, [name])[name],
+      defaults: PROFILE_FIELDS.filter((f) => d[f] === null),
+    };
+  };
+  tool(
+    'profile',
+    "Read or write a profile's defaults: human_led (whether its goals are led by the person, 原則8: the first value " +
+      'of a new goal\'s mark; default false) and color (#rrggbb, its dot in the schedule). With no profile or place, ' +
+      'lists every profile (those with a folder or a place). With one and no field, reads it. defaults lists the ' +
+      'fields still unset. Writing is the person\'s decision: give the fields with by_person: true only when the ' +
+      'person decided it in this conversation; otherwise propose it to them. null puts a field back to its default. ' +
+      'Goals already made keep their mark; change one with update.',
+    {
+      profile: z.string().min(1).optional(),
+      place: z.string().min(1).optional(),
+      human_led: z.boolean().nullable().optional(),
+      color: z.string().nullable().optional(),
+      by_person: z.boolean().optional(),
+    },
+    async ({ profile, place, by_person: byPerson, ...fields }) => {
+      knowledgeHome(knowledge);
+      const input = given(fields);
+      if (profile === undefined && place === undefined) {
+        if (Object.keys(input).length) return refusal(['直すプロフィールを profile か place で渡します']);
+        const names = new Set(profileFolders(knowledge.home));
+        for (const pl of ledger.listPlaces()) if (pl.profile) names.add(pl.profile.normalize('NFC'));
+        return result({ profiles: [...names].sort().map(profileView) });
+      }
+      const p = profileFor(ledger, device.name, { place, profile }, 'profile');
+      if (Object.keys(input).length === 0) return result(profileView(p));
+      if (byPerson !== true) {
+        return refusal([
+          'プロフィールの既定値は本人が決めます(原則8)。本人がこの会話で決めたときだけ by_person: true を付けて書きます。そうでなければ、本人に提案して了承を得ます',
+        ]);
+      }
+      const before = readProfileDefaults(knowledge.home, p);
+      writeProfileDefaults(knowledge.home, p, input);
+      ledger.recordKnowledge(p, 'defaults', Object.fromEntries(Object.keys(input).map((k) => [k, { before: before[k], after: input[k] }])), writer);
+      return result(profileView(p));
     },
   );
 
