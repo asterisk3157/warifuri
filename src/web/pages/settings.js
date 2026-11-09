@@ -6,12 +6,13 @@ import { h, icon, skel, soonBadge, githubIcon, profileChip, ago, ymd } from '../
 const SECTIONS = {
   profile: 'プロフィール',
   display: '表示',
+  secretary: '秘書に任せること',
   life: '自身について',
   places: '作業フォルダ',
   devices: 'デバイスとシークレット',
   apps: '接続済みのAIエージェント',
 };
-const CATS = [['display', 'display', '#8cc4ea'], ['life', 'life', '#f1c47e', true], ['places', 'folder', '#8fd3b2'], ['devices', 'laptop', '#a9a3ec'], ['apps', 'apps', '#e7a9d8']];
+const CATS = [['display', 'display', '#8cc4ea'], ['secretary', 'secretary', '#f4b9a8'], ['life', 'life', '#f1c47e', true], ['places', 'folder', '#8fd3b2'], ['devices', 'laptop', '#a9a3ec'], ['apps', 'apps', '#e7a9d8']];
 const COLORS = [['水色', '#8cc4ea'], ['ミント', '#8fd3b2'], ['ラベンダー', '#a9a3ec'], ['桃', '#e7a9d8'], ['山吹', '#f1c47e'], ['灰', '#c9ced6']];
 
 const sectionOf = () => {
@@ -146,18 +147,60 @@ function profileSection(p, ctx) {
     h('div', { class: 'wf-profile-body' }, top, body));
 }
 
-const silRows = (n) => h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column' } },
-  ...Array.from({ length: n }, () => h('div', { class: 'wf-sil-row' }, skel('30%', '14px'), skel('120px', '28px'))));
+// The theme is kept in this browser: 自動 follows the system (theme.js reads it at load).
+const THEMES = [['light', 'ライト'], ['dark', 'ダーク'], ['auto', '自動']];
 
-function displaySection() {
+function themeNow() {
+  try {
+    const t = localStorage.getItem('wf.theme');
+    return t === 'light' || t === 'dark' ? t : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+function setTheme(t, ctx) {
+  try {
+    if (t === 'auto') localStorage.removeItem('wf.theme');
+    else localStorage.setItem('wf.theme', t);
+  } catch {
+    // Storage may be off: the choice lasts until the page is opened again.
+  }
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  ctx.rerender();
+}
+
+function displaySection(ctx) {
+  const now = themeNow();
   const theme = h('div', { class: 'wf-seg', role: 'group', 'aria-label': 'テーマ' },
-    h('button', { type: 'button', 'aria-pressed': 'true', text: 'ライト' }),
-    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false' }, 'ダーク', soonBadge()),
-    h('button', { type: 'button', disabled: true, 'aria-pressed': 'false' }, '自動', soonBadge()));
+    ...THEMES.map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(now === k), data: { key: `theme-${k}` }, onclick: () => setTheme(k, ctx), text: label })));
+  return h('section', { class: 'wf-surface wf-theme' }, h('span', { class: 'wf-muted', text: 'テーマ' }), theme);
+}
+
+// The secretary's autonomy, to look at only. It changes when the person tells the secretary.
+const STAGES = [[2, '予定と受信箱'], [3, 'タスクとナレッジ']];
+
+function secretarySection(a) {
+  const row = (k) => h('div', { class: 'wf-row wf-row-autonomy' },
+    h('span', { class: 'wf-cell' }, h('b', { text: k.label })),
+    h('span', { class: 'wf-cell' },
+      h('span', { class: ['wf-level', k.level === 'act_then_tell' && 'wf-level-on'], text: k.level === 'act_then_tell' ? 'やってから知らせる' : '聞いてから' }),
+      k.by_person ? h('span', { class: 'wf-muted wf-small', text: 'ユーザーが決めました' }) : null),
+    h('span', { class: 'wf-tm-num', text: k.level === 'act_then_tell' || k.by_person ? '—' : `${k.approvals_in_row} / ${a.streak}` }),
+    h('span', { class: 'wf-tm-num', text: `${k.revokes}回` }));
+  const intro = h('section', { class: 'wf-surface wf-autonomy-intro' },
+    h('p', { text: a.secretary
+      ? `秘書は、そのまま了承が${a.streak}回続いた動きを、聞かずに行ってから知らせるようになります。取り消すと、聞いてからに戻ります。外に出ることと元に戻せないことは、任せません。`
+      : '秘書が止まっているため、どの動きも毎回聞いてから行います。' }),
+    h('p', { class: 'wf-muted', text: '任せ方を変えるときは、秘書に話しかけてください。' }),
+    h('a', { class: 'wf-btn-line wf-autonomy-go', href: '/secretary', text: '秘書と話す' }));
   return [
-    h('section', { class: 'wf-surface wf-theme' }, h('span', { class: 'wf-muted', text: 'テーマ' }), theme),
-    h('section', { class: 'wf-placeholder', 'aria-disabled': 'true', style: { gap: '4px' } },
-      h('div', { class: 'wf-placeholder-head', style: { paddingBottom: '10px' } }, h('h2', { class: 'wf-muted', text: '文字の大きさとテーマカラー' }), soonBadge()), silRows(3)),
+    intro,
+    ...STAGES.map(([stage, title]) => {
+      const list = a.kinds.filter((k) => k.stage === stage);
+      return table(title, `${list.length}件`, 'autonomy', ['動き', '任せ方', '続けて了承', '取り消し'], list.map(row), 'まだありません');
+    }),
   ];
 }
 
@@ -166,7 +209,7 @@ function lifeSection() {
   return h('section', { class: 'wf-placeholder', 'aria-disabled': 'true' },
     h('div', { class: 'wf-placeholder-head' }, h('h2', { text: '自身について' }), soonBadge()),
     h('p', { text: '秘書が予定を組むときに使う、生活の決まりと場所です。' }),
-    h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: '#f9f9fb' } },
+    h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: 'var(--fill)' } },
       h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' } }, pair(), pair(), pair(), pair()), pair()));
 }
 
@@ -209,9 +252,9 @@ function devicesSection(st) {
   const words = { on: '使用中', none: 'なし', revoked: '取り消し済み' };
   const row = (d) => h('div', { class: 'wf-row wf-row-secrets' },
     h('span', { class: 'wf-ellipsis', style: { fontWeight: '600' }, text: d.name }),
-    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: d.secret === 'on' ? '#1d1d1f' : '#6e6e73' } },
-      h('span', { class: 'wf-dot', style: { background: d.secret === 'on' ? '#5fb98f' : '#d2d2d7' }, 'aria-hidden': 'true' }), words[d.secret]),
-    h('span', { style: { color: d.github_login ? '#1d1d1f' : '#6e6e73' }, text: d.github_login ? 'あり' : 'なし' }),
+    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: d.secret === 'on' ? 'var(--ink)' : 'var(--sub)' } },
+      h('span', { class: 'wf-dot', style: { background: d.secret === 'on' ? 'var(--green)' : 'var(--line)' }, 'aria-hidden': 'true' }), words[d.secret]),
+    h('span', { style: { color: d.github_login ? 'var(--ink)' : 'var(--sub)' }, text: d.github_login ? 'あり' : 'なし' }),
     h('span', { class: 'wf-muted', text: d.created_at ? ymd(new Date(d.created_at)) : '—' }));
   // The machines that use the server, the secretary, and other programs on the server machine.
   const groups = [['device', 'デバイス', 'まだデバイスがありません'], ['secretary', '秘書'], ['server', 'サーバー']];
@@ -236,7 +279,8 @@ function render(data, ctx) {
   const st = data.settings;
   let content;
   if (view.sec === 'profile') content = profileSection(data.profile, ctx);
-  else if (view.sec === 'display') content = displaySection();
+  else if (view.sec === 'display') content = displaySection(ctx);
+  else if (view.sec === 'secretary') content = secretarySection(st.autonomy);
   else if (view.sec === 'life') content = lifeSection();
   else if (view.sec === 'places') content = placesSection(st, ctx);
   else if (view.sec === 'devices') content = devicesSection(st);

@@ -24,7 +24,7 @@ const KEEP = [
   (t) => shown(t) === 'ready',
 ];
 
-const dueColor = (d) => (d === null ? '#8e8e93' : d < 0 ? '#c4282e' : d <= 3 ? '#9a5a00' : '#6e6e73');
+const dueColor = (d) => (d === null ? 'var(--off)' : d < 0 ? 'var(--red)' : d <= 3 ? 'var(--due-soon)' : 'var(--sub)');
 const leftText = (d) => (d === null ? '' : d < 0 ? `${-d}日過ぎ` : d === 0 ? '今日まで' : `残り${d}日`);
 const prov = (x) => (x.due_provisional ? '（仮）' : '');
 const chip = (st, extra) => h('span', { class: `wf-state wf-st-${st}`, text: STATE[st] ?? st, ...extra });
@@ -61,10 +61,10 @@ function flowchart(g, ctx) {
     seg[on ? 'hlHeads' : 'heads'] += arrowHead(e.tipX, e.tipY);
   }
   const svg = s('svg', { width: lay.width, height: lay.height, viewBox: `0 0 ${lay.width} ${lay.height}`, 'aria-hidden': 'true' },
-    s('path', { d: seg.lines || 'M0 0', fill: 'none', stroke: '#d2d2d7', 'stroke-width': 2 }),
-    s('path', { d: seg.heads || 'M0 0', fill: '#d2d2d7' }),
-    s('path', { d: seg.hlLines || 'M0 0', fill: 'none', stroke: '#8cc4ea', 'stroke-width': 2.5 }),
-    s('path', { d: seg.hlHeads || 'M0 0', fill: '#8cc4ea' }));
+    s('path', { d: seg.lines || 'M0 0', fill: 'none', 'stroke-width': 2, style: { stroke: 'var(--line)' } }),
+    s('path', { d: seg.heads || 'M0 0', style: { fill: 'var(--line)' } }),
+    s('path', { d: seg.hlLines || 'M0 0', fill: 'none', 'stroke-width': 2.5, style: { stroke: 'var(--pastel)' } }),
+    s('path', { d: seg.hlHeads || 'M0 0', style: { fill: 'var(--pastel)' } }));
   const nodes = tasks.map((t) => {
     const { x, y, h: nh } = lay.nodes[t.id];
     const me = t.id === hl;
@@ -101,7 +101,7 @@ function taskRow(t, today) {
       before ? h('span', { class: 'wf-task-note' }, icon('after', 14, 2), before) : null,
       note ? h('span', { class: 'wf-task-note', text: note }) : null),
     h('span', { class: 'wf-task-due' },
-      h('span', { class: 'wf-left', style: { color: closed || d === null ? '#8e8e93' : dueColor(d) }, text: closed ? '完了' : leftText(d) }),
+      h('span', { class: 'wf-left', style: { color: closed || d === null ? 'var(--off)' : dueColor(d) }, text: closed ? '完了' : leftText(d) }),
       h('small', { text: t.due ? `期限 ${md(dueDay(t.due))}${prov(t)}` : '期限なし' })));
 }
 
