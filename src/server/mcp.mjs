@@ -1005,7 +1005,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   tool(
     'settings',
     "Read or write the person's own settings that scheduling uses. With no section given it only reads, returning " +
-      'life, places, limits, calendar and week with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
+      'life, places, limits, calendar, week and onboarding with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
       'text] } for sleep, meals and fixed commitments, as plain rules. places: { places: [{ name, note }], travel: ' +
       '[{ from, to, minutes }] } for the physical places the person goes to and the travel time between two of them ' +
       '(both ways; not the working folders of the places tool). life and places are replaced as given. limits: ' +
@@ -1019,6 +1019,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'calendar: { skip: [{ title, calendar? }] } for the events of the person\'s calendars not to take in (nor keep) as ' +
       'fixed bookings: title is the whole title as it is, calendar the id of the calendar (left out: any); replaced as ' +
       'given, and written when the person says an event should not be taken in. ' +
+      'onboarding: { state } for the first conversation, where the secretary makes these settings with the person: ' +
+      'asking (started), done (made), skipped (the person said not now), null (unset). ' +
       'A section given as null goes back to its defaults.',
     {
       life: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -1026,6 +1028,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       limits: z.record(z.string(), z.unknown()).nullable().optional(),
       calendar: z.record(z.string(), z.unknown()).nullable().optional(),
       week: z.record(z.string(), z.unknown()).nullable().optional(),
+      onboarding: z.record(z.string(), z.unknown()).nullable().optional(),
       by_person: z.boolean().optional(),
     },
     async ({ by_person: byPerson, ...sections }) => {

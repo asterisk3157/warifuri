@@ -2,7 +2,8 @@
 // written as plain rules), places (場所と移動時間), limits (上限: hours a day, the size of a
 // block, the hours when blocks may be placed), calendar (カレンダー: the events not to take
 // in from the person's calendars) and week (週の型: where the person is at set times of the
-// week, and which profile's work goes there). Each is a section of the settings table, one
+// week, and which profile's work goes there), plus onboarding (最初の会話: whether the secretary
+// is making these settings with the person, has done it, or was told not to). Each is a section of the settings table, one
 // key per field (life.rules, places.places, places.travel, limits.day_max_hours, ...), the
 // value as JSON text, and each change is recorded as entity 'settings' with the section as
 // its id. Unset fields read as their defaults.
@@ -12,7 +13,7 @@
 
 import { LedgerError } from './ledger.mjs';
 
-export const SECTIONS = ['life', 'places', 'limits', 'calendar', 'week'];
+export const SECTIONS = ['life', 'places', 'limits', 'calendar', 'week', 'onboarding'];
 
 export const RULES_MAX = 50;
 export const RULE_MAX = 200;
@@ -24,6 +25,9 @@ export const SKIP_TITLE_MAX = 100;
 export const SKIP_CALENDAR_MAX = 200;
 export const WEEK_SLOTS_MAX = 50;
 export const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+// The states of the first conversation: asking (the secretary is making the settings with
+// the person), done (made), skipped (the person said not now; asked again only on their word).
+export const ONBOARDING_STATES = ['asking', 'done', 'skipped'];
 
 // The defaults of the limits: a working day of 8 hours placed between 09:00 and 21:00, in
 // blocks of 30 to 120 minutes. A scheduler stays inside them until the person changes them.
@@ -41,6 +45,7 @@ const DEFAULTS = {
   limits: LIMIT_DEFAULTS,
   calendar: { skip: [] },
   week: { slots: [] },
+  onboarding: { state: null },
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
@@ -198,6 +203,31 @@ function checkWeek(value, problems) {
   };
 }
 
+// onboarding: { state }, one of ONBOARDING_STATES; null puts it back to unset.
+function checkOnboarding(value, problems) {
+  if (!isObject(value)) return refuse(problems, 'onboarding は { state } の形です');
+  unknownKeys(value, ['state'], 'onboarding ', problems);
+  if (value.state === undefined) return {};
+  if (value.state !== null && !ONBOARDING_STATES.includes(value.state)) {
+    return refuse(problems, `onboarding.state は ${ONBOARDING_STATES.join('、')} か null です`);
+  }
+  return { state: value.state };
+}
+
+// Whether the secretary should make the settings with the person now (最初の会話): it said it
+// is (asking), or nobody has said anything yet and the settings the schedule reads are all
+// unset (a new install). Settings made by hand, done and skipped all say no.
+export function onboardingDue(settings) {
+  const state = settings.onboarding?.state ?? null;
+  if (state === 'asking') return true;
+  if (state !== null) return false;
+  const d = settings.defaults ?? {};
+  return ['life', 'places', 'limits', 'week'].every((section) => {
+    const all = Object.keys(DEFAULTS[section]);
+    return all.every((k) => (d[section] ?? []).includes(k));
+  });
+}
+
 // The slots of the week type laid on the local days of [fromMs, toMs): [{ starts_at, ends_at,
 // place, profile }] by start, as ISO times. slots: week.slots of readSettings.
 export function weekBands(slots, fromMs, toMs) {
@@ -268,7 +298,7 @@ export function readSettings(ledger) {
   return out;
 }
 
-// Writes the sections given ({ life, places, limits, calendar, week }; a section given as null is put back to
+// Writes the sections given ({ life, places, limits, calendar, week, onboarding }; a section given as null is put back to
 // its defaults). Every problem of every section is listed before anything is written. Limits
 // need byPerson. Returns readSettings afterwards.
 export function writeSettings(ledger, input, { byPerson = false } = {}, writer) {
@@ -293,7 +323,8 @@ export function writeSettings(ledger, input, { byPerson = false } = {}, writer) 
         : section === 'places' ? checkPlaces(input.places, now.places, problems)
           : section === 'calendar' ? checkCalendar(input.calendar, problems)
             : section === 'week' ? checkWeek(input.week, problems)
-              : checkLimits(input.limits, now.limits, problems);
+              : section === 'onboarding' ? checkOnboarding(input.onboarding, problems)
+                : checkLimits(input.limits, now.limits, problems);
     if (problems.length > before) continue;
     plan[section] = Object.fromEntries(Object.entries(checked).map(([k, v]) => [k, v === null ? null : JSON.stringify(v)]));
   }
