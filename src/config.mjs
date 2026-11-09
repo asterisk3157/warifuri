@@ -246,6 +246,27 @@ export const SETTINGS = [
     commands: SECRETARY,
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
+  {
+    name: 'WARIFURI_DISCORD_TOKEN',
+    section: 'secretary',
+    about: '秘書の質問、朝の報告、失敗を Discord に送るボットのトークン。ファイル(_FILE)なら、トークンだけか DISCORD_BOT_TOKEN= の1行を置く。WARIFURI_DISCORD_CHANNEL と一緒に設定すると送る',
+    secret: true,
+    commands: SECRETARY,
+  },
+  {
+    name: 'WARIFURI_DISCORD_CHANNEL',
+    section: 'secretary',
+    about: '送る先の Discord のチャンネルの id。本人だけが見るチャンネルにする',
+    commands: SECRETARY,
+    check: (v) => (/^\d{1,20}$/.test(v) ? null : 'must be a Discord channel id (digits)'),
+  },
+  {
+    name: 'WARIFURI_DISCORD_USER',
+    section: 'secretary',
+    about: '質問と失敗のときにメンションする、本人の Discord のユーザーの id。空ならメンションしない',
+    commands: SECRETARY,
+    check: (v) => (/^\d{1,20}$/.test(v) ? null : 'must be a Discord user id (digits)'),
+  },
 ];
 
 const byName = new Map(SETTINGS.map((s) => [s.name, s]));
