@@ -1,18 +1,21 @@
-// 人: one row per person (原則20, 21). A person has fixed fields that every profile they are in
-// sees (name, the names they go by, email, phone, affiliation, role, birthday), and, per
-// profile, free items ("好きなもの: 紅茶") and facts learned about them (分かったこと, each with
-// where it came from). A fact whose person is not known yet is kept with person_id NULL, for
-// the secretary to put on the right person.
+// 人: one row per person (原則20, 21), kept as a table. What can be a column is a column: the
+// fixed ones every profile the person is in sees (name, the names they go by, email, phone,
+// affiliation, role, birthday), and per profile, free columns (好きなもの, 学年, ...). A free
+// column's name is matched against the ones the profile already has (好きな物 is written as
+// 好きなもの), so one thing is one column. Everything else is a memo (メモ: what happened, how to
+// deal with them, or other), with where it came from; a memo can later become a column
+// (promote_memos). A memo whose person is not known yet is kept with person_id NULL, for the
+// secretary to put on the right person.
 //
 // Who sees what: a caller names one profile and sees only the people in it, and only that
-// profile's items and facts. The scope { all: true } (the secretary, with no profile named)
-// sees everything, each item and fact with its profile.
+// profile's items and memos. The scope { all: true } (the secretary, with no profile named)
+// sees everything, each item and memo with its profile.
 // { profile, secretary: true } (the secretary naming a profile) sees that profile like anyone,
 // and may also put people in other profiles.
 //
 // People can be forgotten for good: forget deletes the rows (the database runs with
 // secure_delete, and the write-ahead log is emptied afterwards). So the ledger's records of
-// people say which fields changed, never their values or the text of a fact.
+// people say which fields changed, never their values or the text of a memo.
 //
 // `ctx` is what openLedger shares with this module: the database, its helpers and the clock.
 
@@ -21,8 +24,11 @@ import { randomInt } from 'node:crypto';
 export const FIELDS = ['name', 'aliases', 'email', 'phone', 'affiliation', 'role', 'birthday'];
 export const LINK_KINDS = ['goal', 'task', 'booking'];
 export const MARKS = ['本人の言葉', '未確認'];
+// やりとり: something that happened (a meeting, a request), 接し方: how to deal with them (how they
+// like to be asked, what to watch for), その他: the rest.
+export const MEMO_KINDS = ['やりとり', '接し方', 'その他'];
 export const MAX_ALIASES = 10;
-export const MAX_FACT_CHARS = 4000;
+export const MAX_MEMO_CHARS = 4000;
 export const BIRTHDAYS_MAX_DAYS = 366;
 export const PEOPLE_MAX = 200;
 
@@ -37,7 +43,7 @@ const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // What warifuri does not keep about anyone: numbers that open accounts or prove who someone
-// is, secrets, and health and beliefs. A label naming one is refused, and so is a value or fact holding 12 or more
+// is, secrets, and health and beliefs. A label naming one is refused, and so is a value or memo holding 12 or more
 // digits in a row (a card, account or My Number; a phone number has fewer and has its field).
 const FORBIDDEN_LABEL = /マイナンバー|個人番号|口座|暗証|パスワード|password|クレジット|カード番号|card\s*number|保険証|パスポート|passport|免許証|健康|持病|病歴|宗教|信仰|支持政党/i;
 const LONG_DIGITS = /(?:\d[\s-]?){12,}/;
@@ -47,6 +53,12 @@ const chars = (s) => [...s].length;
 const blank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 // The form two names are compared in: NFKC, no spaces, lower case.
 export const nameKey = (s) => String(s).normalize('NFKC').replace(/\s+/gu, '').toLowerCase();
+// The form two column names are compared in: as nameKey, katakana as hiragana, and the kanji
+// often written in kana (物, 事, 時) as kana, and ・ and colons dropped. 好きな物 and 好きなモノ meet.
+export const labelKey = (s) => nameKey(s)
+  .replace(/[\u30a1-\u30f6]/gu, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60))
+  .replace(/物/gu, 'もの').replace(/事/gu, 'こと').replace(/時/gu, 'とき')
+  .replace(/[・:：]/gu, '');
 
 function checkBirthday(value) {
   const m = BIRTHDAY.exec(value);
@@ -58,7 +70,7 @@ function checkBirthday(value) {
   return d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }
 
-// Problems with a text that is kept about someone (an item's value or a fact).
+// Problems with a text that is kept about someone (an item's value or a memo).
 function sensitive(text, what) {
   return LONG_DIGITS.test(text)
     ? [`${what}に、12桁以上続く数字があります。カードや口座、マイナンバーのような番号は持ちません`]
@@ -122,10 +134,10 @@ function cleanItems(items) {
   return { out, problems };
 }
 
-function checkFactText(text) {
-  if (typeof text !== 'string' || text.trim() === '') return ['分かったこと(text)が空です'];
-  if (chars(text.trim()) > MAX_FACT_CHARS) return [`分かったことは1件 ${MAX_FACT_CHARS} 文字までです`];
-  return sensitive(text, '分かったこと');
+function checkMemoText(text) {
+  if (typeof text !== 'string' || text.trim() === '') return ['メモ(text)が空です'];
+  if (chars(text.trim()) > MAX_MEMO_CHARS) return [`メモは1件 ${MAX_MEMO_CHARS} 文字までです`];
+  return sensitive(text, 'メモ');
 }
 
 export function peopleStore({ db, one, all, transaction, record, now, LedgerError, requireWriter }) {
@@ -164,14 +176,14 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return row;
   }
 
-  // The profile an item or fact is written in: the scope's, or for { all } the one given.
+  // The profile an item or memo is written in: the scope's, or for { all } the one given.
   function writeProfile(scope, profile, what) {
     if (scope.all !== true) return scope.profile;
     if (typeof profile !== 'string' || profile.trim() === '') fail([`${what}を書くプロフィール(profile)を決めます`]);
     return profile;
   }
 
-  const factCond = (scope) => (scope.all ? ['', []] : [' AND profile = ?', [scope.profile]]);
+  const memoCond = (scope) => (scope.all ? ['', []] : [' AND profile = ?', [scope.profile]]);
 
   function linksOf(id) {
     const out = [];
@@ -184,13 +196,13 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return out;
   }
 
-  function factView(f, scope) {
-    return { id: f.id, text: f.text, mark: f.mark, source: f.source, learned_on: f.learned_on, ...(scope.all ? { profile: f.profile } : {}) };
+  function memoView(f, scope) {
+    return { id: f.id, kind: f.kind, text: f.text, mark: f.mark, source: f.source, learned_on: f.learned_on, ...(scope.all ? { profile: f.profile } : {}) };
   }
 
   // The whole person, as the scope sees them.
   function view(row, scope) {
-    const [cond, args] = factCond(scope);
+    const [cond, args] = memoCond(scope);
     return {
       id: row.id,
       name: row.name,
@@ -203,23 +215,33 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       ...(scope.all ? { profiles: profilesOf(row.id) } : {}),
       items: all(`SELECT profile, label, value FROM person_items WHERE person_id = ?${cond} ORDER BY profile, label`, row.id, ...args)
         .map((i) => ({ label: i.label, value: i.value, ...(scope.all ? { profile: i.profile } : {}) })),
-      facts: all(`SELECT * FROM person_facts WHERE person_id = ?${cond} ORDER BY learned_on, id`, row.id, ...args).map((f) => factView(f, scope)),
+      memos: all(`SELECT * FROM person_memos WHERE person_id = ?${cond} ORDER BY learned_on, id`, row.id, ...args).map((f) => memoView(f, scope)),
       links: linksOf(row.id),
       created_at: row.created_at,
       updated_at: row.updated_at,
     };
   }
 
-  // A short line per person, for lists.
+  const itemsOf = (id, scope) => {
+    const [cond, args] = memoCond(scope);
+    return all(`SELECT profile, label, value FROM person_items WHERE person_id = ?${cond} ORDER BY profile, label`, id, ...args);
+  };
+
+  // One row of the table: the columns, and how many memos (their text is read with get).
+  // items: { 列: 値 } of the scope's profile (for { all }, "プロフィール/列").
   function summary(row, scope) {
-    const [cond, args] = factCond(scope);
+    const [cond, args] = memoCond(scope);
     return {
       id: row.id,
       name: row.name,
       aliases: JSON.parse(row.aliases),
+      email: row.email,
+      phone: row.phone,
       affiliation: row.affiliation,
       role: row.role,
-      facts: one(`SELECT count(*) AS n FROM person_facts WHERE person_id = ?${cond}`, row.id, ...args).n,
+      birthday: row.birthday,
+      items: Object.fromEntries(itemsOf(row.id, scope).map((i) => [scope.all ? `${i.profile}/${i.label}` : i.label, i.value])),
+      memos: one(`SELECT count(*) AS n FROM person_memos WHERE person_id = ?${cond}`, row.id, ...args).n,
       ...(scope.all ? { profiles: profilesOf(row.id) } : {}),
     };
   }
@@ -238,24 +260,28 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     )).map((r) => ({ id: r.id, name: r.name }));
   }
 
+  // A person as written, with the free columns whose name was matched to one already there.
+  const withNotes = (v, changes) => (changes.renamed_labels ? { ...v, renamed_labels: changes.renamed_labels } : v);
+
   const recordPerson = (w, id, action, changes) => record(w, 'person', id, action, changes);
 
-  function insertFact(w, { person_id: personId, profile, text, mark, source, learned_on: learnedOn }) {
+  function insertMemo(w, { person_id: personId, profile, text, kind, mark, source, learned_on: learnedOn }) {
     const info = db.prepare(
-      'INSERT INTO person_facts (person_id, profile, text, mark, source, learned_on, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(personId ?? null, profile, text.trim().replace(/\r\n?/g, '\n'), mark ?? null, source ?? null, learnedOn ?? localDate(), nowIso());
+      'INSERT INTO person_memos (person_id, profile, text, kind, mark, source, learned_on, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(personId ?? null, profile, text.trim().replace(/\r\n?/g, '\n'), kind ?? 'その他', mark ?? null, source ?? null, learnedOn ?? localDate(), nowIso());
     return Number(info.lastInsertRowid);
   }
 
-  function checkFacts(list, at) {
+  function checkMemos(list, at) {
     const problems = [];
     if (list === undefined) return problems;
     if (!Array.isArray(list)) return [`${at} は並びです`];
     for (const [i, f] of list.entries()) {
-      problems.push(...checkFactText(f?.text).map((p) => `${at}[${i}]: ${p}`));
+      problems.push(...checkMemoText(f?.text).map((p) => `${at}[${i}]: ${p}`));
       if (f?.learned_on !== undefined && !(typeof f.learned_on === 'string' && checkBirthday(f.learned_on) && f.learned_on.length === 10)) {
         problems.push(`${at}[${i}]: learned_on は YYYY-MM-DD で書きます`);
       }
+      if (f?.kind !== undefined && !MEMO_KINDS.includes(f.kind)) problems.push(`${at}[${i}]: kind は やりとり、接し方、その他 のどれかです`);
       if (f?.mark !== undefined && f.mark !== null && !MARKS.includes(f.mark)) problems.push(`${at}[${i}]: mark は 本人の言葉 か 未確認 です(確かめたことは null)`);
     }
     return problems;
@@ -273,28 +299,34 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return problems;
   }
 
-  // The facts named by id that the scope may change: { rows, problems }.
-  function factsNamed(ids, scope, at, { unassignedOnly = false, personId = null } = {}) {
+  // The memos named by id that the scope may change: { rows, problems }.
+  function memosNamed(ids, scope, at, { unassignedOnly = false, personId = null } = {}) {
     const rows = [];
     const problems = [];
-    if (!Array.isArray(ids)) return { rows, problems: [`${at} は分かったことの id の並びです`] };
+    if (!Array.isArray(ids)) return { rows, problems: [`${at} はメモの id の並びです`] };
     for (const id of ids) {
-      const f = one('SELECT * FROM person_facts WHERE id = ?', id);
+      const f = one('SELECT * FROM person_memos WHERE id = ?', id);
       const seen = f && (scope.all || f.profile === scope.profile) && (f.person_id === null || visible(f.person_id, scope));
-      if (!seen) problems.push(`${at}: ${id} という分かったことはありません`);
+      if (!seen) problems.push(`${at}: ${id} というメモはありません`);
       else if (unassignedOnly && f.person_id !== null) problems.push(`${at}: ${id} はもう人に付いています`);
-      else if (personId && f.person_id !== personId) problems.push(`${at}: ${id} はこの人の分かったことではありません`);
+      else if (personId && f.person_id !== personId) problems.push(`${at}: ${id} はこの人のメモではありません`);
       else rows.push(f);
     }
     return { rows, problems };
   }
 
-  // Applies items, facts and links to a person inside a write. Returns the changes to record
+  // Applies items, memos and links to a person inside a write. Returns the changes to record
   // (names and counts only).
   function applyParts(w, id, input, scope) {
     const changes = {};
     if (input.items?.length) {
       const p = writeProfile(scope, input.profile, '項目');
+      const known = new Map(all('SELECT DISTINCT label FROM person_items WHERE profile = ? ORDER BY label', p).map((r) => [labelKey(r.label), r.label]));
+      for (const item of input.items) {
+        const same = known.get(labelKey(item.label));
+        if (same && same !== item.label) { (changes.renamed_labels ??= []).push({ given: item.label, as: same }); item.label = same; }
+        known.set(labelKey(item.label), item.label);
+      }
       for (const { label, value } of input.items) {
         if (value === null) db.prepare('DELETE FROM person_items WHERE person_id = ? AND profile = ? AND label = ?').run(id, p, label);
         else {
@@ -306,16 +338,20 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       }
       changes.items = input.items.map((i) => i.label);
     }
-    if (input.add_facts?.length) {
-      const p = writeProfile(scope, input.profile, '分かったこと');
-      changes.added_facts = input.add_facts.map((f) => insertFact(w, { person_id: id, profile: p, text: f.text, mark: f.mark, source: f.source ?? input.source, learned_on: f.learned_on }));
+    if (input.add_memos?.length) {
+      const p = writeProfile(scope, input.profile, 'メモ');
+      changes.added_memos = input.add_memos.map((f) => insertMemo(w, { person_id: id, profile: p, text: f.text, kind: f.kind, mark: f.mark, source: f.source ?? input.source, learned_on: f.learned_on }));
     }
     for (const f of input.editRows ?? []) {
-      db.prepare('UPDATE person_facts SET text = ?, mark = ? WHERE id = ?').run(f.text.trim(), f.mark === undefined ? f.row.mark : f.mark, f.row.id);
+      db.prepare('UPDATE person_memos SET text = ?, kind = ?, mark = ? WHERE id = ?')
+        .run(f.text === undefined ? f.row.text : f.text.trim(), f.kind ?? f.row.kind, f.mark === undefined ? f.row.mark : f.mark, f.row.id);
     }
-    if (input.editRows?.length) changes.edited_facts = input.editRows.map((f) => f.row.id);
-    for (const f of input.assignRows ?? []) db.prepare('UPDATE person_facts SET person_id = ? WHERE id = ?').run(id, f.id);
-    if (input.assignRows?.length) changes.assigned_facts = input.assignRows.map((f) => f.id);
+    // A memo that became a column: the column is written above (items), the memo goes.
+    for (const f of input.promoteRows ?? []) db.prepare('DELETE FROM person_memos WHERE id = ?').run(f.id);
+    if (input.promoteRows?.length) changes.promoted_memos = input.promoteRows.map((f) => f.id);
+    if (input.editRows?.length) changes.edited_memos = input.editRows.map((f) => f.row.id);
+    for (const f of input.assignRows ?? []) db.prepare('UPDATE person_memos SET person_id = ? WHERE id = ?').run(id, f.id);
+    if (input.assignRows?.length) changes.assigned_memos = input.assignRows.map((f) => f.id);
     for (const l of input.link ?? []) {
       db.prepare('INSERT OR IGNORE INTO person_links (person_id, kind, target_id, created_at) VALUES (?, ?, ?, ?)').run(id, l.kind, l.id, nowIso());
     }
@@ -330,34 +366,51 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
   // Checks everything but the fixed fields that create and update share. Pushes problems and
   // returns the cleaned parts.
   function prepareParts(input, scope, problems, personId) {
-    const items = cleanItems(input.items);
+    // promote_memos: [{ id, label, value? }]: the memo becomes the column label (its text as the
+    // value, unless value is given) and leaves the memos.
+    let promoteRows = [];
+    const promoted = {};
+    if (input.promote_memos !== undefined) {
+      if (!Array.isArray(input.promote_memos)) problems.push('promote_memos は [{ id, label, value? }] の並びです');
+      else {
+        const named = memosNamed(input.promote_memos.map((f) => f?.id), scope, 'promote_memos', { personId });
+        problems.push(...named.problems);
+        promoteRows = named.rows;
+        for (const row of named.rows) {
+          const f = input.promote_memos.find((e) => e?.id === row.id);
+          if (typeof f.label !== 'string' || f.label.trim() === '') problems.push(`promote_memos: ${row.id} の移す先の列(label)がありません`);
+          else promoted[f.label] = f.value ?? row.text;
+        }
+      }
+    }
+    const items = cleanItems(Object.keys(promoted).length ? { ...(input.items ?? {}), ...promoted } : input.items);
     problems.push(...items.problems);
-    problems.push(...checkFacts(input.add_facts, 'add_facts'));
+    problems.push(...checkMemos(input.add_memos, 'add_memos'));
     problems.push(...checkLinks(input.link, 'link'));
     problems.push(...checkLinks(input.unlink, 'unlink'));
     let editRows = [];
-    if (input.edit_facts !== undefined) {
-      if (!Array.isArray(input.edit_facts)) problems.push('edit_facts は [{ id, text, mark? }] の並びです');
+    if (input.edit_memos !== undefined) {
+      if (!Array.isArray(input.edit_memos)) problems.push('edit_memos は [{ id, text, mark? }] の並びです');
       else {
-        problems.push(...checkFacts(input.edit_facts, 'edit_facts'));
-        const named = factsNamed(input.edit_facts.map((f) => f?.id), scope, 'edit_facts', { personId });
+        problems.push(...checkMemos(input.edit_memos.map((f) => (f?.text === undefined ? { ...f, text: '-' } : f)), 'edit_memos'));
+        const named = memosNamed(input.edit_memos.map((f) => f?.id), scope, 'edit_memos', { personId });
         problems.push(...named.problems);
         editRows = named.rows.map((row) => {
-          const f = input.edit_facts.find((e) => e?.id === row.id);
-          return { row, text: f.text, mark: f.mark };
+          const f = input.edit_memos.find((e) => e?.id === row.id);
+          return { row, text: f.text, kind: f.kind, mark: f.mark };
         });
       }
     }
     let assignRows = [];
-    if (input.assign_facts !== undefined) {
-      const named = factsNamed(input.assign_facts, scope, 'assign_facts', { unassignedOnly: true });
+    if (input.assign_memos !== undefined) {
+      const named = memosNamed(input.assign_memos, scope, 'assign_memos', { unassignedOnly: true });
       problems.push(...named.problems);
       assignRows = named.rows;
     }
-    if (scope.all && (items.out.length || input.add_facts?.length) && blank(input.profile)) {
-      problems.push('項目や分かったことを書くプロフィール(profile)を決めます');
+    if (scope.all && (items.out.length || input.add_memos?.length) && blank(input.profile)) {
+      problems.push('項目やメモを書くプロフィール(profile)を決めます');
     }
-    return { ...input, items: items.out, editRows, assignRows };
+    return { ...input, items: items.out, editRows, assignRows, promoteRows };
   }
 
   function checkProfiles(list, at, scope) {
@@ -368,8 +421,8 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
   }
 
   // Makes a person. input: the fixed fields (name needed), profiles (default: the scope's),
-  // items, add_facts, link, profile (for { all }: where items and facts go), source (of the
-  // facts), allow_similar (make it even when someone in the scope has the same name or email).
+  // items, add_memos, link, profile (for { all }: where items and memos go), source (of the
+  // memos), allow_similar (make it even when someone in the scope has the same name or email).
   function create(input, scope, opts) {
     const w = requireWriter(opts);
     checkScope(scope);
@@ -377,8 +430,8 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     problems.push(...checkProfiles(input.profiles, 'profiles', scope));
     const profiles = [...new Set(input.profiles ?? (scope.all ? [input.profile].filter(Boolean) : [scope.profile]))];
     if (profiles.length === 0) problems.push('profiles(この人が入るプロフィール)を1つ以上渡します');
-    if (input.edit_facts !== undefined || input.unlink !== undefined) problems.push('新しい人には edit_facts と unlink は使えません');
-    const parts = prepareParts({ ...input, edit_facts: undefined, unlink: undefined }, scope, problems, null);
+    if (input.edit_memos !== undefined || input.unlink !== undefined) problems.push('新しい人には edit_memos と unlink は使えません');
+    const parts = prepareParts({ ...input, edit_memos: undefined, unlink: undefined }, scope, problems, null);
     if (problems.length) fail(problems);
     if (input.allow_similar !== true) {
       const same = similar(values, scope);
@@ -398,13 +451,13 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       for (const p of profiles) db.prepare('INSERT INTO person_profiles (person_id, profile) VALUES (?, ?)').run(id, p);
       const changes = applyParts(w, id, parts, scope);
       recordPerson(w, id, 'create', { fields: Object.keys(values), profiles, ...changes });
-      return view(one('SELECT * FROM people WHERE id = ?', id), scope);
+      return withNotes(view(one('SELECT * FROM people WHERE id = ?', id), scope), changes);
     });
   }
 
   // Changes a person: the fixed fields given (null clears one), add_profiles, remove_profiles,
-  // items ({ label: value }, null removes), add_facts, edit_facts ([{ id, text, mark? }]),
-  // assign_facts (ids of facts with no person yet), link and unlink ([{ kind, id }]).
+  // items ({ label: value }, null removes), add_memos, edit_memos ([{ id, text, mark? }]),
+  // assign_memos (ids of memos with no person yet), link and unlink ([{ kind, id }]).
   function update(id, input, scope, opts) {
     const w = requireWriter(opts);
     const row = personRow(id, scope);
@@ -416,9 +469,10 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     for (const p of input.add_profiles ?? []) after.add(p);
     for (const p of input.remove_profiles ?? []) after.delete(p);
     if (after.size === 0) problems.push('どのプロフィールにも入らない人は持てません。消すなら forget を使います');
-    const touched = Object.keys(values).length + (input.add_profiles?.length ?? 0) + (input.remove_profiles?.length ?? 0) +
-      parts.items.length + (parts.add_facts?.length ?? 0) + parts.editRows.length + parts.assignRows.length +
+    let touched = Object.keys(values).length + (input.add_profiles?.length ?? 0) + (input.remove_profiles?.length ?? 0) +
+      parts.items.length + (parts.add_memos?.length ?? 0) + parts.editRows.length + parts.assignRows.length +
       (parts.link?.length ?? 0) + (parts.unlink?.length ?? 0);
+    if (input.promote_memos?.length) touched += 1;
     if (touched === 0 && problems.length === 0) problems.push('直す項目を1つ以上渡します');
     if (problems.length) fail(problems);
     return transaction(() => {
@@ -437,7 +491,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
         ...(input.remove_profiles?.length ? { remove_profiles: input.remove_profiles } : {}),
         ...changes,
       });
-      return view(one('SELECT * FROM people WHERE id = ?', row.id), scope);
+      return withNotes(view(one('SELECT * FROM people WHERE id = ?', row.id), scope), changes);
     });
   }
 
@@ -458,12 +512,13 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return best && !tie ? { id: best.id, name: best.name } : null;
   }
 
-  // Adds a fact learned in a profile (note with people: true, close with learned_people, the
+  // Adds a memo learned in a profile (note with people: true, close with learned_people, the
   // inbox sorted into people). person: an id in the profile, or else the person the text starts
-  // with; with neither, the fact waits with no person. Returns { fact, person }.
-  function learn({ profile, text, mark = null, source = null, person }, opts) {
+  // with; with neither, the memo waits with no person. Returns { memo, person }.
+  function learn({ profile, text, kind = 'その他', mark = null, source = null, person }, opts) {
     const w = requireWriter(opts);
-    const problems = checkFactText(text);
+    const problems = checkMemoText(text);
+    if (!MEMO_KINDS.includes(kind)) problems.push('kind は やりとり、接し方、その他 のどれかです');
     if (mark !== null && !MARKS.includes(mark)) problems.push('mark は 本人の言葉 か 未確認 です');
     if (typeof profile !== 'string' || profile.trim() === '') problems.push('プロフィールの名前がありません');
     if (problems.length) fail(problems);
@@ -475,30 +530,60 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       who = match(profile, text);
     }
     return transaction(() => {
-      const fact = insertFact(w, { person_id: who?.id ?? null, profile, text, mark, source });
+      const memo = insertMemo(w, { person_id: who?.id ?? null, profile, text, kind, mark, source });
       if (who) db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), who.id);
-      recordPerson(w, who?.id ?? `profile:${profile}`, 'learn', { fact, profile });
-      return { fact, person: who };
+      recordPerson(w, who?.id ?? `profile:${profile}`, 'learn', { memo, profile });
+      return { memo, person: who };
     });
   }
 
-  // The people of the scope as short lines, and the facts there that wait for a person.
-  // query: only those whose name, a name they go by, email or affiliation contains it.
-  function list(scope, { query } = {}) {
+  // The columns of the scope: the fixed ones, then the free ones its people have, each with
+  // how many people fill it.
+  function columns(scope) {
+    const [cond, args] = memoCond(scope);
+    const ids = new Set(rowsIn(scope).map((r) => r.id));
+    const free = new Map();
+    for (const i of all(`SELECT person_id, profile, label FROM person_items WHERE 1 = 1${cond}`, ...args)) {
+      if (!ids.has(i.person_id)) continue;
+      const key = scope.all ? `${i.profile}/${i.label}` : i.label;
+      free.set(key, (free.get(key) ?? 0) + 1);
+    }
+    return { fixed: FIELDS, free: [...free].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)) };
+  }
+
+  // The table of the scope (one row per person) and the memos there that wait for a person.
+  // query: only those whose name, a name they go by, email, affiliation, role or a free column
+  // contains it. where: { 列: text }: only those whose column contains the text (a fixed field by
+  // its name, such as affiliation, or a free column, matched as labelKey); '' means "filled".
+  function list(scope, { query, where } = {}) {
     checkScope(scope);
-    let rows = rowsIn(scope);
+    let rows = rowsIn(scope).map((r) => summary(r, scope));
     if (!blank(query)) {
       const q = nameKey(query);
-      rows = rows.filter((r) => [r.name, ...JSON.parse(r.aliases), r.email ?? '', r.affiliation ?? ''].some((v) => nameKey(v).includes(q)));
+      rows = rows.filter((r) => [r.name, ...r.aliases, r.email, r.affiliation, r.role, ...Object.values(r.items)].some((v) => v && nameKey(v).includes(q)));
     }
-    const [cond, args] = factCond(scope);
-    const waiting = all(`SELECT * FROM person_facts WHERE person_id IS NULL${cond} ORDER BY learned_on, id LIMIT ?`, ...args, PEOPLE_MAX);
+    if (where !== undefined && where !== null) {
+      if (typeof where !== 'object' || Array.isArray(where)) fail(['where は { 列: 含む文字 } の形です']);
+      for (const [col, want] of Object.entries(where)) {
+        if (typeof want !== 'string') fail([`where の ${col} は文字列です('' で、埋まっている人)`]);
+        const value = (r) => {
+          if (FIELDS.includes(col)) return col === 'aliases' ? r.aliases.join(' ') : r[col];
+          const k = labelKey(col);
+          const hit = Object.keys(r.items).find((l) => labelKey(scope.all ? l.split('/').pop() : l) === k);
+          return hit ? r.items[hit] : null;
+        };
+        rows = rows.filter((r) => { const v = value(r); return v != null && v !== '' && nameKey(v).includes(nameKey(want)); });
+      }
+    }
+    const [cond, args] = memoCond(scope);
+    const waiting = all(`SELECT * FROM person_memos WHERE person_id IS NULL${cond} ORDER BY learned_on, id LIMIT ?`, ...args, PEOPLE_MAX);
     return {
       ...(scope.all ? {} : { profile: scope.profile }),
+      columns: columns(scope),
       count: rows.length,
-      people: rows.slice(0, PEOPLE_MAX).map((r) => summary(r, scope)),
+      people: rows.slice(0, PEOPLE_MAX),
       more: Math.max(0, rows.length - PEOPLE_MAX),
-      unassigned: waiting.map((f) => factView(f, scope)),
+      unassigned: waiting.map((f) => memoView(f, scope)),
     };
   }
 
@@ -537,7 +622,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
 
   // Puts `from` into `into` and forgets `from`: its name and the names it went by become names
   // `into` goes by, a field `into` lacks is taken from it, and its profiles, items (where `into`
-  // has none of that label), facts and links move over. Returns the merged person and the
+  // has none of that label), memos and links move over. Returns the merged person and the
   // fields both had with different values (into's kept).
   function merge(intoId, fromId, scope, opts) {
     const w = requireWriter(opts);
@@ -556,7 +641,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       db.prepare('UPDATE people SET aliases = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(aliases), nowIso(), into.id);
       db.prepare('INSERT OR IGNORE INTO person_profiles (person_id, profile) SELECT ?, profile FROM person_profiles WHERE person_id = ?').run(into.id, from.id);
       db.prepare('INSERT OR IGNORE INTO person_items (person_id, profile, label, value, updated_at) SELECT ?, profile, label, value, updated_at FROM person_items WHERE person_id = ?').run(into.id, from.id);
-      db.prepare('UPDATE person_facts SET person_id = ? WHERE person_id = ?').run(into.id, from.id);
+      db.prepare('UPDATE person_memos SET person_id = ? WHERE person_id = ?').run(into.id, from.id);
       db.prepare('INSERT OR IGNORE INTO person_links (person_id, kind, target_id, created_at) SELECT ?, kind, target_id, created_at FROM person_links WHERE person_id = ?').run(into.id, from.id);
       db.prepare('DELETE FROM people WHERE id = ?').run(from.id);
       recordPerson(w, into.id, 'merge', { from: from.id, filled, kept });
@@ -565,33 +650,33 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     });
   }
 
-  // Forgets for good: the person (with all their items, facts and links, in every profile),
-  // or the facts named. The rows are deleted and the write-ahead log emptied, so the values
+  // Forgets for good: the person (with all their items, memos and links, in every profile),
+  // or the memos named. The rows are deleted and the write-ahead log emptied, so the values
   // stay only in backups taken before (until they are rotated out).
-  function forget({ person, facts }, scope, opts) {
+  function forget({ person, memos }, scope, opts) {
     const w = requireWriter(opts);
     checkScope(scope);
     const problems = [];
     const row = person === undefined ? null : personRow(person, scope);
     let rows = [];
-    if (facts !== undefined) {
-      const named = factsNamed(facts, scope, 'facts');
+    if (memos !== undefined) {
+      const named = memosNamed(memos, scope, 'memos');
       problems.push(...named.problems);
       rows = named.rows;
     }
-    if (!row && rows.length === 0 && problems.length === 0) problems.push('消す人(person)か、分かったこと(facts)を渡します');
+    if (!row && rows.length === 0 && problems.length === 0) problems.push('消す人(person)か、メモ(memos)を渡します');
     if (problems.length) fail(problems);
     const out = transaction(() => {
-      let forgotFacts = 0;
+      let forgotMemos = 0;
       if (row) {
-        forgotFacts = one('SELECT count(*) AS n FROM person_facts WHERE person_id = ?', row.id).n;
+        forgotMemos = one('SELECT count(*) AS n FROM person_memos WHERE person_id = ?', row.id).n;
         db.prepare('DELETE FROM people WHERE id = ?').run(row.id);
-        recordPerson(w, row.id, 'forget', { facts: forgotFacts });
+        recordPerson(w, row.id, 'forget', { memos: forgotMemos });
       }
       const extra = rows.filter((f) => f.person_id !== row?.id);
-      for (const f of extra) db.prepare('DELETE FROM person_facts WHERE id = ?').run(f.id);
-      if (extra.length) recordPerson(w, row?.id ?? `profile:${scope.profile ?? '*'}`, 'forget_facts', { facts: extra.map((f) => f.id) });
-      return { person: row ? row.id : null, facts: forgotFacts + extra.length };
+      for (const f of extra) db.prepare('DELETE FROM person_memos WHERE id = ?').run(f.id);
+      if (extra.length) recordPerson(w, row?.id ?? `profile:${scope.profile ?? '*'}`, 'forget_memos', { memos: extra.map((f) => f.id) });
+      return { person: row ? row.id : null, memos: forgotMemos + extra.length };
     });
     // Outside the write: copy the log into the file and empty it, so deleted pages leave it.
     try {
@@ -607,5 +692,5 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return Object.fromEntries(all('SELECT profile, count(*) AS n FROM person_profiles GROUP BY profile').map((r) => [r.profile, r.n]));
   }
 
-  return { create, update, learn, match, list, get: getPerson, birthdays, merge, forget, counts };
+  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, counts };
 }

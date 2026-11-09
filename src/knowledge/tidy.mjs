@@ -181,7 +181,7 @@ function inboxBody(entry) {
 }
 
 // Sorts the inbox. moves: [{ entries: [id], to, text?, checked?, reason?, person? }]. to is
-// 'knowledge' (knowledge.md), 'people' (a fact about a person, handed to toPeople, which puts it
+// 'knowledge' (knowledge.md), 'people' (a memo about a person, handed to toPeople, which puts it
 // in the ledger's people; person names who), a 'knowledge/<topic>.md', or 'drop' (left
 // out, with a reason). The entry written is "- <date> 「未確認」 <text> (<device> / 受信箱から)";
 // text is the wording to keep (needed when several entries are merged into one; one entry
@@ -237,7 +237,7 @@ export function sortInbox(home, profile, { moves, device, toPeople = null, now =
     const text = step.text !== null || !m ? body : body.slice(0, m.index);
     const source = step.text !== null ? `${device} / 受信箱から` : (m ? `${m[1]} / 受信箱から` : `${device} / 受信箱から`);
     const out = toPeople({ text, mark: step.checked ? null : MARK_UNCONFIRMED, source, person: step.person });
-    step.done = { to: 'people', entries: step.taken.map((e) => e.id), fact: out.fact, person: out.person, from: step.taken.map((e) => e.text) };
+    step.done = { to: 'people', entries: step.taken.map((e) => e.id), memo: out.memo, person: out.person, from: step.taken.map((e) => e.text) };
   }
   for (const step of plan) {
     if (step.target === 'people') done.push(step.done);

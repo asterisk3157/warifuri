@@ -36,7 +36,7 @@ function notes(text) {
 function profileButton(p, colors, ctx) {
   return h('button', {
     type: 'button', class: 'wf-goal-btn', 'aria-pressed': String(view.profile === p.name), data: { key: `profile-${p.name}` },
-    onclick: () => { view.profile = p.name; view.open = null; view.person = null; ctx.refresh(); },
+    onclick: () => { view.profile = p.name; view.open = null; view.person = null; people.query = ''; people.affiliation = ''; ctx.refresh(); },
   },
   h('span', { class: 'wf-goal-top' }, profileChip(p.name, colors, 15)),
   h('span', { class: 'wf-goal-meta', text: count(p) ? [p.people && `人 ${p.people}`, p.knowledge && `ナレッジ ${p.knowledge}`, p.inbox && `受信箱 ${p.inbox}`, p.files && `手順 ${p.files}`].filter(Boolean).join(' · ') : 'まだありません' }));
@@ -54,44 +54,115 @@ function section(title, file) {
 const MD = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/;
 const birthdayText = (b) => {
   const m = MD.exec(b ?? '');
-  return m ? `${m[1] ? `${m[1]}年` : ''}${Number(m[2])}月${Number(m[3])}日` : b;
+  return m ? `${m[1] ? `${m[1]}/` : ''}${Number(m[2])}/${Number(m[3])}` : (b ?? '');
 };
-const factMeta = (f) => {
+// Days from today to the next birthday (for sorting), or Infinity without one.
+function daysToBirthday(b, now) {
+  const m = MD.exec(b ?? '');
+  if (!m) return Infinity;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let d = new Date(today.getFullYear(), Number(m[2]) - 1, Number(m[3]));
+  if (d < today) d = new Date(today.getFullYear() + 1, Number(m[2]) - 1, Number(m[3]));
+  return Math.round((d - today) / 86400000);
+}
+const memoMeta = (f) => {
   const [, mo, d] = /^\d{4}-(\d{2})-(\d{2})$/.exec(f.learned_on) ?? [];
   return [mo ? `${Number(mo)}/${Number(d)}` : null, f.mark ? WHO[f.mark] : null].filter(Boolean).join(' · ');
 };
-const factList = (facts) => h('ul', { class: 'wf-know-notes' }, ...facts.map((f) => h('li', {},
-  h('span', { class: 'wf-know-text', text: f.text }),
-  h('span', { class: 'wf-know-meta', text: factMeta(f) }))));
+const memoList = (memos) => h('ul', { class: 'wf-know-notes' }, ...memos.map((f) => h('li', {},
+  h('span', { class: 'wf-know-text' }, f.kind ? h('span', { class: 'wf-know-kind', text: f.kind }) : null, f.text),
+  h('span', { class: 'wf-know-meta', text: memoMeta(f) }))));
 
-// One person: name and what they do; opened, the fields, the free items and what was learned.
-function personRow(p, ctx) {
-  const open = view.person === p.id;
-  const meta = [p.affiliation, p.role, p.facts.length ? `分かったこと ${p.facts.length}件` : null].filter(Boolean).join(' · ');
-  const fields = [
-    ['呼び名', p.aliases.join('、')], ['メール', p.email], ['電話', p.phone], ['誕生日', p.birthday && birthdayText(p.birthday)],
-    ...p.items.map((i) => [i.label, i.value]),
-  ].filter(([, v]) => v);
-  return h('div', { class: 'wf-know-person' },
-    h('button', {
-      type: 'button', class: 'wf-know-who', 'aria-expanded': String(open), data: { key: `person-${p.id}` },
-      onclick: () => { view.person = open ? null : p.id; ctx.refresh(); },
-    }, h('span', { class: 'wf-know-name-text', text: p.name }), meta ? h('span', { class: 'wf-know-meta', text: meta }) : null),
-    open ? h('div', { class: 'wf-know-detail' },
-      fields.length ? h('dl', { class: 'wf-know-fields' }, ...fields.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })])) : null,
-      p.facts.length ? factList(p.facts) : null,
-      !fields.length && !p.facts.length ? h('div', { class: 'wf-know-empty', text: '名前のほかは、まだありません' }) : null) : null);
+// The table of people: the fixed columns, then the free columns of this profile, then how many
+// memos. Search, a filter by affiliation and the order are kept per screen, not on the server.
+const people = { query: '', affiliation: '', sort: 'name', desc: false };
+const FIXED = [['name', '名前'], ['affiliation', '所属'], ['role', '役職・担当'], ['email', 'メール'], ['phone', '電話'], ['birthday', '誕生日']];
+const KINDS = ['やりとり', '接し方', 'その他'];
+
+function cell(p, key) {
+  if (key === 'birthday') return birthdayText(p.birthday);
+  if (key.startsWith('item:')) return p.items.find((i) => i.label === key.slice(5))?.value ?? '';
+  return p[key] ?? '';
+}
+
+function peopleTable(list, ctx) {
+  const labels = [...new Set(list.flatMap((p) => p.items.map((i) => i.label)))].sort();
+  // A fixed column nobody has filled stays out, except name.
+  const cols = [
+    ...FIXED.filter(([k]) => k === 'name' || list.some((p) => p[k])),
+    ...labels.map((l) => [`item:${l}`, l]),
+    ['memos', 'メモ'],
+  ];
+  const q = people.query.trim().toLowerCase();
+  let rows = list.filter((p) => (!people.affiliation || p.affiliation === people.affiliation) &&
+    (!q || [p.name, ...p.aliases, p.email, p.phone, p.affiliation, p.role, ...p.items.map((i) => i.value), ...p.memos.map((m) => m.text)]
+      .some((v) => v && v.toLowerCase().includes(q))));
+  const now = ctx.now;
+  const key = (p) => (people.sort === 'memos' ? p.memos.length : people.sort === 'birthday' ? daysToBirthday(p.birthday, now) : cell(p, people.sort));
+  rows = rows.slice().sort((a, b) => {
+    const x = key(a);
+    const y = key(b);
+    const empty = (v) => v === '' || v === Infinity;
+    if (empty(x) !== empty(y)) return empty(x) ? 1 : -1; // blanks last, either way
+    const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'ja');
+    return people.desc ? -c : c;
+  });
+  const affiliations = [...new Set(list.map((p) => p.affiliation).filter(Boolean))].sort();
+  const sortBy = (k) => () => { if (people.sort === k) people.desc = !people.desc; else { people.sort = k; people.desc = false; } ctx.rerender(); };
+  const head = h('tr', {}, ...cols.map(([k, label]) => h('th', { scope: 'col', 'aria-sort': people.sort === k ? (people.desc ? 'descending' : 'ascending') : 'none' },
+    h('button', { type: 'button', class: 'wf-ptable-sort', data: { key: `sort-${k}` }, onclick: sortBy(k) },
+      label, people.sort === k ? h('span', { class: 'wf-ptable-arrow', 'aria-hidden': 'true', text: people.desc ? '▼' : '▲' }) : null))));
+  const body = rows.flatMap((p) => {
+    const open = view.person === p.id;
+    const toggle = () => { view.person = open ? null : p.id; ctx.rerender(); };
+    const tr = h('tr', { class: open ? 'wf-ptable-open' : '' }, ...cols.map(([k]) => {
+      if (k === 'name') {
+        return h('th', { scope: 'row' }, h('button', { type: 'button', class: 'wf-ptable-name', 'aria-expanded': String(open), data: { key: `person-${p.id}` }, onclick: toggle, text: p.name }));
+      }
+      if (k === 'memos') return h('td', { class: 'wf-ptable-num', text: p.memos.length ? String(p.memos.length) : '' });
+      return h('td', { text: cell(p, k) });
+    }));
+    if (!open) return [tr];
+    return [tr, h('tr', { class: 'wf-ptable-detail' }, h('td', { colspan: String(cols.length) }, personDetail(p)))];
+  });
+  return h('div', { class: 'wf-ptable-wrap' },
+    h('div', { class: 'wf-ptable-tools' },
+      h('input', {
+        type: 'search', class: 'wf-ptable-search', placeholder: '名前、所属、メモで探す', value: people.query, 'aria-label': '人を探す', data: { key: 'people-search' },
+        oninput: (e) => { people.query = e.target.value; ctx.rerender(); },
+      }),
+      affiliations.length > 1 ? h('select', {
+        class: 'wf-ptable-select', 'aria-label': '所属で絞る', data: { key: 'people-affiliation' },
+        onchange: (e) => { people.affiliation = e.target.value; ctx.rerender(); },
+      }, h('option', { value: '', text: 'すべての所属', selected: people.affiliation === '' }),
+      ...affiliations.map((a) => h('option', { value: a, text: a, selected: people.affiliation === a }))) : null,
+      h('span', { class: 'wf-muted', text: rows.length === list.length ? `${list.length}人` : `${rows.length} / ${list.length}人` })),
+    h('div', { class: 'wf-ptable-scroll', data: { scroll: `people-${view.profile}` } },
+      h('table', { class: 'wf-ptable' }, h('thead', {}, head), h('tbody', {}, ...body))),
+    rows.length ? null : h('div', { class: 'wf-know-empty', text: '当てはまる人はいません' }));
+}
+
+// Under an opened row: what is not a column of the table, and the memos by kind.
+function personDetail(p) {
+  const extra = [['呼び名', p.aliases.join('、')], ['誕生日', p.birthday && birthdayText(p.birthday)]].filter(([, v]) => v);
+  const byKind = KINDS.map((k) => [k, p.memos.filter((m) => (m.kind ?? 'その他') === k)]).filter(([, m]) => m.length);
+  return h('div', { class: 'wf-know-detail' },
+    extra.length ? h('dl', { class: 'wf-know-fields' }, ...extra.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })])) : null,
+    ...byKind.map(([k, memos]) => h('div', { class: 'wf-know-sub' }, h('h3', { text: k }), memoList(memos.map((m) => ({ ...m, kind: null }))))),
+    p.links?.length ? h('div', { class: 'wf-know-sub' }, h('h3', { text: 'つながり' }),
+      h('ul', { class: 'wf-know-links' }, ...p.links.map((l) => h('li', { text: `${{ goal: 'ゴール', task: 'タスク', booking: '予定' }[l.kind]}: ${l.title}` })))) : null,
+    !extra.length && !byKind.length && !p.links?.length ? h('div', { class: 'wf-know-empty', text: '表のほかには、まだありません' }) : null);
 }
 
 function peopleSection(one, ctx) {
-  const people = one.people?.people ?? [];
+  const list = one.people?.people ?? [];
   const waiting = one.people?.unassigned ?? [];
   const old = one.people_md?.text?.trim() ? one.people_md : null;
   return h('section', { class: 'wf-know-sec' },
-    h('div', { class: 'wf-group-head' }, h('h2', { text: '人' }), people.length ? h('span', { class: 'wf-group-count', text: `${people.length}人` }) : null),
-    people.length ? h('div', { class: 'wf-know-people' }, ...people.map((p) => personRow(p, ctx))) : h('div', { class: 'wf-know-empty', text: 'まだいません' }),
+    h('div', { class: 'wf-group-head' }, h('h2', { text: '人' })),
+    list.length ? peopleTable(list, ctx) : h('div', { class: 'wf-know-empty', text: 'まだいません' }),
     waiting.length ? h('div', { class: 'wf-know-sub' },
-      h('h3', { text: 'だれのことか、まだ決まっていないこと' }), factList(waiting)) : null,
+      h('h3', { text: 'だれのことか、まだ決まっていないメモ' }), memoList(waiting)) : null,
     old ? h('div', { class: 'wf-know-sub' },
       h('h3', { text: '取り込む前の people.md' }),
       h('p', { class: 'wf-muted', text: '秘書が人に取り込むまで、前の形のまま表示しています' }),

@@ -560,7 +560,7 @@ test('the badge on 秘書: what the secretary said since the person last saw the
 test('ナレッジ: the profiles with their counts, one profile\'s files, and a file split out of them, read only', async (t) => {
   const { base, home, ledger } = await start(t);
   fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'knowledge.md'), '- 2026-10-27 「本人の言葉」 苗は朝に水をやる (laptop)\n');
-  const person = ledger.people.create({ name: '田中さん', role: '園芸部の部長', items: { 好きなもの: 'トマト' }, add_facts: [{ text: '朝に来る', mark: '未確認' }] }, { profile: 'hobby' }, { actor: 'human' });
+  const person = ledger.people.create({ name: '田中さん', role: '園芸部の部長', items: { 好きなもの: 'トマト' }, add_memos: [{ text: '朝に来る', mark: '未確認' }] }, { profile: 'hobby' }, { actor: 'human' });
   ledger.people.learn({ profile: 'hobby', text: '鈴木さん: 新しく来た' }, { actor: 'human' });
   ledger.people.create({ name: '別の領域の人' }, { profile: 'research' }, { actor: 'human' });
   fs.mkdirSync(path.join(home, 'profiles', 'hobby', 'procedures'));
@@ -574,8 +574,8 @@ test('ナレッジ: the profiles with their counts, one profile\'s files, and a 
   assert.equal(one.profile, 'hobby');
   assert.match(one.knowledge.text, /苗は朝に水をやる/);
   assert.deepEqual(one.files.procedures, ['procedures/植え替え.md']);
-  // People come from the ledger, in full, with only this profile's items and facts.
-  assert.deepEqual(one.people.people.map((p) => [p.id, p.role, p.items, p.facts.map((f) => f.text)]), [[person.id, '園芸部の部長', [{ label: '好きなもの', value: 'トマト' }], ['朝に来る']]]);
+  // People come from the ledger, in full, with only this profile's items and memos.
+  assert.deepEqual(one.people.people.map((p) => [p.id, p.role, p.items, p.memos.map((f) => f.text)]), [[person.id, '園芸部の部長', [{ label: '好きなもの', value: 'トマト' }], ['朝に来る']]]);
   assert.deepEqual(one.people.unassigned.map((f) => f.text), ['鈴木さん: 新しく来た']);
   assert.equal(one.people_md, null);
   const file = await (await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('procedures/植え替え.md')}`)).json();

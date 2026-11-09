@@ -115,7 +115,7 @@ test('sort_inbox lists the inbox, moves, merges and drops entries, and keeps the
 
   assert.equal(read(dir, 'inbox.md'), '');
   assert.match(read(dir, 'knowledge.md'), /^# 決まり\n\n- 2026-10-01 「本人の言葉」 共有フォルダは触らない \(laptop\)\n- \d{4}-\d{2}-\d{2} 「未確認」 発表の練習は前日にする \(laptop \/ t_1\)\n$/);
-  // A person's fact goes to the ledger's people, its source kept apart; checked leaves no mark.
+  // A person's memo goes to the ledger's people, its source kept apart; checked leaves no mark.
   assert.equal(fs.existsSync(path.join(dir, 'people.md')), false);
   assert.deepEqual(ledger.people.list({ profile: '研究' }).unassigned.map((f) => [f.text, f.mark, f.source]), [['田中先生は図を先に見る', null, 'laptop / 受信箱から']]);
   assert.match(read(dir, 'knowledge/提出.md'), /^- \d{4}-\d{2}-\d{2} 「未確認」 締切は金曜の17時 \(secretary \/ 受信箱から\)\n$/);
@@ -126,7 +126,7 @@ test('sort_inbox lists the inbox, moves, merges and drops entries, and keeps the
   assert.equal(rec.changes.moved[3].reason, 'その日かぎり');
   assert.equal(rec.changes.moved[3].from[0], '- 2026-11-05 今日はビルドが遅かった (laptop)');
   // What went to people keeps no text there: people can be forgotten, records cannot.
-  assert.deepEqual(Object.keys(rec.changes.moved[1]).sort(), ['entries', 'fact', 'person', 'to']);
+  assert.deepEqual(Object.keys(rec.changes.moved[1]).sort(), ['entries', 'memo', 'person', 'to']);
   assert.doesNotMatch(JSON.stringify(rec.changes), /田中先生/);
 
   // context lists the new topic file.

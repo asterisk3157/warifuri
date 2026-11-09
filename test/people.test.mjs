@@ -1,5 +1,5 @@
 // Tests for 人 (src/ledger/people.mjs) and its tools: one entry per person, fields every profile
-// they are in sees, items and facts only in the profile they were written in, matching a note
+// they are in sees, items and memos only in the profile they were written in, matching a note
 // to the person it begins with, birthdays, merging two entries, and forgetting for good.
 // Everyone here is made up.
 
@@ -73,34 +73,34 @@ test('person: made with its fields, refused in Japanese, and not made twice by n
   ledger.close();
 });
 
-test('person: fixed fields are seen from each profile the person is in; items and facts only from their own', () => {
+test('person: fixed fields are seen from each profile the person is in; items and memos only from their own', () => {
   const ledger = openLedger(':memory:');
-  const p = ledger.people.create({ name: '佐藤さん', items: { 好きなもの: '紅茶' }, add_facts: [{ text: '朝が早い', mark: '未確認' }], source: 'laptop' }, LAB, W);
+  const p = ledger.people.create({ name: '佐藤さん', items: { 好きなもの: '紅茶' }, add_memos: [{ text: '朝が早い', mark: '未確認' }], source: 'laptop' }, LAB, W);
   assert.throws(() => ledger.people.get(p.id, CLUB), /いません/);
   assert.throws(() => ledger.people.update(p.id, { add_profiles: ['サークル'] }, LAB, W), /いまのプロフィール\(研究\)だけ/);
   ledger.people.update(p.id, { add_profiles: ['サークル'] }, { ...LAB, secretary: true }, W);
-  ledger.people.update(p.id, { role: '部長', items: { 好きなもの: 'ケーキ' }, add_facts: [{ text: '甘い物が好き' }] }, CLUB, W);
+  ledger.people.update(p.id, { role: '部長', items: { 好きなもの: 'ケーキ' }, add_memos: [{ text: '甘い物が好き' }] }, CLUB, W);
 
   const inLab = ledger.people.get(p.id, LAB);
   const inClub = ledger.people.get(p.id, CLUB);
   assert.equal(inLab.role, '部長');
   assert.deepEqual(inLab.items, [{ label: '好きなもの', value: '紅茶' }]);
   assert.deepEqual(inClub.items, [{ label: '好きなもの', value: 'ケーキ' }]);
-  assert.deepEqual(inLab.facts.map((f) => [f.text, f.mark, f.source]), [['朝が早い', '未確認', 'laptop']]);
-  assert.deepEqual(inClub.facts.map((f) => f.text), ['甘い物が好き']);
-  // The secretary with no profile sees all, each item and fact with its profile.
+  assert.deepEqual(inLab.memos.map((f) => [f.text, f.mark, f.source]), [['朝が早い', '未確認', 'laptop']]);
+  assert.deepEqual(inClub.memos.map((f) => f.text), ['甘い物が好き']);
+  // The secretary with no profile sees all, each item and memo with its profile.
   const all = ledger.people.get(p.id, ALL);
   assert.deepEqual(all.profiles, ['サークル', '研究']);
   assert.deepEqual(all.items.map((i) => i.profile).sort(), ['サークル', '研究']);
-  assert.equal(all.facts.length, 2);
+  assert.equal(all.memos.length, 2);
 
-  // Field by field: null clears, items null removes, a fact is rewritten; the last profile stays.
+  // Field by field: null clears, items null removes, a memo is rewritten; the last profile stays.
   ledger.people.update(p.id, { role: null, items: { 好きなもの: null } }, CLUB, W);
-  const factId = inLab.facts[0].id;
-  ledger.people.update(p.id, { edit_facts: [{ id: factId, text: '朝7時には来る', mark: null }] }, LAB, W);
-  assert.throws(() => ledger.people.update(p.id, { edit_facts: [{ id: factId, text: 'x' }] }, CLUB, W), /ありません/);
+  const memoId = inLab.memos[0].id;
+  ledger.people.update(p.id, { edit_memos: [{ id: memoId, text: '朝7時には来る', mark: null }] }, LAB, W);
+  assert.throws(() => ledger.people.update(p.id, { edit_memos: [{ id: memoId, text: 'x' }] }, CLUB, W), /ありません/);
   assert.deepEqual([ledger.people.get(p.id, CLUB).role, ledger.people.get(p.id, CLUB).items], [null, []]);
-  assert.deepEqual(ledger.people.get(p.id, LAB).facts.map((f) => [f.text, f.mark]), [['朝7時には来る', null]]);
+  assert.deepEqual(ledger.people.get(p.id, LAB).memos.map((f) => [f.text, f.mark]), [['朝7時には来る', null]]);
   ledger.people.update(p.id, { remove_profiles: ['サークル'] }, CLUB, W);
   assert.throws(() => ledger.people.update(p.id, { remove_profiles: ['研究'] }, LAB, W), /forget を使います/);
   assert.throws(() => ledger.people.update(p.id, {}, LAB, W), /直す項目を1つ以上/);
@@ -115,7 +115,7 @@ test('person: numbers that prove who someone is, secrets, health and beliefs are
     { items: { 口座: 'x' } },
     { items: { 持病: 'x' } },
     { items: { メモ: '4111 1111 1111 1111' } },
-    { add_facts: [{ text: '番号は 1234-5678-9012 だった' }] },
+    { add_memos: [{ text: '番号は 1234-5678-9012 だった' }] },
   ]) {
     assert.throws(() => ledger.people.update(p.id, input, LAB, W), LedgerError, JSON.stringify(input));
   }
@@ -123,7 +123,7 @@ test('person: numbers that prove who someone is, secrets, health and beliefs are
   ledger.close();
 });
 
-test('learn: a fact goes to the person it begins with, or waits for one; assign_facts places it', () => {
+test('learn: a memo goes to the person it begins with, or waits for one; assign_memos places it', () => {
   const ledger = openLedger(':memory:');
   const a = ledger.people.create({ name: '田中先生', aliases: ['田中'] }, LAB, W);
   const b = ledger.people.create({ name: '田中 太郎', aliases: ['太郎さん'] }, LAB, W);
@@ -137,14 +137,14 @@ test('learn: a fact goes to the person it begins with, or waits for one; assign_
   assert.throws(() => ledger.people.learn({ profile: 'サークル', text: 'x', person: b.id }, W), /いません/);
 
   const list = ledger.people.list(LAB);
-  assert.deepEqual(list.people.map((p) => [p.name, p.facts]), [['田中 太郎', 3], ['田中先生', 1]]);
+  assert.deepEqual(list.people.map((p) => [p.name, p.memos]), [['田中 太郎', 3], ['田中先生', 1]]);
   assert.deepEqual(list.unassigned.map((f) => f.text), ['鈴木さん: 新しく来た']);
   assert.deepEqual(ledger.people.list(LAB, { query: '太郎' }).people.map((p) => p.id), [b.id]);
 
-  const c = ledger.people.create({ name: '鈴木さん', assign_facts: [waiting.fact] }, LAB, W);
-  assert.deepEqual(ledger.people.get(c.id, LAB).facts.map((f) => f.text), ['鈴木さん: 新しく来た']);
+  const c = ledger.people.create({ name: '鈴木さん', assign_memos: [waiting.memo] }, LAB, W);
+  assert.deepEqual(ledger.people.get(c.id, LAB).memos.map((f) => f.text), ['鈴木さん: 新しく来た']);
   assert.equal(ledger.people.list(LAB).unassigned.length, 0);
-  assert.throws(() => ledger.people.update(a.id, { assign_facts: [waiting.fact] }, LAB, W), /もう人に付いています/);
+  assert.throws(() => ledger.people.update(a.id, { assign_memos: [waiting.memo] }, LAB, W), /もう人に付いています/);
   ledger.close();
 });
 
@@ -168,18 +168,18 @@ test('birthdays: the ones coming within the days asked, soonest first, across th
   common.close();
 });
 
-test('merge_people: one entry is left, with both names, every fact, profile and link; differing fields are kept from into', () => {
+test('merge_people: one entry is left, with both names, every memo, profile and link; differing fields are kept from into', () => {
   const ledger = openLedger(':memory:');
   const goal = ledger.createGoal({ title: '発表', mode: 'ai_worker' }, W);
-  const into = ledger.people.create({ name: '田中先生', email: 'a@example.com', add_facts: [{ text: '図を先に見る' }] }, LAB, W);
-  const from = ledger.people.create({ name: 'タナカ', aliases: ['T先生'], email: 'b@example.com', role: '教授', add_facts: [{ text: '朝が早い' }], link: [{ kind: 'goal', id: goal.id }], items: { 好きなもの: '紅茶' } }, CLUB, W);
+  const into = ledger.people.create({ name: '田中先生', email: 'a@example.com', add_memos: [{ text: '図を先に見る' }] }, LAB, W);
+  const from = ledger.people.create({ name: 'タナカ', aliases: ['T先生'], email: 'b@example.com', role: '教授', add_memos: [{ text: '朝が早い' }], link: [{ kind: 'goal', id: goal.id }], items: { 好きなもの: '紅茶' } }, CLUB, W);
   ledger.people.update(from.id, { add_profiles: ['研究'] }, { ...CLUB, secretary: true }, W);
   const out = ledger.people.merge(into.id, from.id, LAB, W);
   assert.deepEqual(out.filled, ['role']);
   assert.deepEqual(out.kept_both, ['email']);
   const all = ledger.people.get(into.id, ALL);
   assert.deepEqual([all.aliases, all.email, all.role, all.profiles], [['タナカ', 'T先生'], 'a@example.com', '教授', ['サークル', '研究']]);
-  assert.equal(all.facts.length, 2);
+  assert.equal(all.memos.length, 2);
   assert.deepEqual(all.links, [{ kind: 'goal', id: goal.id, title: '発表' }]);
   assert.deepEqual(all.items.map((i) => [i.profile, i.label]), [['サークル', '好きなもの']]);
   assert.throws(() => ledger.people.get(from.id, ALL), /いません/);
@@ -194,16 +194,16 @@ test('forget: the person and everything about them are deleted for good; records
   const task = ledger.createTask({ title: '打ち合わせ', mode: 'ai_worker' }, W);
   const p = ledger.people.create({
     name: '消える人', email: 'gone@example.com', items: { 好きなもの: 'ひみつの果物' },
-    add_facts: [{ text: 'ひみつの話' }], link: [{ kind: 'task', id: task.id }],
+    add_memos: [{ text: 'ひみつの話' }], link: [{ kind: 'task', id: task.id }],
   }, LAB, W);
-  const other = ledger.people.create({ name: '残る人', add_facts: [{ text: '残す話' }, { text: '消す話' }] }, LAB, W);
+  const other = ledger.people.create({ name: '残る人', add_memos: [{ text: '残す話' }, { text: '消す話' }] }, LAB, W);
   const out = ledger.people.forget({ person: p.id }, LAB, W);
-  assert.deepEqual(out, { person: p.id, facts: 1 });
-  const wrongFact = ledger.people.get(other.id, LAB).facts.find((f) => f.text === '消す話');
-  assert.deepEqual(ledger.people.forget({ facts: [wrongFact.id] }, LAB, W), { person: null, facts: 1 });
-  assert.deepEqual(ledger.people.get(other.id, LAB).facts.map((f) => f.text), ['残す話']);
+  assert.deepEqual(out, { person: p.id, memos: 1 });
+  const wrongMemo = ledger.people.get(other.id, LAB).memos.find((f) => f.text === '消す話');
+  assert.deepEqual(ledger.people.forget({ memos: [wrongMemo.id] }, LAB, W), { person: null, memos: 1 });
+  assert.deepEqual(ledger.people.get(other.id, LAB).memos.map((f) => f.text), ['残す話']);
   assert.throws(() => ledger.people.forget({}, LAB, W), /消す人\(person\)か/);
-  assert.throws(() => ledger.people.forget({ facts: [wrongFact.id] }, LAB, W), /ありません/);
+  assert.throws(() => ledger.people.forget({ memos: [wrongMemo.id] }, LAB, W), /ありません/);
 
   const recs = [...ledger.records(p.id), ...ledger.records(other.id)];
   assert.deepEqual(ledger.records(p.id).map((r) => r.action), ['create', 'forget']);
@@ -249,10 +249,10 @@ async function start(t, { secretaryDevice } = {}) {
 
 test('the people tools: by place or profile, the secretary sees all, note finds the person, forget needs the person\'s word', async (t) => {
   const { ledger, home, call, secretary } = await start(t, { secretaryDevice: 'secretary' });
-  const made = await call('person', { place: '/home/alex/lab', name: '田中先生', aliases: ['田中'], birthday: '12-24', items: { 好きなもの: '紅茶' }, add_facts: [{ text: '図を先に見る' }] });
+  const made = await call('person', { place: '/home/alex/lab', name: '田中先生', aliases: ['田中'], birthday: '12-24', items: { 好きなもの: '紅茶' }, add_memos: [{ text: '図を先に見る' }] });
   assert.equal(made.res.isError, undefined, made.text);
   const id = made.data.id;
-  assert.deepEqual(made.data.facts.map((f) => [f.mark, f.source]), [['未確認', 'laptop']]);
+  assert.deepEqual(made.data.memos.map((f) => [f.mark, f.source]), [['未確認', 'laptop']]);
   assert.match((await call('person', { profile: '研究', name: '田中' })).text, /同じ名前かメールの人がもういます/);
 
   // note and close's learned_people land on the person the line begins with.
@@ -262,13 +262,13 @@ test('the people tools: by place or profile, the secretary sees all, note finds 
   assert.deepEqual(closed.noted_people.map((n) => n.person?.id ?? null), [id, null]);
 
   const one = (await call('people', { profile: '研究', id })).data;
-  assert.deepEqual(one.facts.map((f) => f.mark), ['未確認', '本人の言葉', '未確認']);
+  assert.deepEqual(one.memos.map((f) => f.mark), ['未確認', '本人の言葉', '未確認']);
   const list = (await call('people', { place: '/home/alex/lab', birthdays_within: 366 })).data;
   assert.deepEqual([list.people.length, list.unassigned.length, list.birthdays[0].name], [1, 1, '田中先生']);
   assert.match((await call('people', {})).text, /place か profile を渡します/);
   assert.equal((await call('people', { profile: 'サークル', id })).res.isError, true);
   assert.deepEqual((await secretary('people', {})).data.people[0].profiles, ['研究']);
-  // context gives the short lines, not the facts.
+  // context gives the short lines, not the memos.
   assert.equal((await call('context', { profile: '研究' })).data.people.people[0].name, '田中先生');
 
   const twin = (await call('person', { profile: '研究', name: '田中先生(別アドレス)', email: 't@example.com' })).data;
@@ -276,9 +276,9 @@ test('the people tools: by place or profile, the secretary sees all, note finds 
   assert.equal(merged.person.email, 't@example.com');
 
   // Importing people.md: dates and marks carried over, then the file renamed by the secretary only.
-  const old = (await call('person', { profile: '研究', name: '森先生', add_facts: [{ text: '相談はゼミの後', mark: '本人の言葉', learned_on: '2026-10-24' }], source: 'people.md' })).data;
-  assert.deepEqual(old.facts.map((f) => [f.learned_on, f.mark, f.source]), [['2026-10-24', '本人の言葉', 'people.md']]);
-  assert.match((await call('person', { profile: '研究', id: old.id, add_facts: [{ text: 'x', learned_on: '10/24' }] })).text, /learned_on は YYYY-MM-DD/);
+  const old = (await call('person', { profile: '研究', name: '森先生', add_memos: [{ text: '相談はゼミの後', mark: '本人の言葉', learned_on: '2026-10-24' }], source: 'people.md' })).data;
+  assert.deepEqual(old.memos.map((f) => [f.learned_on, f.mark, f.source]), [['2026-10-24', '本人の言葉', 'people.md']]);
+  assert.match((await call('person', { profile: '研究', id: old.id, add_memos: [{ text: 'x', learned_on: '10/24' }] })).text, /learned_on は YYYY-MM-DD/);
   const dir = path.join(home, 'profiles', '研究');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'people.md'), '- 2026-10-24 「本人の言葉」 森先生: 相談はゼミの後\n');
@@ -290,6 +290,41 @@ test('the people tools: by place or profile, the secretary sees all, note finds 
   assert.match((await secretary('finish_people_import', { profile: '研究' })).text, /people\.md がありません/);
 
   assert.match((await call('forget_person', { profile: '研究', person: id })).text, /本人が消してと言ったときだけ/);
-  assert.deepEqual((await call('forget_person', { profile: '研究', person: id, by_person: true })).data, { person: id, facts: 3 });
+  assert.deepEqual((await call('forget_person', { profile: '研究', person: id, by_person: true })).data, { person: id, memos: 3 });
   assert.deepEqual((await call('people', { profile: '研究' })).data.people.map((p) => p.name), ['森先生']);
+});
+
+test('the table: one column per thing, close names meet, filters by column, and a memo becomes a column', () => {
+  const ledger = openLedger(':memory:');
+  const a = ledger.people.create({ name: '佐藤さん', affiliation: '2年', items: { 好きなもの: '紅茶' } }, CLUB, W);
+  const b = ledger.people.create({ name: '鈴木さん', affiliation: '1年', items: { 好きな物: 'ケーキ', ' 好きなモノ ': 'x' } }, CLUB, W);
+  // 好きな物 and 好きなモノ are written as the column the profile already has.
+  assert.deepEqual(b.renamed_labels, [{ given: '好きな物', as: '好きなもの' }, { given: '好きなモノ', as: '好きなもの' }]);
+  assert.deepEqual(ledger.people.get(b.id, CLUB).items, [{ label: '好きなもの', value: 'x' }]);
+  ledger.people.create({ name: '山本さん' }, CLUB, W);
+
+  const table = ledger.people.list(CLUB);
+  assert.deepEqual(table.columns.free, [{ label: '好きなもの', count: 2 }]);
+  assert.equal(table.columns.fixed.includes('birthday'), true);
+  assert.deepEqual(table.people.map((p) => [p.name, p.items]), [['佐藤さん', { 好きなもの: '紅茶' }], ['山本さん', {}], ['鈴木さん', { 好きなもの: 'x' }]]);
+  const names = (where, query) => ledger.people.list(CLUB, { where, query }).people.map((p) => p.name);
+  assert.deepEqual(names({ affiliation: '2' }), ['佐藤さん']);
+  assert.deepEqual(names({ 好きな物: '' }), ['佐藤さん', '鈴木さん']); // filled, by a close name
+  assert.deepEqual(names({ 好きなもの: '紅茶', affiliation: '2年' }), ['佐藤さん']);
+  assert.deepEqual(names(undefined, '紅茶'), ['佐藤さん']);
+  assert.throws(() => ledger.people.list(CLUB, { where: { affiliation: 1 } }), /文字列です/);
+
+  // Memos have a kind; one that is really a column moves there.
+  const withMemos = ledger.people.update(a.id, { add_memos: [{ text: '定例のあとに相談した', kind: 'やりとり' }, { text: '3年', kind: 'その他' }, { text: '朝は返事が遅い', kind: '接し方' }] }, CLUB, W);
+  assert.deepEqual(withMemos.memos.map((m) => m.kind), ['やりとり', 'その他', '接し方']);
+  assert.throws(() => ledger.people.update(a.id, { add_memos: [{ text: 'x', kind: '気分' }] }, CLUB, W), /kind は やりとり/);
+  const grade = withMemos.memos.find((m) => m.text === '3年');
+  const promoted = ledger.people.update(a.id, { promote_memos: [{ id: grade.id, label: '学年' }] }, CLUB, W);
+  assert.deepEqual(promoted.items.find((i) => i.label === '学年'), { label: '学年', value: '3年' });
+  assert.deepEqual(promoted.memos.map((m) => m.text), ['定例のあとに相談した', '朝は返事が遅い']);
+  const tip = promoted.memos.find((m) => m.kind === '接し方');
+  assert.equal(ledger.people.update(a.id, { edit_memos: [{ id: tip.id, kind: 'その他' }] }, CLUB, W).memos.find((m) => m.id === tip.id).kind, 'その他');
+  assert.throws(() => ledger.people.update(a.id, { promote_memos: [{ id: tip.id }] }, CLUB, W), /移す先の列/);
+  assert.equal(ledger.people.learn({ profile: 'サークル', text: '佐藤さん: 来週は休み', kind: 'やりとり' }, W).person.id, a.id);
+  ledger.close();
 });

@@ -559,18 +559,19 @@ export const MIGRATIONS = [
     PRIMARY KEY (person_id, profile, label)
   );
 
-  CREATE TABLE IF NOT EXISTS person_facts (
+  CREATE TABLE IF NOT EXISTS person_memos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id  TEXT REFERENCES people(id) ON DELETE CASCADE,
     profile    TEXT NOT NULL,
     text       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'その他' CHECK (kind IN ('やりとり','接し方','その他')),
     mark       TEXT CHECK (mark IS NULL OR mark IN ('本人の言葉','未確認')),
     source     TEXT,
     learned_on TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS person_facts_person ON person_facts(person_id);
-  CREATE INDEX IF NOT EXISTS person_facts_profile ON person_facts(profile);
+  CREATE INDEX IF NOT EXISTS person_memos_person ON person_memos(person_id);
+  CREATE INDEX IF NOT EXISTS person_memos_profile ON person_memos(profile);
 
   CREATE TABLE IF NOT EXISTS person_links (
     person_id  TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,

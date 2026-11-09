@@ -812,14 +812,26 @@ button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight:
 .wf-rich ul, .wf-rich ol { padding-left: 1.2em; }
 .wf-rich a { color: var(--accent); }
 .wf-know-empty { font-size: 14px; color: var(--sub); }
-.wf-know-people { display: flex; flex-direction: column; }
-.wf-know-person { display: flex; flex-direction: column; border-top: 1px solid var(--hair); }
-.wf-know-person:first-child { border-top: none; }
-.wf-know-who { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font: inherit; color: inherit; background: none; border: none; padding: 10px 0; cursor: pointer; }
-.wf-know-name-text { font-size: 15px; font-weight: 600; color: var(--accent); }
-.wf-know-detail { display: flex; flex-direction: column; gap: 10px; padding: 0 0 12px; }
+.wf-ptable-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wf-ptable-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wf-ptable-search { flex: 1 1 180px; min-width: 0; font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--hair); background: transparent; color: inherit; }
+.wf-ptable-select { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--hair); background: transparent; color: inherit; }
+.wf-ptable-scroll { overflow-x: auto; }
+.wf-ptable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.wf-ptable th, .wf-ptable td { text-align: left; padding: 7px 10px 7px 0; border-top: 1px solid var(--hair); vertical-align: top; white-space: nowrap; }
+.wf-ptable td { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+.wf-ptable thead th { border-top: none; font-weight: 600; color: var(--sub); font-size: 13px; }
+.wf-ptable-sort { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; display: inline-flex; gap: 4px; align-items: baseline; }
+.wf-ptable-arrow { font-size: 10px; }
+.wf-ptable-name { font: inherit; font-weight: 600; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
+.wf-ptable-num { text-align: right; color: var(--sub); }
+.wf-ptable-open > * { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.wf-ptable-detail td { white-space: normal; max-width: none; padding: 4px 4px 12px; border-top: none; }
+.wf-know-detail { display: flex; flex-direction: column; gap: 10px; }
 .wf-know-fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
 .wf-know-fields dt { color: var(--sub); }
 .wf-know-fields dd { margin: 0; overflow-wrap: anywhere; }
+.wf-know-kind { font-size: 12px; color: var(--sub); border: 1px solid var(--hair); border-radius: 6px; padding: 0 6px; margin-right: 6px; }
+.wf-know-links { margin: 0; padding-left: 1.2em; font-size: 14px; }
 .wf-know-sub { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 .wf-know-sub h3 { font-size: 14px; font-weight: 600; color: var(--sub); margin: 0; }
