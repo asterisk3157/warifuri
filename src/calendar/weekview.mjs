@@ -1,7 +1,8 @@
 // Draws some days of the calendar as an SVG picture: the fixed appointments in grey and the
 // time taken for tasks and habits in the colour of their profile, side by side where they
-// overlap, the way a calendar app shows a week. Bookings to point at (the ones just changed)
-// get a thick outline. Pure: data in, SVG text out (svgToPng in image.mjs makes a PNG).
+// overlap, the way a calendar app shows a week. The week type (where the person is at set
+// times) is a light band behind them. Bookings to point at (the ones just changed) get a thick
+// outline. Pure: data in, SVG text out (svgToPng in image.mjs makes a PNG).
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const FONT = "'Noto Sans CJK JP', 'Hiragino Sans', 'Yu Gothic', sans-serif";
@@ -80,8 +81,9 @@ const timeOf = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
 // The days from..to (local midnights) and the bookings cut to them, in the local time of this
 // machine. bookings: as schedule returns them. colors: profile name → '#rrggbb'.
+// bands: the week type on those days (weekBands in src/ledger/settings.mjs).
 // Returns { dates, entries, allDay } for renderWeek.
-export function weekData({ from, to, bookings, colors = {}, marks = [] }) {
+export function weekData({ from, to, bookings, colors = {}, marks = [], bands = [] }) {
   const start = new Date(Date.parse(from));
   const first = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const dates = [];
@@ -106,11 +108,18 @@ export function weekData({ from, to, bookings, colors = {}, marks = [] }) {
       entries.push({ date: dateOf(day), start: timeOf(from2), end: to2, title: b.title, color, label, mark: marks.includes(b.id) });
     }
   }
+  for (const band of bands) {
+    const s = new Date(Date.parse(band.starts_at));
+    const e = new Date(Date.parse(band.ends_at));
+    const end = dateOf(e) === dateOf(s) ? timeOf(e) : '24:00';
+    entries.push({ date: dateOf(s), start: timeOf(s), end, title: band.profile ? `${band.place} · ${band.profile}` : band.place, container: true });
+  }
   return { dates: dates.map(dateOf), entries, allDay };
 }
 
 // dates:   the columns, 'YYYY-MM-DD'
-// entries: { date, start, end, title, color?, label?, mark? }; color absent for a fixed one
+// entries: { date, start, end, title, color?, label?, mark?, container? }; color absent for a
+//          fixed one; container: a band of the week type, behind the rest
 // allDay:  { date, title }
 // today:   'YYYY-MM-DD'
 export function renderWeek({ dates, entries, allDay = [], today }) {
@@ -170,7 +179,16 @@ export function renderWeek({ dates, entries, allDay = [], today }) {
       .filter((e) => e.date === date)
       .map((e) => ({ ...e, s: toMin(e.start), e: toMin(e.end) }))
       .filter((e) => e.e > e.s);
-    for (const entry of assignLanes(day)) {
+    // A band of the week type (time at the lab) is drawn light, behind whatever is inside it.
+    for (const c of day.filter((e) => e.container)) {
+      const cy = y(c.s);
+      out.push(
+        `<rect x="${x(i) + 2}" y="${cy + 1}" width="${colW - 4}" height="${y(c.e) - cy - 2}" rx="5" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1" stroke-dasharray="4 3"/>`,
+        `<text x="${x(i) + colW - 8}" y="${y(c.e) - 8}" text-anchor="end" font-size="12" fill="#6B7280">${esc(clip(c.title, colW - 16, 12))}</text>`,
+      );
+    }
+
+    for (const entry of assignLanes(day.filter((e) => !e.container))) {
       const inset = entry.color ? 8 : 3;
       const laneW = (colW - inset - 3) / entry.lanes;
       const bx = x(i) + inset + entry.lane * laneW;
@@ -197,15 +215,16 @@ export function renderWeek({ dates, entries, allDay = [], today }) {
   const kinds = new Map();
   for (const e of entries) if (e.color && e.label && !kinds.has(e.label)) kinds.set(e.label, e.color);
   const legend = [
-    ...(entries.some((e) => !e.color) || !entries.length ? [{ label: '固定の予定', fill: FIXED.fill }] : []),
+    ...(entries.some((e) => !e.color && !e.container) || !entries.length ? [{ label: '固定の予定', fill: FIXED.fill }] : []),
     ...[...kinds].map(([label, fill]) => ({ label, fill })),
+    ...(entries.some((e) => e.container) ? [{ label: '週の型', fill: '#F3F4F6', stroke: '#9CA3AF', dash: true }] : []),
     ...(entries.some((e) => e.mark) ? [{ label: '今回の変更', fill: '#FFFFFF', stroke: MARK }] : []),
   ];
   let lx = GUTTER;
   const ly = top + gridH + 14;
   for (const item of legend) {
     out.push(
-      `<rect x="${lx}" y="${ly}" width="14" height="14" rx="3" fill="${item.fill}"${item.stroke ? ` stroke="${item.stroke}" stroke-width="3"` : ''}/>`,
+      `<rect x="${lx}" y="${ly}" width="14" height="14" rx="3" fill="${item.fill}"${item.stroke ? ` stroke="${item.stroke}" stroke-width="${item.dash ? 1 : 3}"${item.dash ? ' stroke-dasharray="3 2"' : ''}` : ''}/>`,
       `<text x="${lx + 20}" y="${ly + 12}" font-size="13" fill="#374151">${esc(item.label)}</text>`,
     );
     lx += 20 + textWidth(item.label, 13) + 22;

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
-import { readSettings, writeSettings, LIMIT_DEFAULTS } from '../src/ledger/settings.mjs';
+import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../src/ledger/settings.mjs';
 import { createServer } from '../src/server/mcp.mjs';
 
 const AGENT = { actor: 'device-key', device: 'laptop' };
@@ -37,7 +37,7 @@ test('unset settings read as their defaults, and say which fields are unset', (t
   assert.deepEqual(s.limits, { day_max_hours: 8, block_min_minutes: 30, block_max_minutes: 120, earliest: '09:00', latest: '21:00' });
   assert.deepEqual(s.limits, LIMIT_DEFAULTS);
   assert.deepEqual(s.calendar, { skip: [] });
-  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'] });
+  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'], week: ['slots'] });
   // The profile written by the Web screen is a different section and is not touched.
   L.setSettings('profile', { name: 'Aoi' }, AGENT);
   assert.deepEqual(readSettings(L).life, { rules: [] });
@@ -54,6 +54,28 @@ test('calendar: the events not taken in, by title and calendar, checked and reco
   assert.throws(() => writeSettings(L, { calendar: { skip: [{ title: 'A', when: 'x' }] } }, {}, AGENT), /when は書けません/);
   assert.throws(() => writeSettings(L, { calendar: { skip: 'x' } }, {}, AGENT), /calendar.skip は配列です/);
   assert.deepEqual(writeSettings(L, { calendar: null }, {}, AGENT).calendar, { skip: [] });
+});
+
+test('week: where the person is at set times, checked, recorded, and laid on days as bands', (t) => {
+  const L = fresh(t);
+  const slots = [
+    { days: ['木', '月'], start: '13:00', end: '18:00', place: '研究室', profile: '研究' },
+    { days: 'weekdays', start: '09:00', end: '10:00', place: '家' },
+  ];
+  const out = writeSettings(L, { week: { slots } }, {}, AGENT);
+  assert.deepEqual(out.week.slots[0], { days: ['月', '木'], start: '13:00', end: '18:00', place: '研究室', profile: '研究' });
+  assert.deepEqual(out.week.slots[1], { days: 'weekdays', start: '09:00', end: '10:00', place: '家' });
+  assert.deepEqual(L.records('week').map((r) => [r.entity, r.action]), [['settings', 'update']]);
+  assert.throws(() => writeSettings(L, { week: { slots: [{ days: ['月曜'], start: '13:00', end: '18:00', place: 'x' }] } }, {}, AGENT), /days は "daily"、"weekdays" か/);
+  assert.throws(() => writeSettings(L, { week: { slots: [{ days: 'daily', start: '18:00', end: '13:00', place: 'x' }] } }, {}, AGENT), /start は end より前にします/);
+  assert.throws(() => writeSettings(L, { week: { slots: [{ days: 'daily', start: '9:00', end: '13:00', place: 'x' }] } }, {}, AGENT), /start は HH:MM/);
+  assert.throws(() => writeSettings(L, { week: { slots: [{ days: 'daily', start: '09:00', end: '13:00', place: '' }] } }, {}, AGENT), /place が空です/);
+  // 2026-11-09 is a Monday: the lab in the afternoon, home in the morning; Sunday has nothing.
+  const bands = weekBands(out.week.slots, new Date(2026, 10, 8).getTime(), new Date(2026, 10, 10).getTime());
+  assert.deepEqual(bands.map((b) => [new Date(b.starts_at).getDate(), new Date(b.starts_at).getHours(), new Date(b.ends_at).getHours(), b.place, b.profile]), [
+    [9, 9, 10, '家', null],
+    [9, 13, 18, '研究室', '研究'],
+  ]);
 });
 
 test('life and places are written by an agent, checked, and recorded', (t) => {

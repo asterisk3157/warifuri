@@ -28,7 +28,7 @@ import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
-import { readSettings, writeSettings, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
+import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
 import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
 import { readContext, writeNote, noteRecordChanges, secretaryConfigured } from '../knowledge/profiles.mjs';
 
@@ -229,11 +229,16 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
         'start. from and to: YYYY-MM-DD (midnight on the server\'s clock) or an ISO datetime with offset; to is ' +
         'exclusive, so from 2026-11-01 to 2026-11-03 is two days. from defaults to today, to to one day after from. ' +
         'Each booking comes with its task (title, state), habit, goal and profile, and its source and external_id ' +
-        '(the outside event it is, or null).',
+        '(the outside event it is, or null). week: the week type (settings) laid on those days, [{ starts_at, ' +
+        'ends_at, place, profile }]: where the person is then and which profile\'s work goes there. Not bookings and ' +
+        'not busy time: place that profile\'s work inside them.',
       inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
       annotations: readOnly,
     },
-    guarded(async ({ from, to }) => result(ledger.schedule({ from, to }))),
+    guarded(async ({ from, to }) => {
+      const out = ledger.schedule({ from, to });
+      return result({ ...out, week: weekBands(readSettings(ledger).week.slots, Date.parse(out.from), Date.parse(out.to)) });
+    }),
   );
 
   server.registerTool(
@@ -804,7 +809,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   tool(
     'settings',
     "Read or write the person's own settings that scheduling uses. With no section given it only reads, returning " +
-      'life, places, limits and calendar with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
+      'life, places, limits, calendar and week with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
       'text] } for sleep, meals and fixed commitments, as plain rules. places: { places: [{ name, note }], travel: ' +
       '[{ from, to, minutes }] } for the physical places the person goes to and the travel time between two of them ' +
       '(both ways; not the working folders of the places tool). life and places are replaced as given. limits: ' +
@@ -812,6 +817,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       `(${d.block_max_minutes}), earliest ('${d.earliest}'), latest ('${d.latest}') }, times as HH:MM; only the fields ` +
       'given change, null puts one back to its default. Limits are the person\'s to change: write them only when the ' +
       'person decided it in this conversation, with by_person: true; otherwise propose the change to them instead. ' +
+      'week: { slots: [{ days ("daily", "weekdays" or ["月","木"]), start, end (HH:MM), place, profile? }] } for where ' +
+      'the person is at set times of every week and which profile\'s work goes there (a lab in the afternoon: research); ' +
+      'replaced as given; schedule shows it on the days asked. ' +
       'calendar: { skip: [{ title, calendar? }] } for the events of the person\'s calendars not to take in (nor keep) as ' +
       'fixed bookings: title is the whole title as it is, calendar the id of the calendar (left out: any); replaced as ' +
       'given, and written when the person says an event should not be taken in. ' +
@@ -821,6 +829,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       places: z.record(z.string(), z.unknown()).nullable().optional(),
       limits: z.record(z.string(), z.unknown()).nullable().optional(),
       calendar: z.record(z.string(), z.unknown()).nullable().optional(),
+      week: z.record(z.string(), z.unknown()).nullable().optional(),
       by_person: z.boolean().optional(),
     },
     async ({ by_person: byPerson, ...sections }) => {
