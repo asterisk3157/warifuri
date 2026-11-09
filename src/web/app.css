@@ -334,6 +334,8 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-tm-num b { font-size: 17px; color: var(--ink); }
 .wf-tm-hot { background: #fee2e2; border-radius: 4px; padding: 0 4px; }
 .wf-tm-hostrow { padding: 6px 20px; font-size: 13px; color: var(--sub); background: #f6f7f9; border-top: 1px solid var(--hair); }
+.wf-srv-usage { margin-top: 14px; border-top: 1px solid var(--hair); }
+.wf-srv-usage .wf-row { padding-left: 0; padding-right: 0; }
 .wf-tm-hint { margin: 0 4px; font-size: 14px; }
 @media (max-width: 760px) {
   .wf-tm { grid-template-columns: 1fr; }

@@ -247,18 +247,19 @@ function serverCard(data, ctx) {
   return h('section', { class: 'wf-surface wf-srv-card' },
     h('div', { class: 'wf-srv-title' }, h('h2', { text: 'warifuri サーバー' }),
       h('span', { class: 'wf-online' }, h('span', { class: 'wf-led-dot', 'aria-hidden': 'true' }), ctx.offline ? 'つながっていません' : 'オンライン')),
-    h('div', { class: 'wf-facts' }, ...facts.map(([label, value]) => h('div', { class: 'wf-fact' }, h('span', { text: label }), h('span', { text: value })))));
+    h('div', { class: 'wf-facts' }, ...facts.map(([label, value]) => h('div', { class: 'wf-fact' }, h('span', { text: label }), h('span', { text: value })))),
+    usage(data.here));
 }
 
-function hereCard(here) {
+// How the machine the server runs on is doing, under the server's facts.
+function usage(here) {
   if (!here) return null;
   const rows = [
     ['CPU', meter(here.cpu, { warn: 80, bad: 95 }), `${here.cores} コア`],
     ['メモリ', meter(here.memory, { warn: 90, bad: 97 }), `${here.memoryGb} GB`],
     ['ディスク', meter(here.disk?.percent ?? null), here.disk ? `空き ${here.disk.freeGb} GB` : ''],
   ];
-  return h('section', { class: 'wf-surface wf-table' },
-    h('div', { class: 'wf-table-head' }, h('h2', { text: 'この機械' }), h('span', { class: 'wf-muted', text: `稼働時間 ${dhm(here.uptimeSeconds)}` })),
+  return h('div', { class: 'wf-srv-usage' },
     ...rows.map(([label, bar, sub]) => h('div', { class: 'wf-row wf-row-meter' }, h('b', { text: label }), bar, h('span', { class: 'wf-muted', text: sub }))));
 }
 
@@ -306,7 +307,7 @@ function render(data, ctx) {
     : null;
   let body;
   if (view.tab === 'warifuri') {
-    body = [serverCard(server, ctx), hereCard(server.here), jobsCard(server.jobs, ctx), devices(server, ctx),
+    body = [serverCard(server, ctx), jobsCard(server.jobs, ctx), devices(server, ctx),
       lab ? null : h('p', { class: 'wf-muted wf-tm-hint', text: '自宅サーバーの監視(Prometheus)の URL を設定すると、自宅サーバーの機械と VM も出ます' })];
   } else if (lab.detail?.error) {
     body = [h('section', { class: 'wf-surface wf-table' }, h('div', { class: 'wf-empty wf-bad', text: lab.detail.error }))];
