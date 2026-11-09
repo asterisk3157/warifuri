@@ -145,6 +145,23 @@ test('writeNote appends, keeps what is there, and marks each kind', () => {
   assert.throws(() => writeNote(home, 'hobby', { text: 'x', kind: 'guess' }), /kind は/);
 });
 
+test('writeNote: a note about a person goes straight to people.md; the secretary\'s sorted notes skip the inbox', () => {
+  const home = freshHome();
+  const now = new Date(2026, 10, 9, 12);
+  writeNote(home, '研究', { text: '田中先生: 前提の違いを先に聞く', kind: 'human', people: true, now });
+  writeNote(home, '研究', { text: '田中先生は朝が早い', kind: 'agent', people: true, secretary: true, now });
+  writeNote(home, '研究', { text: '田中先生は図を先に見る', kind: 'agent', people: true, secretary: true, sorted: true, from: { device: 'secretary' }, now });
+  writeNote(home, '研究', { text: '発表は15分', kind: 'agent', secretary: true, sorted: true, now });
+  const dir = profileDir(home, '研究');
+  assert.equal(
+    fs.readFileSync(path.join(dir, 'people.md'), 'utf8'),
+    '- 2026-11-09 「本人の言葉」 田中先生: 前提の違いを先に聞く\n- 2026-11-09 「未確認」 田中先生は朝が早い\n- 2026-11-09 「未確認」 田中先生は図を先に見る (secretary)\n',
+  );
+  assert.ok(!fs.existsSync(path.join(dir, 'inbox.md')));
+  assert.equal(fs.readFileSync(path.join(dir, 'knowledge.md'), 'utf8'), '- 2026-11-09 「未確認」 発表は15分\n');
+  assert.match(readContext(home, '研究').people.text, /田中先生: 前提の違いを先に聞く/);
+});
+
 test('secretaryConfigured reads plugins.yaml', () => {
   const home = freshHome();
   assert.equal(secretaryConfigured(home), false);
@@ -240,6 +257,11 @@ test('note: with a secretary, an agent note goes to inbox.md and human words sti
   assert.equal((await call('note', { profile: '研究', text: 'said so', kind: 'human' })).data.file, 'knowledge.md');
   assert.match(fs.readFileSync(path.join(dir, 'inbox.md'), 'utf8'), /^- \d{4}-\d{2}-\d{2} a guess \(laptop\)\n$/);
 
+  // About a person: straight to people.md, an agent's marked 未確認, even with a secretary.
+  assert.equal((await call('note', { profile: '研究', text: '田中先生: 図を先に見る', kind: 'human', people: true })).data.file, 'people.md');
+  const agentNote = await call('note', { profile: '研究', text: '田中先生は朝が早い', kind: 'agent', people: true });
+  assert.deepEqual([agentNote.data.file, agentNote.data.mark], ['people.md', '未確認']);
+
   // The secretary option of createApp wins over plugins.yaml.
   const off = await start(t, { home, secretary: false });
   assert.equal((await off.call('note', { profile: '研究', text: 'another', kind: 'agent' })).data.file, 'knowledge.md');
@@ -292,6 +314,12 @@ test('close with learned writes an agent note to the profile of the task, and ke
   assert.equal(looseClosed.state, 'discarded');
   assert.match(looseClosed.noted.skipped, /プロフィールが分からない/);
   assert.equal(ledger.records(loose.id).at(-1).changes.learned.after, 'y');
+
+  // learned_people goes to the people of the profile, apart from learned.
+  const meet = (await call('create_task', { title: 'Meet', mode: 'ai_worker', place_id: places.lab.id })).data;
+  const met = (await call('close', { id: meet.id, state: 'done', result: 'met', learned: '議事録は当日中に回す', learned_people: '田中先生: 図を先に見る' })).data;
+  assert.deepEqual(met.noted_people, { profile: '研究', file: 'people.md', mark: '未確認' });
+  assert.match(fs.readFileSync(path.join(dir, 'people.md'), 'utf8'), new RegExp(`「未確認」 田中先生: 図を先に見る \\(laptop / ${meet.id}\\)\\n$`));
 
   // Without learned, close answers as before.
   const plain = (await call('create_task', { title: 'Plain', mode: 'ai_worker', place_id: places.lab.id })).data;

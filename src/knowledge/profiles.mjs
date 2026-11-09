@@ -169,16 +169,19 @@ export function checkNoteText(text) {
 
 // Appends a note to the profile and says where it went. kind 'human': the person's own
 // words, straight into knowledge.md marked 本人の言葉. kind 'agent': an agent's insight, into
-// inbox.md when a secretary is configured, else into knowledge.md marked 未確認. from
-// ({ device, task }) is written after the text, so the secretary knows where it came from.
+// inbox.md when a secretary is configured, else into knowledge.md marked 未確認. people: it is
+// about a person, so it goes straight to people.md (an agent's marked 未確認), never through the
+// inbox: who someone is matters more seen at once than sorted later. sorted: the secretary
+// writing what it has sorted, which goes where it belongs rather than back to the inbox. from ({ device, task }) is written after the
+// text, so the secretary knows where it came from.
 // The entry is one list item: "- <date> 「<mark>」 <text> (<from>)", later lines indented.
-export function writeNote(home, profile, { text, kind, secretary = false, from = {}, now = new Date() }) {
+export function writeNote(home, profile, { text, kind, people = false, sorted = false, secretary = false, from = {}, now = new Date() }) {
   const problems = checkNoteText(text);
   if (!['human', 'agent'].includes(kind)) problems.push('kind は human(本人の言葉)か agent(エージェントの気づき)です');
   if (problems.length) throw new LedgerError(problems);
   const dir = profileDir(home, profile);
-  const toInbox = kind === 'agent' && secretary;
-  const file = toInbox ? 'inbox.md' : 'knowledge.md';
+  const toInbox = kind === 'agent' && secretary && !sorted && !people;
+  const file = toInbox ? 'inbox.md' : people ? 'people.md' : 'knowledge.md';
   const mark = kind === 'human' ? MARK_HUMAN : toInbox ? null : MARK_UNCONFIRMED;
   const body = text.trim().replace(/\r\n?/g, '\n').split('\n').join('\n  ');
   const source = [from.device, from.task].filter(Boolean).join(' / ');
