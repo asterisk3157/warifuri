@@ -22,6 +22,9 @@ export const DETAIL_QUERIES = Object.freeze({
     gpuInfo: 'nvidia_gpu_temperature_celsius',
     gpuUtil: 'nvidia_gpu_utilization_percent',
     gpuPower: 'nvidia_gpu_power_watts',
+    gpuPowerLimit: 'nvidia_gpu_power_limit_watts',
+    gpuMemUsed: 'nvidia_gpu_memory_used_bytes',
+    gpuMemTotal: 'nvidia_gpu_memory_total_bytes',
     energyToday: 'tapo_energy_today_watt_hours',
     energyMonth: 'tapo_energy_month_watt_hours',
     guests: QUERIES.guests,
@@ -39,7 +42,10 @@ export const DETAIL_QUERIES = Object.freeze({
     cores: '100 * (1 - rate(node_cpu_seconds_total{mode="idle"}[2m]))',
     memory: '100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)',
     busy: `100 * rate(node_disk_io_time_seconds_total{${DISKS}}[2m])`,
-    gpu: 'nvidia_gpu_temperature_celsius',
+    gpuUtil: 'nvidia_gpu_utilization_percent',
+    gpuTemp: 'nvidia_gpu_temperature_celsius',
+    gpuMemory: '100 * nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes',
+    gpuPower: 'nvidia_gpu_power_watts',
     power: 'tapo_power_watts',
   },
 });
@@ -158,6 +164,21 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
     const hosted = guests.filter((g) => g.host === host);
     const gpuRow = list(instant.gpuInfo).find((r) => r?.labels?.host === host);
     const gpuMatch = (l) => l.host === host;
+    // The GPU as the task manager shows it: how busy, how hot, how much of its memory is used,
+    // and what it draws, each over the last hour.
+    const gpuOf = (row, match) => {
+      const series = (key, keep) => seriesOf(range[key], window, match, keep);
+      const util = series('gpuUtil', within100);
+      const temp = series('gpuTemp');
+      return {
+        name: row.labels.name ?? row.labels.modelName ?? null,
+        utilization: lastOf(util) ?? whole(pick('gpuUtil', match)),
+        tempC: lastOf(temp) ?? whole(num(row.value)), warnC: LIMITS.gpuWarn,
+        memoryUsedBytes: whole(pick('gpuMemUsed', match)), memoryTotalBytes: whole(pick('gpuMemTotal', match)),
+        powerWatts: whole(pick('gpuPower', match)), powerLimitWatts: whole(pick('gpuPowerLimit', match)),
+        series: { utilization: util, temp, memory: series('gpuMemory', within100), power: series('gpuPower') },
+      };
+    };
     return {
       host,
       cpu: {
@@ -178,10 +199,7 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
           series: seriesOf(range.busy, window, dev, within100),
         };
       }),
-      gpu: gpuRow
-        ? { name: gpuRow.labels.name ?? gpuRow.labels.modelName ?? null, tempC: lastOf(seriesOf(range.gpu, window, gpuMatch)) ?? whole(num(gpuRow.value)), warnC: LIMITS.gpuWarn,
-          utilization: whole(pick('gpuUtil', gpuMatch)), powerWatts: whole(pick('gpuPower', gpuMatch)), series: seriesOf(range.gpu, window, gpuMatch) }
-        : null,
+      gpu: gpuRow ? gpuOf(gpuRow, gpuMatch) : null,
       guests: { up: hosted.filter((g) => g.up).length, total: hosted.length },
     };
   });

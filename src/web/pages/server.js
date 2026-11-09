@@ -37,6 +37,12 @@ const dhm = (sec) => {
   const p2 = (n) => String(n).padStart(2, '0');
   return `${Math.floor(sec / 86400)}:${p2(Math.floor((sec % 86400) / 3600))}:${p2(Math.floor((sec % 3600) / 60))}`;
 };
+// Bytes as GB, with one decimal while small.
+const gb = (bytes) => {
+  if (bytes === null || bytes === undefined) return null;
+  const v = bytes / 2 ** 30;
+  return v < 10 ? v.toFixed(1) : String(Math.round(v));
+};
 const kwh = (wh) => (wh === null || wh === undefined ? '—' : `${(wh / 1000).toFixed(1)} kWh`);
 
 // The colours of the graphs of Windows' task manager, so the view reads as one.
@@ -87,10 +93,19 @@ function itemsOf(detail) {
       });
     }
     if (m.gpu) {
+      const g = m.gpu;
+      const vram = g.memoryTotalBytes === null ? '—' : `${gb(g.memoryUsedBytes) ?? '—'} / ${gb(g.memoryTotalBytes)} GB`;
+      const watts = g.powerLimitWatts ?? 300;
       items.push({
-        id: `${m.host}:gpu`, kind: 'gpu', title: 'GPU', line: `${m.gpu.name ? `${m.gpu.name} ` : ''}${or(m.gpu.tempC, '℃')}`, color: COLOR.gpu, series: m.gpu.series, max: 100,
-        head: m.gpu.name ?? '', unit: '温度',
-        stats: [['温度', or(m.gpu.tempC, '℃')], ['使用率', or(m.gpu.utilization, '%')], ['電力', or(m.gpu.powerWatts, ' W')]],
+        id: `${m.host}:gpu`, kind: 'gpu', title: 'GPU', line: `${g.name ? `${g.name} ` : ''}${or(g.utilization, '%')}`, color: COLOR.gpu, series: g.series.utilization,
+        head: g.name ?? '',
+        strips: [
+          { label: '使用率', top: '100%', series: g.series.utilization, max: 100 },
+          { label: '温度', top: '100℃', series: g.series.temp, max: 100 },
+          { label: 'VRAM', top: g.memoryTotalBytes === null ? '100%' : `${gb(g.memoryTotalBytes)} GB`, series: g.series.memory, max: 100 },
+          { label: '電力', top: `${watts} W`, series: g.series.power, max: watts },
+        ],
+        stats: [['使用率', or(g.utilization, '%')], ['温度', or(g.tempC, '℃')], ['VRAM', vram], ['電力', or(g.powerWatts, ' W')]],
       });
     }
     return { name: m.host, items };
@@ -157,6 +172,13 @@ function mainPanel(it, minutes) {
           h('span', { class: 'wf-tm-core-n', text: String(n) }), h('span', { class: 'wf-tm-core-p', text: or(series.length ? Math.round(series.at(-1)) : null, '%') }),
           graph(series, COLOR.cpu, { cls: 'wf-tm-core-graph' })))), it.cores.length),
       axis);
+  } else if (it.strips) {
+    // Several thin graphs stacked, as the task manager shows a GPU's engines and memory.
+    body = h('div', { class: 'wf-tm-body wf-tm-strips' },
+      ...it.strips.map((st) => h('div', { class: 'wf-tm-strip' },
+        h('div', { class: 'wf-tm-scale' }, h('span', { text: st.label }), h('span', { text: st.top })),
+        h('div', { class: 'wf-tm-big wf-tm-thin', style: { borderColor: it.color } }, graph(st.series, it.color, { max: st.max })))),
+      axis);
   } else {
     body = h('div', { class: 'wf-tm-body' },
       h('div', { class: 'wf-tm-scale' }, h('span', { text: it.unit ?? '使用率' }), h('span', { text: it.max === 400 ? '400 W' : it.kind === 'gpu' ? '100℃' : '100%' })),
@@ -176,12 +198,6 @@ function performance(detail, ctx) {
   return h('div', { class: 'wf-surface wf-tm' }, sideList(groups, ctx), mainPanel(items.find((it) => it.id === view.sel), detail.minutes));
 }
 
-// Bytes as GB, with one decimal while small.
-const gb = (bytes) => {
-  if (bytes === null || bytes === undefined) return null;
-  const v = bytes / 2 ** 30;
-  return v < 10 ? v.toFixed(1) : String(Math.round(v));
-};
 const coresText = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 // What a guest was given and how much of it is in use, with the share of it.
