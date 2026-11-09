@@ -64,7 +64,7 @@ export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 const TEXT_TYPES = /^(text\/|application\/(json|xml|x-yaml|yaml|csv|javascript|x-sh|toml)$)/;
 const TEXT_NAMES = /\.(txt|md|markdown|csv|tsv|json|ya?ml|toml|xml|html?|css|js|mjs|ts|py|rb|go|rs|sh|ini|log|ics)$/i;
 // What a scheduled trigger says in the conversation; its instructions are harness/secretary/<job>.md.
-export const TRIGGERS = { morning: '朝の時間です' };
+export const TRIGGERS = { morning: '朝の時間です', weekly: '週の完了確認の時間です' };
 
 // The longest an agent's request may be, and the longest it may wait for the reply.
 export const REQUEST_MAX = 2000;
@@ -224,7 +224,7 @@ export function readUpload(dir, a) {
   return { ...a };
 }
 
-// Writes warifuri's call at a set time (job: morning) into the secretary's conversation.
+// Writes warifuri's call at a set time (job: morning or weekly) into the secretary's conversation.
 export function writeTrigger(ledger, job, writer) {
   if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);
   const thread = ledger.ensureThread(SECRETARY_THREAD.kind, writer);
@@ -607,7 +607,7 @@ export function createChat(ledger, cfg, ctx = {}) {
         listeners.delete(fn);
       }
     },
-    // warifuri's call into the conversation at a set time (job: morning). Not in the night,
+    // warifuri's call into the conversation at a set time (job: morning or weekly). Not in the night,
     // unless force (the person asked for it). { sent: message } or { skipped: reason }.
     trigger(job, { force = false } = {}) {
       if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);

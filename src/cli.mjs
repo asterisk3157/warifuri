@@ -20,7 +20,7 @@
 //                                    every calendar tool of a harness on the gcp route)
 //   warifuri hook tools <tool> ...   (the secretary's: stops all but the reads of the tools given)
 //   warifuri secretary enable|disable
-//   warifuri secretary run <nightly|morning|inbox>
+//   warifuri secretary run <nightly|morning|inbox|weekly>
 //   warifuri --version               (also -v; the version of this package)
 //
 // Every command takes --home <dir> (the data directory) and --db <ledger.sqlite>. The flags
@@ -49,7 +49,7 @@ import { decideStop, STATE_FILE as STOP_STATE_FILE } from './client/stop-hook.mj
 import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
-import { createChat, writeTrigger } from './secretary/chat.mjs';
+import { createChat, writeTrigger, TRIGGERS } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
 import { createGateway } from './notify/gateway.mjs';
@@ -58,7 +58,7 @@ import { createThreadMap } from './notify/discord-threads.mjs';
 import { parseAliases } from './monitor/detail.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
-import { JOBS } from './secretary/schedule.mjs';
+import { JOBS, CHAT_JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -80,7 +80,7 @@ const USAGE = [
   '       warifuri hook stop',
   '       warifuri hook calendar [claude|codex]',
   '       warifuri secretary enable|disable',
-  '       warifuri secretary run <nightly|morning|inbox>',
+  '       warifuri secretary run <nightly|morning|inbox|weekly>',
   '       warifuri --version',
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
@@ -447,10 +447,10 @@ function runServe(args) {
 }
 
 // The secretary's clock in serve, when WARIFURI_SECRETARY is on: { stop } or null. Only one
-// line per run start and end is printed; claude's output goes to its log file. The morning is
-// not a run of its own: it is a call into the conversation (chat.trigger), answered by the
-// secretary of the conversation. Each check also looks for calls written by
-// `warifuri secretary run morning` from another process.
+// line per run start and end is printed; claude's output goes to its log file. The morning
+// and the weekly check are not runs of their own: they are calls into the conversation
+// (chat.trigger), answered by the secretary of the conversation. Each check also looks for
+// calls written by `warifuri secretary run morning` (or weekly) from another process.
 function startSecretary(cfg, chat, ledger) {
   if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
   const ready = secretary.readyToSchedule(cfg);
@@ -502,7 +502,7 @@ function startSecretary(cfg, chat, ledger) {
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
-    run: (job) => (job === 'morning' ? chat.trigger(job) : runJob(job)),
+    run: (job) => (CHAT_JOBS.includes(job) ? chat.trigger(job) : runJob(job)),
     onTick: () => {
       chat.kick();
       notifier.tick().catch((err) => log(`discord: ${err.message}`));
@@ -536,18 +536,20 @@ async function runSecretary(args) {
   const cfg = settingsFor('secretary', values);
   if (cfg === 2) return 2;
   warn(cfg);
-  if (sub === 'run' && positionals[0] === 'morning') {
-    // The morning goes into the conversation: warifuri serve answers it at its next check.
+  if (sub === 'run' && CHAT_JOBS.includes(positionals[0])) {
+    // The morning and the weekly check go into the conversation: warifuri serve answers them
+    // at its next check.
+    const job = positionals[0];
     let ledger;
     try {
       ledger = openConfiguredLedger(cfg);
-      writeTrigger(ledger, 'morning', { actor: 'cli', device: null });
+      writeTrigger(ledger, job, { actor: 'cli', device: null });
     } catch (err) {
       return fail(err, 'cannot write to the ledger');
     } finally {
       ledger?.close();
     }
-    process.stdout.write('secretary: sent 朝の時間です into the conversation; warifuri serve answers it within a minute\n');
+    process.stdout.write(`secretary: sent ${TRIGGERS[job]} into the conversation; warifuri serve answers it within a minute\n`);
     return 0;
   }
   if (sub === 'run') {

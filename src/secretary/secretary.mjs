@@ -33,7 +33,7 @@ import { openLedger } from '../ledger/ledger.mjs';
 import { initHome, decodeText } from '../config.mjs';
 import { secretaryConfigured } from '../knowledge/profiles.mjs';
 import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME, BIN } from '../client/connect.mjs';
-import { JOBS, parseWhen, parseNight, inNight, localIso, showWhen } from './schedule.mjs';
+import { JOBS, CHAT_JOBS, parseWhen, parseNight, inNight, localIso, showWhen } from './schedule.mjs';
 
 export const DEVICE = 'secretary';
 // The device the secretary writes as: WARIFURI_SECRETARY_DEVICE, or DEVICE.
@@ -82,7 +82,7 @@ export function logTail(file, bytes = 4096) {
   }
 }
 
-export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', morning: '朝の報告', inbox: '受信箱の整理', sync: 'カレンダーの同期' };
+export const JOB_TITLES = { nightly: '毎晩の見張りと組み直し', morning: '朝の報告', inbox: '受信箱の整理', weekly: '週の完了確認', sync: 'カレンダーの同期' };
 
 export const paths = (home) => {
   const dir = path.join(home, DIR);
@@ -126,6 +126,7 @@ export function scheduleFrom(values) {
     nightly: parseWhen(values.WARIFURI_SECRETARY_NIGHTLY ?? '23:00'),
     morning: parseWhen(values.WARIFURI_SECRETARY_MORNING ?? '07:00'),
     inbox: parseWhen(values.WARIFURI_SECRETARY_INBOX ?? 'sun 23:00'),
+    weekly: parseWhen(values.WARIFURI_SECRETARY_WEEKLY ?? 'sun 10:00'),
   };
   const night = parseNight(values.WARIFURI_SECRETARY_NIGHT ?? '23:00-07:00');
   const calendarTools = (values.WARIFURI_SECRETARY_CALENDAR_TOOLS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -432,8 +433,8 @@ export function kill(child, platform) {
 // ctx: { env, platform, now, spawn, signal, timeoutMs, instructionsDir } (tests stand in here).
 export async function runJob(job, cfg, ctx = {}) {
   if (!JOBS.includes(job)) return { error: `no job ${job} (${JOBS.join(', ')})` };
-  // The morning is a call into the conversation (chat.mjs), not a run of its own.
-  if (job === 'morning') return { error: 'morning runs in the conversation; warifuri serve sends it there' };
+  // The morning and the weekly check are calls into the conversation (chat.mjs), not runs of their own.
+  if (CHAT_JOBS.includes(job)) return { error: `${job} runs in the conversation; warifuri serve sends it there` };
   const env = ctx.env ?? process.env;
   const platform = ctx.platform ?? process.platform;
   const schedule = scheduleFrom(cfg.values);
