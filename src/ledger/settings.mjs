@@ -1,6 +1,7 @@
 // The person's settings that scheduling reads: life (生活: sleep, meals, fixed commitments,
-// written as plain rules), places (場所と移動時間) and limits (上限: hours a day, the size of a
-// block, the hours when blocks may be placed). Each is a section of the settings table, one
+// written as plain rules), places (場所と移動時間), limits (上限: hours a day, the size of a
+// block, the hours when blocks may be placed) and calendar (カレンダー: the events not to take
+// in from the person's calendars). Each is a section of the settings table, one
 // key per field (life.rules, places.places, places.travel, limits.day_max_hours, ...), the
 // value as JSON text, and each change is recorded as entity 'settings' with the section as
 // its id. Unset fields read as their defaults.
@@ -10,13 +11,16 @@
 
 import { LedgerError } from './ledger.mjs';
 
-export const SECTIONS = ['life', 'places', 'limits'];
+export const SECTIONS = ['life', 'places', 'limits', 'calendar'];
 
 export const RULES_MAX = 50;
 export const RULE_MAX = 200;
 export const PLACES_MAX = 50;
 export const PLACE_NAME_MAX = 40;
 export const PLACE_NOTE_MAX = 200;
+export const SKIP_MAX = 50;
+export const SKIP_TITLE_MAX = 100;
+export const SKIP_CALENDAR_MAX = 200;
 
 // The defaults of the limits: a working day of 8 hours placed between 09:00 and 21:00, in
 // blocks of 30 to 120 minutes. A scheduler stays inside them until the person changes them.
@@ -32,6 +36,7 @@ const DEFAULTS = {
   life: { rules: [] },
   places: { places: [], travel: [] },
   limits: LIMIT_DEFAULTS,
+  calendar: { skip: [] },
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
@@ -127,6 +132,33 @@ function checkPlaces(value, current, problems) {
   return out;
 }
 
+// calendar: { skip: [{ title, calendar? }] }: the events not taken in, by their title as it is
+// (the whole title); calendar, the id of the calendar they are in, or left out for any.
+function checkCalendar(value, problems) {
+  if (!isObject(value)) return refuse(problems, 'calendar は { skip: [...] } の形です');
+  unknownKeys(value, ['skip'], 'calendar ', problems);
+  if (value.skip === undefined) return {};
+  if (!Array.isArray(value.skip)) return refuse(problems, 'calendar.skip は配列です');
+  if (value.skip.length > SKIP_MAX) problems.push(`calendar.skip は ${SKIP_MAX} 件までです`);
+  const seen = new Set();
+  return {
+    skip: value.skip.map((x, i) => {
+      const label = `calendar.skip の ${i + 1} 件目`;
+      if (!isObject(x)) {
+        problems.push(`${label}は { title, calendar? } の形です`);
+        return null;
+      }
+      unknownKeys(x, ['title', 'calendar'], `${label}`, problems);
+      const title = line(x.title, `${label}の title `, SKIP_TITLE_MAX, problems);
+      const calendar = x.calendar === undefined || x.calendar === null ? null : line(x.calendar, `${label}の calendar `, SKIP_CALENDAR_MAX, problems);
+      const key = `${calendar ?? ''}\u0000${title}`;
+      if (seen.has(key)) problems.push(`${label}は、前と同じ組です`);
+      seen.add(key);
+      return calendar ? { title, calendar } : { title };
+    }),
+  };
+}
+
 // limits: the fields given are merged over the current ones (null puts a field back to its
 // default, and is returned as null so that it is unset), and the result must hold together.
 function checkLimits(value, current, problems) {
@@ -155,7 +187,7 @@ function checkLimits(value, current, problems) {
   return out;
 }
 
-// The three sections as they are now, defaults filled in. `defaults` lists, per section, the
+// The sections as they are now, defaults filled in. `defaults` lists, per section, the
 // fields that are not set and read as their defaults.
 export function readSettings(ledger) {
   const out = { defaults: {} };
@@ -177,7 +209,7 @@ export function readSettings(ledger) {
   return out;
 }
 
-// Writes the sections given ({ life, places, limits }; a section given as null is put back to
+// Writes the sections given ({ life, places, limits, calendar }; a section given as null is put back to
 // its defaults). Every problem of every section is listed before anything is written. Limits
 // need byPerson. Returns readSettings afterwards.
 export function writeSettings(ledger, input, { byPerson = false } = {}, writer) {
@@ -198,7 +230,10 @@ export function writeSettings(ledger, input, { byPerson = false } = {}, writer) 
     }
     const before = problems.length;
     const checked =
-      section === 'life' ? checkLife(input.life, problems) : section === 'places' ? checkPlaces(input.places, now.places, problems) : checkLimits(input.limits, now.limits, problems);
+      section === 'life' ? checkLife(input.life, problems)
+        : section === 'places' ? checkPlaces(input.places, now.places, problems)
+          : section === 'calendar' ? checkCalendar(input.calendar, problems)
+            : checkLimits(input.limits, now.limits, problems);
     if (problems.length > before) continue;
     plan[section] = Object.fromEntries(Object.entries(checked).map(([k, v]) => [k, v === null ? null : JSON.stringify(v)]));
   }
