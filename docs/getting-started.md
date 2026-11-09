@@ -214,6 +214,8 @@ warifuri secretary enable
 
 止める場合は `warifuri secretary disable` を実行し、`warifuri serve` を再起動します。時刻は[設定](configuration.md)で変更できます。
 
+秘書の画面で初めて話しかけると、秘書が予定を組むための設定(生活の決まり、予定を置いてよい時間、週の決まった場所、プロフィール)を一緒に作るかを聞きます。答えた中身は、確認してから書き込まれ、設定の「自身について」で見られます。
+
 <details>
 <summary>秘書が使えるもの</summary>
 
