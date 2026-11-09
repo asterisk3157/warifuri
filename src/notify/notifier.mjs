@@ -12,7 +12,9 @@
 // night is over, oldest first.
 // A thread of the conversation opened in Discord (threads, src/notify/discord-threads.mjs)
 // is a talk of its own: everything said in it goes to its Discord thread, as with mirror,
-// at night too: the person started it.
+// at night too: the person started it. A thread opened on the screen gets a Discord thread
+// once something is said in it: from the Discord message its first message went as, or on its
+// own (with the first message quoted) when that message did not go to Discord.
 //
 // The notifier reads the conversation after the last message it handled (kept in a file in
 // the data directory), so a restart neither loses nor repeats anything. The first time it
@@ -76,28 +78,62 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
   };
   let running = false;
   // Posts a notice: its messages, or its text (cut when whole), the buttons and the picture
-  // under the last part. channel: a thread of the channel, or the channel itself.
+  // under the last part. channel: a thread of the channel, or the channel itself. Resolves to
+  // the id of the last Discord message, where the buttons are.
   async function post(notice, png, channel) {
+    let last = null;
     const parts = notice.messages
       ?? (notice.whole ? chunks(notice.text) : [notice.text]).map((text, i, all) => ({ text, components: i === all.length - 1 ? notice.components ?? [] : [] }));
     for (const [i, part] of parts.entries()) {
       const lastPart = i === parts.length - 1;
-      await discord.post(part.text, {
+      last = await discord.post(part.text, {
         mention: notice.mention && i === 0,
         files: lastPart && png ? [{ name: 'calendar.png', data: png, type: 'image/png' }] : [],
         components: part.components ?? [],
         ...(channel ? { channel } : {}),
       });
     }
+    return last?.id ?? null;
+  }
+
+  // A Discord thread for each thread opened on the screen in which something was said since
+  // threads were first tied, from the first message's Discord message when it went to Discord.
+  async function tieThreads() {
+    const since = threads.since();
+    for (const [parentId, t] of Object.entries(ledger.threadCounts())) {
+      if (threads.channelOf(t.id)) continue;
+      const list = ledger.listMessages(t.id);
+      const fresh = list.filter((m) => ['user', 'secretary'].includes(m.role) && m.created_at > since);
+      if (!fresh.length) continue;
+      const thread = ledger.getThread(t.id);
+      const parent = ledger.getMessage(parentId);
+      const from = threads.posted(parentId);
+      let channel = null;
+      if (from) channel = await discord.startThread(from, thread.title).catch(() => null);
+      if (!channel) {
+        channel = await discord.startThread(null, thread.title);
+        await discord.post(`秘書のこの発言から始まったスレッドです。\n> ${clip(parent?.body ?? '', 300).replace(/\n/g, '\n> ')}`, { channel: channel.id });
+      }
+      // What was said before since stays on the screen; the rest goes.
+      const before = list.filter((m) => m.created_at <= since).at(-1);
+      threads.add(channel.id, t.id, before?.id ?? null);
+    }
   }
 
   // What came in each thread tied to a Discord thread, sent there. Resolves to the number sent.
   async function tickThreads() {
     let sent = 0;
+    if (discord.startThread) {
+      try {
+        await tieThreads();
+      } catch (err) {
+        log(`discord: a thread not opened, tried again later: ${err.message}`);
+      }
+    }
     for (const { channel, thread, last } of threads?.list() ?? []) {
       let list;
       try {
-        list = last ? ledger.listMessages(thread, { after: last }) : ledger.listMessages(thread);
+        list = last ? ledger.listMessages(thread, { after: last }) : ledger.listMessages(thread, { limit: 200 });
       } catch {
         // The thread or the message it stopped at is gone: start again from now.
         try {
@@ -134,7 +170,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
     running = true;
     let sent = 0;
     try {
-      sent += await tickThreads();
+      if (threads) sent += await tickThreads();
       const state = read();
       let list;
       try {
@@ -169,7 +205,8 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         if (notice) {
           try {
             const png = m.data?.calendar ? await picture(m).catch(() => null) : null;
-            await post(notice, png);
+            const posted = await post(notice, png);
+            if (posted && threads) threads.setPosted(m.id, posted);
             sent += 1;
             if (failure) state.failure = failure;
           } catch (err) {

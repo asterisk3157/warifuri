@@ -306,3 +306,60 @@ test('discord chat: スレッドで話す opens a Discord thread tied to the thr
   await again.tick();
   assert.equal(w.calls.slice(n).filter((c) => c.post && c.channel === 'th-dm1').length, 0);
 });
+
+test('notifier: a thread opened on the screen gets a Discord thread once something is said in it', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-webthread-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const ledger = openLedger(':memory:');
+  t.after(() => ledger.close());
+  const main = ledger.ensureThread('secretary', S);
+  const W = { actor: 'web', device: null };
+  // A thread of before: left alone.
+  const old = ledger.addMessage(main.id, { role: 'secretary', body: '前の話' }, S);
+  const oldThread = ledger.openThread(old.id, W);
+  ledger.addMessage(oldThread.id, { role: 'user', body: '前のスレッド' }, W);
+  await new Promise((r) => setTimeout(r, 5));
+  const threads = createThreadMap(path.join(dir, 'discord-threads.json'));
+  const calls = [];
+  let n = 0;
+  const discord = {
+    post: async (text, opts) => {
+      calls.push({ post: text, ...opts });
+      n += 1;
+      return { id: `dm${n}` };
+    },
+    startThread: async (message, name) => {
+      calls.push({ startThread: message, name });
+      return { id: `th${calls.length}` };
+    },
+  };
+  const notifier = createNotifier({ ledger, discord, file: path.join(dir, 'd.json'), mirror: true, threads });
+  await notifier.tick();
+  await new Promise((r) => setTimeout(r, 5));
+  // A reply that went to Discord; a thread opened from it on the screen.
+  ledger.addMessage(main.id, { role: 'user', body: '計画は？' }, W);
+  const reply = ledger.addMessage(main.id, { role: 'secretary', body: '来週の計画です' }, S);
+  await notifier.tick();
+  assert.equal(threads.posted(reply.id), 'dm2');
+  const sub = ledger.openThread(reply.id, W);
+  await notifier.tick();
+  assert.equal(threads.channelOf(sub.id), null, 'not until something is said in it');
+  ledger.addMessage(sub.id, { role: 'user', body: 'テストです' }, W);
+  ledger.addMessage(sub.id, { role: 'secretary', body: '届いています' }, S);
+  await notifier.tick();
+  assert.deepEqual(calls.find((c) => c.startThread), { startThread: 'dm2', name: '来週の計画です' });
+  const channel = threads.channelOf(sub.id);
+  assert.ok(channel);
+  assert.deepEqual(calls.filter((c) => c.channel === channel).map((c) => c.post), ['(Web から)\nテストです', '届いています']);
+  assert.equal(threads.channelOf(oldThread.id), null, 'a thread of before is left alone');
+  // From a message that did not go to Discord: a thread of its own, the message quoted.
+  const quiet = ledger.addMessage(main.id, { role: 'secretary', kind: 'text', body: '画面だけの発言' }, S);
+  const sub2 = ledger.openThread(quiet.id, W);
+  ledger.addMessage(sub2.id, { role: 'user', body: 'こちらも' }, W);
+  const before = calls.length;
+  await notifier.tick();
+  const after = calls.slice(before);
+  assert.deepEqual(after.find((c) => 'startThread' in c), { startThread: null, name: '画面だけの発言' });
+  const channel2 = threads.channelOf(sub2.id);
+  assert.deepEqual(after.filter((c) => c.channel === channel2).map((c) => c.post), ['秘書のこの発言から始まったスレッドです。\n> 画面だけの発言', '(Web から)\nこちらも']);
+});

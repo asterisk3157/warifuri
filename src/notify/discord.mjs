@@ -75,9 +75,12 @@ export function createDiscord({ token, channel, user = null, fetch = globalThis.
   async function typing(to = channel) {
     return call(`${API}/channels/${encodeURIComponent(to)}/typing`, { method: 'POST', headers: { Authorization: `Bot ${key}` } });
   }
-  // A thread started from a message of the channel: resolves to the thread ({ id, … }).
+  // A thread of the channel, started from a message of it, or on its own when message is null:
+  // resolves to the thread ({ id, … }).
   async function startThread(message, name) {
-    return call(`${API}/channels/${encodeURIComponent(channel)}/messages/${encodeURIComponent(message)}/threads`, json({ name: clip(name || '秘書とのスレッド', 100), auto_archive_duration: 10080 }));
+    const body = { name: clip(name || '秘書とのスレッド', 100), auto_archive_duration: 10080 };
+    if (!message) return call(`${API}/channels/${encodeURIComponent(channel)}/threads`, json({ ...body, type: 11 }));
+    return call(`${API}/channels/${encodeURIComponent(channel)}/messages/${encodeURIComponent(message)}/threads`, json(body));
   }
   return { post, respond, typing, startThread, channel: String(channel), user: user ? String(user) : null };
 }
