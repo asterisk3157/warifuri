@@ -31,6 +31,7 @@ export const MAX_ALIASES = 10;
 export const MAX_MEMO_CHARS = 4000;
 export const BIRTHDAYS_MAX_DAYS = 366;
 export const PEOPLE_MAX = 200;
+export const COLUMN_VALUES = 10;
 
 const NAME_CHARS = 100;
 const FIELD_CHARS = 200;
@@ -538,17 +539,27 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
   }
 
   // The columns of the scope: the fixed ones, then the free ones its people have, each with
-  // how many people fill it.
+  // how many people fill it and the values written there (up to COLUMN_VALUES, the most used
+  // first), so a new value is written the way the others are (B4, M1 rather than 4年).
   function columns(scope) {
     const [cond, args] = memoCond(scope);
     const ids = new Set(rowsIn(scope).map((r) => r.id));
     const free = new Map();
-    for (const i of all(`SELECT person_id, profile, label FROM person_items WHERE 1 = 1${cond}`, ...args)) {
+    for (const i of all(`SELECT person_id, profile, label, value FROM person_items WHERE 1 = 1${cond}`, ...args)) {
       if (!ids.has(i.person_id)) continue;
       const key = scope.all ? `${i.profile}/${i.label}` : i.label;
-      free.set(key, (free.get(key) ?? 0) + 1);
+      const col = free.get(key) ?? { count: 0, values: new Map() };
+      col.count += 1;
+      col.values.set(i.value, (col.values.get(i.value) ?? 0) + 1);
+      free.set(key, col);
     }
-    return { fixed: FIELDS, free: [...free].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)) };
+    return {
+      fixed: FIELDS,
+      free: [...free].map(([label, c]) => ({
+        label, count: c.count,
+        values: [...c.values].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ja', { numeric: true })).slice(0, COLUMN_VALUES).map(([v]) => v),
+      })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    };
   }
 
   // The table of the scope (one row per person) and the memos there that wait for a person.

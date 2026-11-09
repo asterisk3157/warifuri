@@ -778,7 +778,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'people',
     'Read the people of a profile as a table (人: one row per person). profile, or place for its profile; the ' +
       'secretary may give neither and see everyone. Without id: columns (the fixed ones, and the free ones the ' +
-      "profile's people have, with how many fill each: reuse these names), one row per person (name, aliases, " +
+      "profile's people have, with how many fill each and the values written there: reuse these names, and write " +
+      'a value the way the others are), one row per person (name, aliases, ' +
       'email, phone, affiliation, role, birthday, items: the free columns, memos: how many), and unassigned (memos ' +
       'with no person yet, for the secretary to put on someone with person assign_memos). query: rows where any ' +
       'column contains it. where: { column: text }, rows whose column (a fixed one such as affiliation, or a free ' +

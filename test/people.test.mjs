@@ -304,7 +304,7 @@ test('the table: one column per thing, close names meet, filters by column, and 
   ledger.people.create({ name: '山本さん' }, CLUB, W);
 
   const table = ledger.people.list(CLUB);
-  assert.deepEqual(table.columns.free, [{ label: '好きなもの', count: 2 }]);
+  assert.deepEqual(table.columns.free, [{ label: '好きなもの', count: 2, values: ['x', '紅茶'] }]);
   assert.equal(table.columns.fixed.includes('birthday'), true);
   assert.deepEqual(table.people.map((p) => [p.name, p.items]), [['佐藤さん', { 好きなもの: '紅茶' }], ['山本さん', {}], ['鈴木さん', { 好きなもの: 'x' }]]);
   const names = (where, query) => ledger.people.list(CLUB, { where, query }).people.map((p) => p.name);
@@ -326,5 +326,13 @@ test('the table: one column per thing, close names meet, filters by column, and 
   assert.equal(ledger.people.update(a.id, { edit_memos: [{ id: tip.id, kind: 'その他' }] }, CLUB, W).memos.find((m) => m.id === tip.id).kind, 'その他');
   assert.throws(() => ledger.people.update(a.id, { promote_memos: [{ id: tip.id }] }, CLUB, W), /移す先の列/);
   assert.equal(ledger.people.learn({ profile: 'サークル', text: '佐藤さん: 来週は休み', kind: 'やりとり' }, W).person.id, a.id);
+  ledger.close();
+});
+
+test('columns: each free column says how many fill it and the values written there, most used first', () => {
+  const ledger = openLedger(':memory:');
+  for (const [name, grade] of [['一', 'M1'], ['二', 'B4'], ['三', 'M1'], ['四', 'D2']]) ledger.people.create({ name: `${name}さん`, items: { 学年: grade } }, LAB, W);
+  ledger.people.create({ name: '五さん' }, LAB, W);
+  assert.deepEqual(ledger.people.columns(LAB).free, [{ label: '学年', count: 4, values: ['M1', 'B4', 'D2'] }]);
   ledger.close();
 });
