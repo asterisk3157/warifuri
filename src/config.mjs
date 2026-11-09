@@ -247,6 +247,17 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_MONITOR_URL',
+    about: '自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない',
+    commands: ['serve'],
+    check: (v) => (/^https?:\/\/[^/\s]+\/?$/.test(v) ? null : 'must be an http(s) URL with no path'),
+  },
+  {
+    name: 'WARIFURI_MONITOR_ALIASES',
+    about: '監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01)',
+    commands: ['serve'],
+  },
+  {
     name: 'WARIFURI_DISCORD_TOKEN',
     section: 'secretary',
     about: '秘書の質問、朝の報告、失敗を Discord に送るボットのトークン。ファイル(_FILE)なら、トークンだけか DISCORD_BOT_TOKEN= の1行を置く。WARIFURI_DISCORD_CHANNEL と一緒に設定すると送る',

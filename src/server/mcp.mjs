@@ -1018,6 +1018,7 @@ export function createApp({
   chat = null,
   secretaryDevice,
   serverDevices = [],
+  monitor = null,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1048,7 +1049,7 @@ export function createApp({
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true)));
   web = createWeb({
     ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,
-    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices,
+    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor,
   });
   app.use(web.router);
   app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };

@@ -77,6 +77,8 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SECRETARY_TOOLS` | 秘書に渡す外の道具と、その範囲(mcp__<サーバーの名前>=範囲 の形、カンマ区切り)。範囲は read(読むツールだけ。書くツールはフックで止める)、own(warifuri が作ったものだけ書く)、write(書ける。外に出すときは毎回聞く)。own と write の違いは手引きで守る。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる | なし |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_DEVICE` | 秘書が書くときのデバイスの名前。同じ名前のデバイスがほかで使われているときに変える | `secretary` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_CONNECTORS` | claude.ai のコネクタ(Gmail、カレンダーなど)を秘書にも使わせるか。既定の off では、claude を ENABLE_CLAUDEAI_MCP_SERVERS=false で起こす。カレンダーを渡すときだけ、考えたうえで on にする | `off` |  |  | serve、secretary |
+| `WARIFURI_MONITOR_URL` | 自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない | なし |  |  | serve |
+| `WARIFURI_MONITOR_ALIASES` | 監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01) | なし |  |  | serve |
 | `WARIFURI_DISCORD_TOKEN` | 秘書の質問、朝の報告、失敗を Discord に送るボットのトークン。ファイル(_FILE)なら、トークンだけか DISCORD_BOT_TOKEN= の1行を置く。WARIFURI_DISCORD_CHANNEL と一緒に設定すると送る | なし |  | 秘密 | serve、secretary |
 | `WARIFURI_DISCORD_CHANNEL` | 送る先の Discord のチャンネルの id。本人だけが見るチャンネルにする | なし |  |  | serve、secretary |
 | `WARIFURI_DISCORD_USER` | 質問と失敗のときにメンションする、本人の Discord のユーザーの id。空ならメンションしない | なし |  |  | serve、secretary |

@@ -33,11 +33,15 @@ import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
 import { calendarSvg } from '../calendar/image.mjs';
 import { readSettings, weekBands } from '../ledger/settings.mjs';
+import { fetchDetail } from '../monitor/detail.mjs';
+import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
 
 // Pictures a sent message shows in its bubble; other files show only their name.
+// How long the numbers of the home lab's monitoring are kept before asking again.
+const HOMELAB_TTL_MS = 15_000;
 const PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -309,6 +313,7 @@ export function createWeb({
   chat = null,
   secretaryDevice = null,
   serverDevices = [],
+  monitor = null,
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
@@ -592,12 +597,26 @@ export function createWeb({
       }));
   }
 
-  api.get('/server', (req, res) => {
+  // The home lab as the server screen shows it (src/monitor/detail.mjs): the last hour, asked
+  // at most every HOMELAB_TTL_MS, whoever looks.
+  let detail = null;
+  let detailAt = 0;
+  api.get('/server/monitor', async (req, res) => {
+    if (!monitor?.url) return res.json({ configured: false });
+    if (!detail || now() - detailAt > HOMELAB_TTL_MS) {
+      detailAt = now();
+      detail = await fetchDetail(monitor.url, { aliases: monitor.aliases ?? {}, now });
+    }
+    return res.json({ configured: true, detail });
+  });
+
+  api.get('/server', async (req, res) => {
     const devices = devicesWithHolds();
     const names = devices.flatMap((d) => d.holds.map((h) => h.profile));
     res.json({
       now: nowIso(), version, started_at: new Date(startedAt).toISOString(), uptime_s: Math.max(0, Math.floor((now() - startedAt) / 1000)),
       mcp_url: mcpUrl(req), label: serverLabel, last_backup_at: lastBackup(home), devices, profiles: profileColors(home, names),
+      here: localMachine(home), jobs: home && secretaryDevice ? secretaryJobs(home) : [], monitor: Boolean(monitor?.url),
     });
   });
 
