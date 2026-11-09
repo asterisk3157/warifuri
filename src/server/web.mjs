@@ -34,6 +34,7 @@ import { listBackups } from '../ledger/backup.mjs';
 import { calendarSvg } from '../calendar/image.mjs';
 import { readSettings, weekBands } from '../ledger/settings.mjs';
 import { fetchHomelab } from '../monitor/homelab.mjs';
+import { fetchDetail } from '../monitor/detail.mjs';
 import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
@@ -609,13 +610,26 @@ export function createWeb({
     return homelab;
   };
 
+  // The performance view of the home lab (src/monitor/detail.mjs): the last hour, asked at most
+  // every HOMELAB_TTL_MS, with the summary of what is worth telling.
+  let detail = null;
+  let detailAt = 0;
+  api.get('/server/monitor', async (req, res) => {
+    if (!monitor?.url) return res.json({ configured: false });
+    if (!detail || now() - detailAt > HOMELAB_TTL_MS) {
+      detailAt = now();
+      detail = await fetchDetail(monitor.url, { aliases: monitor.aliases ?? {}, now });
+    }
+    return res.json({ configured: true, summary: await readHomelab(), detail });
+  });
+
   api.get('/server', async (req, res) => {
     const devices = devicesWithHolds();
     const names = devices.flatMap((d) => d.holds.map((h) => h.profile));
     res.json({
       now: nowIso(), version, started_at: new Date(startedAt).toISOString(), uptime_s: Math.max(0, Math.floor((now() - startedAt) / 1000)),
       mcp_url: mcpUrl(req), label: serverLabel, last_backup_at: lastBackup(home), devices, profiles: profileColors(home, names),
-      here: localMachine(home), jobs: home && secretaryDevice ? secretaryJobs(home) : [], homelab: await readHomelab(),
+      here: localMachine(home), jobs: home && secretaryDevice ? secretaryJobs(home) : [], monitor: Boolean(monitor?.url),
     });
   });
 

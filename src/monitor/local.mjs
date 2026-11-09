@@ -35,7 +35,7 @@ export function localMachine(home, { platform = process.platform } = {}) {
   return {
     cpu, cores,
     memory: round(100 * (1 - available / total)), memoryGb: round(total / 1024 ** 3),
-    disk, uptimeDays: Math.floor(os.uptime() / 86400),
+    disk, uptimeSeconds: Math.floor(os.uptime()),
   };
 }
 
