@@ -1,6 +1,7 @@
 // A profile's knowledge, as files in the data directory (原則20, 21, 22):
 //
-//   <home>/profiles/<folder>/people.md        the people of this area
+//   <home>/profiles/<folder>/people.md        the people of this area, as written before the
+//                                             ledger kept people (read only, to import them)
 //                            knowledge.md     rules and facts
 //                            knowledge/*.md   knowledge split by topic
 //                            procedures/*.md  one procedure per file
@@ -8,7 +9,7 @@
 //
 // The folder is the profile's name made safe for a file name on Windows, macOS and Linux
 // (profileFolder below). context reads the files; note appends to them and never rewrites
-// what is there. Nothing here opens a path given by a caller: a file asked for by name is
+// what is there. People are kept in the ledger (src/ledger/people.mjs), not here. Nothing here opens a path given by a caller: a file asked for by name is
 // looked up among the files that are listed.
 
 import fs from 'node:fs';
@@ -115,9 +116,10 @@ function listFolder(dir) {
   return { names: names.slice(0, MAX_LIST), onDisk, more: Math.max(0, names.length - MAX_LIST) };
 }
 
-// What an agent reads before working in a profile: people.md, knowledge.md and inbox.md
-// (null when absent; the inbox is for the secretary to sort), and the names in knowledge/ and procedures/ as "knowledge/<file>". With name (one
-// of those names), that one file instead.
+// What an agent reads before working in a profile: knowledge.md and inbox.md (null when
+// absent; the inbox is for the secretary to sort), people.md as people_md (the old list of
+// people, until it is imported into the ledger), and the names in knowledge/ and procedures/
+// as "knowledge/<file>". With name (one of those names), that one file instead.
 export function readContext(home, profile, { name } = {}) {
   const dir = profileDir(home, profile);
   if (name !== undefined) {
@@ -135,12 +137,27 @@ export function readContext(home, profile, { name } = {}) {
     profile,
     folder: path.basename(dir),
     exists: fs.existsSync(dir),
-    people: readCapped(path.join(dir, 'people.md')),
+    people_md: readCapped(path.join(dir, 'people.md')),
     knowledge: readCapped(path.join(dir, 'knowledge.md')),
     inbox: readCapped(path.join(dir, 'inbox.md')),
     files: Object.fromEntries(FOLDERS.map((f) => [f, listings[f].names.map((n) => `${f}/${n}`)])),
     more: Object.fromEntries(FOLDERS.map((f) => [f, listings[f].more])),
   };
+}
+
+// Once people.md has been imported into the ledger's people, it is renamed people.imported.md,
+// so context stops offering it. The file is kept for the person to check and then delete by
+// hand; it is never removed here. Refuses when there is no people.md, or the new name is taken.
+export const PEOPLE_MD = 'people.md';
+export const PEOPLE_IMPORTED = 'people.imported.md';
+export function finishPeopleImport(home, profile) {
+  const dir = profileDir(home, profile);
+  const from = path.join(dir, PEOPLE_MD);
+  const to = path.join(dir, PEOPLE_IMPORTED);
+  if (!fs.existsSync(from)) throw new LedgerError([`プロフィール ${profile} には people.md がありません`]);
+  if (fs.existsSync(to)) throw new LedgerError([`${PEOPLE_IMPORTED} がもうあります。前の取り込みのファイルを本人が片づけてから、もう一度呼びます`]);
+  fs.renameSync(from, to);
+  return { profile, renamed: PEOPLE_MD, to: PEOPLE_IMPORTED };
 }
 
 // Is a secretary plug-in configured? Plug-ins are listed in <home>/plugins.yaml; the
@@ -169,19 +186,18 @@ export function checkNoteText(text) {
 
 // Appends a note to the profile and says where it went. kind 'human': the person's own
 // words, straight into knowledge.md marked 本人の言葉. kind 'agent': an agent's insight, into
-// inbox.md when a secretary is configured, else into knowledge.md marked 未確認. people: it is
-// about a person, so it goes straight to people.md (an agent's marked 未確認), never through the
-// inbox: who someone is matters more seen at once than sorted later. sorted: the secretary
+// inbox.md when a secretary is configured, else into knowledge.md marked 未確認. (A note about a
+// person goes to the ledger's people instead; see addPersonFact in mcp.mjs.) sorted: the secretary
 // writing what it has sorted, which goes where it belongs rather than back to the inbox. from ({ device, task }) is written after the
 // text, so the secretary knows where it came from.
 // The entry is one list item: "- <date> 「<mark>」 <text> (<from>)", later lines indented.
-export function writeNote(home, profile, { text, kind, people = false, sorted = false, secretary = false, from = {}, now = new Date() }) {
+export function writeNote(home, profile, { text, kind, sorted = false, secretary = false, from = {}, now = new Date() }) {
   const problems = checkNoteText(text);
   if (!['human', 'agent'].includes(kind)) problems.push('kind は human(本人の言葉)か agent(エージェントの気づき)です');
   if (problems.length) throw new LedgerError(problems);
   const dir = profileDir(home, profile);
-  const toInbox = kind === 'agent' && secretary && !sorted && !people;
-  const file = toInbox ? 'inbox.md' : people ? 'people.md' : 'knowledge.md';
+  const toInbox = kind === 'agent' && secretary && !sorted;
+  const file = toInbox ? 'inbox.md' : 'knowledge.md';
   const mark = kind === 'human' ? MARK_HUMAN : toInbox ? null : MARK_UNCONFIRMED;
   const body = text.trim().replace(/\r\n?/g, '\n').split('\n').join('\n  ');
   const source = [from.device, from.task].filter(Boolean).join(' / ');

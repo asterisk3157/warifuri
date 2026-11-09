@@ -29,6 +29,8 @@ import { askMessages, replyComponents } from './discord-chat.mjs';
 const BODY_MAX = 1500;
 // The first line of a copy of what the person wrote on the screen.
 export const WEB_MARK = '(Web から)';
+// The first line of a request an agent sent the secretary (ask_secretary).
+export const AGENT_MARK = '(エージェントから)';
 // How long after the person last wrote from Discord the secretary's replies go there too.
 export const TALK_MS = 30 * 60 * 1000;
 
@@ -39,6 +41,10 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   if (mirror && m.role === 'user' && m.actor !== 'discord') {
     const words = m.body.trim() || (m.data?.attachments?.length ? 'ファイルを送りました' : '');
     return words ? { text: `${WEB_MARK}\n${words}`, mention: false, whole: true } : null;
+  }
+  if (mirror && isAgentRequest(m)) {
+    const from = m.data.request.from ? `${AGENT_MARK} ${m.data.request.from}` : AGENT_MARK;
+    return { text: `${from}\n${m.data.request.text ?? m.body}`, mention: false, whole: true };
   }
   if (m.kind === 'ask' && m.state === 'open') {
     const messages = askMessages(m);
@@ -55,8 +61,13 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   return null;
 }
 
-// What the person wrote: from Discord or not. Answers count; agents' requests do not.
-const personVia = (m) => (m.role === 'user' ? (m.actor === 'discord' ? 'discord' : 'screen') : null);
+const isAgentRequest = (m) => m.role === 'system' && m.kind === 'text' && Boolean(m.data?.request);
+// Who last wrote to the secretary: the person from Discord or the screen, or (with mirror) an
+// agent's request, whose reply then goes to Discord too.
+const viaOf = (m, mirror) => {
+  if (m.role === 'user') return m.actor === 'discord' ? 'discord' : 'screen';
+  return mirror && isAgentRequest(m) ? 'agent' : null;
+};
 
 // discord: { post } (src/notify/discord.mjs). night: the secretary's night ({ start, end }).
 // picture(m): the PNG of the calendar under a message (show_calendar), or null; it goes with
@@ -187,12 +198,12 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
       }
       // In the night, nothing goes unless the person is talking from Discord now (by what the
       // person wrote last); then all of it goes, in order.
-      const newest = [...list].reverse().find((m) => personVia(m));
-      const now_ = newest ? { via: personVia(newest), viaAt: newest.created_at } : state;
+      const newest = [...list].reverse().find((m) => viaOf(m, mirror));
+      const now_ = newest ? { via: viaOf(newest, mirror), viaAt: newest.created_at } : state;
       if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) return sent;
       const save = () => write({ started: true, last: state.last, failure: state.failure ?? null, via: state.via ?? null, viaAt: state.viaAt ?? null });
       for (const m of list) {
-        const via = personVia(m);
+        const via = viaOf(m, mirror);
         if (via) {
           state.via = via;
           state.viaAt = m.created_at;

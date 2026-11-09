@@ -81,7 +81,7 @@ warifuri connect
 
 - この PC 用のシークレット(`wf_` で始まる文字列)を発行し、ユーザーだけが読めるファイル `~/.warifuri/device.key` に保存します。デバイス名は PC のホスト名で、`--device <名前>` で変更できます。
 - `claude` と `codex` に、MCP サーバーを `warifuri` という名前で登録します。
-- タスク確認と、秘書が有効なときにカレンダーへ直接書くのを止める確認を、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に追加します。
+- タスク確認と、作業の終わりの確認と、秘書が有効なときにカレンダーへ直接書くのを止める確認を、Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に追加します。
 - warifuri のスキルをコピーします。前の版の秘書のスキル(`warifuri-secretary`)があれば、スキルのフォルダの外に移します。
 
 書き換える設定ファイルは、先に `<ファイル>.bak-warifuri-<日時>` としてバックアップします。何度実行しても同じ結果になります。
@@ -90,7 +90,7 @@ warifuri connect
 |---|---|
 | `--dry-run` | 何をするかだけ表示する |
 | `--harness claude`・`--harness codex` | 片方だけに接続する |
-| `--no-hook` | タスク確認とカレンダーの確認を設定しない |
+| `--no-hook` | タスク確認、作業の終わりの確認、カレンダーの確認を設定しない |
 | `--no-skills` | warifuri のスキルをコピーしない |
 | `--force` | スキルを新しい版に入れ替える |
 
@@ -214,6 +214,8 @@ warifuri secretary enable
 
 止める場合は `warifuri secretary disable` を実行し、`warifuri serve` を再起動します。時刻は[設定](configuration.md)で変更できます。
 
+秘書の画面で初めて話しかけると、秘書が予定を組むための設定(生活の決まり、予定を置いてよい時間、週の決まった場所、プロフィール)を一緒に作るかを聞きます。答えた中身は、確認してから書き込まれ、設定の「自身について」で見られます。
+
 <details>
 <summary>秘書が使えるもの</summary>
 
@@ -260,7 +262,7 @@ warifuri backup --dir <バックアップ先のフォルダ>
 <summary>手順</summary>
 
 1. サーバーを停止します。
-2. Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` の `hooks` の `PreToolUse` から、`warifuri hook gate` と `warifuri hook calendar`(Windows では `warifuri.cmd hook gate` と `warifuri.cmd hook calendar`)を呼ぶ項目を削除します。ほかのフックは残してください。
+2. Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` の `hooks` の `PreToolUse` から `warifuri hook gate` と `warifuri hook calendar` を、`Stop` から `warifuri hook stop` を呼ぶ項目を削除します(Windows では `warifuri.cmd hook gate` などです)。ほかのフックは残してください。
 3. スキルのフォルダ `~/.claude/skills/warifuri/` と `~/.codex/skills/warifuri/` を削除します。
 4. MCP サーバーの登録を削除します。
 

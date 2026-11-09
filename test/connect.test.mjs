@@ -146,6 +146,11 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
   const codex = readJson(path.join(w.user, '.codex', 'hooks.json'));
   assert.equal(codex.hooks.PreToolUse[0].matcher, 'apply_patch|Edit|Write');
   assert.equal(codex.hooks.PreToolUse[1].matcher, CALENDAR_MATCHER);
+  for (const json of [claude, codex]) {
+    assert.equal(json.hooks.Stop.length, 1);
+    assert.equal(json.hooks.Stop[0].matcher, undefined);
+    assert.match(json.hooks.Stop[0].hooks[0].command, /warifuri\.mjs" hook stop --home "[^"]+"$/);
+  }
   assert.match(r.stdout, /trust the new hooks/);
 
   const before = { user: listing(path.join(w.user, '.claude')), codex: listing(path.join(w.user, '.codex')), settings: fs.readFileSync(path.join(w.user, '.claude', 'settings.json'), 'utf8') };
@@ -157,6 +162,8 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
   assert.match(again.stdout, /codex: kept the MCP server/);
   assert.match(again.stdout, /claude: kept the start gate/);
   assert.match(again.stdout, /claude: kept the calendar hook/);
+  assert.match(again.stdout, /claude: kept the stop reminder/);
+  assert.match(again.stdout, /codex: kept the stop reminder/);
   assert.equal(w.calls().length, 2);
   assert.equal(fs.readFileSync(keyFile, 'utf8').trim(), key);
   assert.deepEqual(listing(path.join(w.user, '.claude')), before.user);
@@ -183,7 +190,9 @@ test('other hooks are kept, the old file is backed up, and an old gate is replac
   assert.equal(r.status, 0, r.all);
   const now = readJson(file);
   assert.equal(now.model, 'x');
-  assert.deepEqual(now.hooks.Stop, original.hooks.Stop);
+  assert.deepEqual(now.hooks.Stop[0], original.hooks.Stop[0]);
+  assert.equal(now.hooks.Stop.length, 2);
+  assert.match(now.hooks.Stop[1].hooks[0].command, / hook stop/);
   assert.deepEqual(now.hooks.PreToolUse[0], original.hooks.PreToolUse[0]);
   assert.deepEqual(now.hooks.PreToolUse[1], { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'lint.sh' }] });
   assert.equal(now.hooks.PreToolUse.length, 4);

@@ -81,7 +81,7 @@ warifuri connect
 
 - Issues a device key for this PC (a string starting with `wf_`) and saves it in `~/.warifuri/device.key`, readable only by you. The device name is the PC's host name; change it with `--device <name>`.
 - Registers the MCP server as `warifuri` in `claude` and `codex`.
-- Adds the task check, and the check that stops writing to a calendar directly while the secretary is on, to Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
+- Adds the task check, the end-of-work check, and the check that stops writing to a calendar directly while the secretary is on, to Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
 - Copies the warifuri skill. If the secretary skill of an earlier version (`warifuri-secretary`) is there, moves it out of the skills folder.
 
 Before changing a settings file, it backs it up as `<file>.bak-warifuri-<date>`. Running it again gives the same result.
@@ -90,7 +90,7 @@ Before changing a settings file, it backs it up as `<file>.bak-warifuri-<date>`.
 |---|---|
 | `--dry-run` | Only show what it would do |
 | `--harness claude` / `--harness codex` | Connect only one of them |
-| `--no-hook` | Don't set up the task check and the calendar check |
+| `--no-hook` | Don't set up the task check, the end-of-work check and the calendar check |
 | `--no-skills` | Don't copy the warifuri skill |
 | `--force` | Replace the skill with the new version |
 
@@ -214,6 +214,8 @@ warifuri secretary enable
 
 To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times can be changed in [Configuration](configuration.md) (in Japanese).
 
+The first time you talk to the secretary on its screen, it offers to make the settings it schedules with (daily routine, the hours tasks may go in, where you are each week, profiles) together with you. It shows what it will write and asks before writing; the result is shown under 自身について in the settings.
+
 <details>
 <summary>What the secretary can use</summary>
 
@@ -260,7 +262,7 @@ warifuri backup --dir <backup folder>
 <summary>Steps</summary>
 
 1. Stop the server.
-2. In Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`, delete the entries under `hooks` → `PreToolUse` that call `warifuri hook gate` and `warifuri hook calendar` (`warifuri.cmd hook gate` and `warifuri.cmd hook calendar` on Windows). Leave other hooks alone.
+2. In Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`, delete the entries under `hooks` → `PreToolUse` that call `warifuri hook gate` and `warifuri hook calendar`, and the one under `hooks` → `Stop` that calls `warifuri hook stop` (`warifuri.cmd hook gate` and so on on Windows). Leave other hooks alone.
 3. Delete the skill folders `~/.claude/skills/warifuri/` and `~/.codex/skills/warifuri/`.
 4. Remove the MCP server registrations.
 

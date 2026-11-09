@@ -445,6 +445,10 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-autonomy-intro p { margin: 0; font-size: 15px; line-height: 1.6; }
 .wf-autonomy-go { align-self: flex-start; margin-top: 8px; }
 @media (max-width: 640px) { .wf-cols-autonomy { display: none; } .wf-row-autonomy { grid-template-columns: 1fr auto; gap: 6px 12px; } .wf-row-autonomy > :nth-child(n+3) { display: none; } }
+.wf-cols-life1, .wf-row-life1 { grid-template-columns: 1fr; }
+.wf-cols-life2, .wf-row-life2 { grid-template-columns: minmax(140px, .8fr) minmax(160px, 1.4fr); }
+.wf-cols-week, .wf-row-week { grid-template-columns: minmax(90px, .8fr) 120px minmax(100px, 1fr) minmax(100px, 1fr); }
+@media (max-width: 640px) { .wf-cols-week { display: none; } .wf-row-week { grid-template-columns: 1fr auto; gap: 6px 12px; } }
 .wf-cols-apps, .wf-row-apps { grid-template-columns: minmax(140px, 1fr) minmax(100px, .8fr) minmax(120px, 1fr); }
 .wf-cell { display: flex; flex-direction: column; min-width: 0; }
 .wf-cell b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -812,3 +816,33 @@ button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight:
 .wf-rich ul, .wf-rich ol { padding-left: 1.2em; }
 .wf-rich a { color: var(--accent); }
 .wf-know-empty { font-size: 14px; color: var(--sub); }
+.wf-ptable-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wf-ptable-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wf-ptable-search { flex: 1 1 180px; min-width: 0; font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--hair); background: transparent; color: inherit; }
+.wf-ptable-select { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--hair); background: transparent; color: inherit; }
+.wf-ptable-select:disabled { opacity: .5; }
+.wf-ptable-count { font-size: 13px; color: var(--sub); margin-left: auto; font-variant-numeric: tabular-nums; }
+.wf-ptable-scroll { overflow-x: auto; border: 1px solid var(--hair); border-radius: 10px; }
+.wf-ptable { border-collapse: separate; border-spacing: 0; font-size: 14px; min-width: 100%; table-layout: fixed; }
+.wf-ptable th, .wf-ptable td { text-align: left; padding: 8px 12px; border-top: 1px solid var(--hair); vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-ptable thead th { border-top: none; font-weight: 600; color: var(--sub); font-size: 12px; background: var(--bg, transparent); }
+.wf-pcol-name { width: 8em; position: sticky; left: 0; z-index: 1; background: var(--surface, var(--bg)); box-shadow: 1px 0 0 var(--hair); }
+.wf-pcol-fixed { width: 9em; }
+.wf-pcol-item { width: 8em; }
+.wf-pcol-memos { width: 4em; text-align: right !important; font-variant-numeric: tabular-nums; }
+.wf-ptable-blank { color: var(--sub); opacity: .5; }
+.wf-ptable-sort { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; display: inline-flex; gap: 4px; align-items: baseline; }
+.wf-ptable-arrow { font-size: 10px; min-width: 1ch; }
+.wf-ptable-name { font: inherit; font-weight: 600; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.wf-ptable tbody tr:hover > * { background-color: color-mix(in srgb, var(--accent) 5%, var(--surface, var(--bg))); }
+.wf-ptable-open > * { background-color: color-mix(in srgb, var(--accent) 10%, var(--surface, var(--bg))) !important; }
+.wf-ptable-detail td { white-space: normal; overflow: visible; padding: 10px 12px 14px; border-top: none; position: sticky; left: 0; }
+.wf-ptable-detail .wf-know-detail { max-width: 40em; }
+.wf-know-detail { display: flex; flex-direction: column; gap: 10px; }
+.wf-know-fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+.wf-know-fields dt { color: var(--sub); }
+.wf-know-fields dd { margin: 0; overflow-wrap: anywhere; }
+.wf-know-kind { font-size: 12px; color: var(--sub); border: 1px solid var(--hair); border-radius: 6px; padding: 0 6px; margin-right: 6px; }
+.wf-know-links { margin: 0; padding-left: 1.2em; font-size: 14px; }
+.wf-know-sub { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.wf-know-sub h3 { font-size: 14px; font-weight: 600; color: var(--sub); margin: 0; }

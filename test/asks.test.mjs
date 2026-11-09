@@ -62,7 +62,7 @@ test('schema: a version 8 file keeps its thread, messages and proposals, and gai
   assert.throws(() => raw.prepare("INSERT INTO records (at, actor, entity, entity_id, action, changes) VALUES ('x', 'web', 'attachment', 'a1', 'create', '{}')").run(), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 11);
+  assert.equal(SCHEMA_VERSION, 12);
   const L = openLedger(file, { now: ticking() });
   const thread = L.getThread();
   assert.equal(thread.session_id, 's-1');
@@ -79,7 +79,7 @@ test('schema: a version 8 file keeps its thread, messages and proposals, and gai
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '11');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '12');
   for (const t of ['messages_v8', 'threads_v8', 'records_v8']) assert.equal(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(t), undefined);
   for (const i of ['messages_thread', 'messages_state', 'threads_kind', 'records_entity']) assert.ok(check.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(i), i);
   assert.throws(() => check.exec('DELETE FROM records WHERE id = 1'), /append-only/);
@@ -409,7 +409,12 @@ test('while the secretary runs, only it books; the others ask it with ask_secret
     assert.match(out.content[0].text, /予定は秘書が決めます.*ask_secretary/);
   }
   const secretary = await on('secretary');
-  assert.equal((await secretary.callTool({ name: 'book', arguments: slot })).isError, undefined);
+  const made = await secretary.callTool({ name: 'book', arguments: { ...slot, location: '自宅' } });
+  assert.equal(made.isError, undefined);
+  // A booking made here says who made it; one copied from a calendar keeps its own.
+  assert.deepEqual([made.structuredContent.booking.organizer, made.structuredContent.booking.location], ['秘書', '自宅']);
+  const copied = await secretary.callTool({ name: 'book', arguments: { ...slot, source: 'google-calendar', external_id: 'ev1' } });
+  assert.equal(copied.structuredContent.booking.organizer ?? null, null);
   assert.match((await secretary.callTool({ name: 'ask_secretary', arguments: { text: 'x' } })).content[0].text, /秘書は自分に頼めません/);
 
   const answered = await laptop.callTool({ name: 'ask_secretary', arguments: { text: '資料作り', task_id: 't_1', minutes: 120, prefer: '午前', wait_seconds: 30 } });
@@ -425,7 +430,9 @@ test('while the secretary runs, only it books; the others ask it with ask_secret
   // A secretary that cannot answer (claude missing, turned off): anyone books, nobody asks.
   for (const options of [{ secretaryDevice: 'secretary', chat: chat(false) }, { secretaryDevice: null }]) {
     const c = await (await start(options))('laptop');
-    assert.equal((await c.callTool({ name: 'book', arguments: slot })).isError, undefined);
+    const own = await c.callTool({ name: 'book', arguments: slot });
+    assert.equal(own.isError, undefined);
+    assert.equal(own.structuredContent.booking.organizer, 'laptop');
     assert.match((await c.callTool({ name: 'ask_secretary', arguments: { text: '2時間' } })).content[0].text, /秘書が有効になっていないので、頼めません/);
     assert.equal((await c.callTool({ name: 'board', arguments: {} })).structuredContent.secretary, 'off');
   }

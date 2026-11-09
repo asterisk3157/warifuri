@@ -36,7 +36,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 ## 使う機械の設定
 
-`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認とカレンダーのフック(`warifuri hook gate`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使わず、warifuri を通して予定を読み書きします。warifuri が自分の Google の資格情報でカレンダーを触る道は、次の版で作ります。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_STOP`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認、作業の終わりの確認、カレンダーのフック(`warifuri hook gate`、`warifuri hook stop`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使わず、warifuri を通して予定を読み書きします。warifuri が自分の Google の資格情報でカレンダーを触る道は、次の版で作ります。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
 ## 秘書の設定
 
@@ -64,12 +64,14 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_DEVICE_KEY_FILE` | このデバイスのシークレットを1行で置くファイル。本人だけが読めるようにする。connect が書き、タスク確認のフックが読む | `WARIFURI_HOME/device.key` |  |  | connect、hook |
 | `WARIFURI_SERVER_DEVICES` | サーバーの機械で動くほかのプログラムのデバイスの名前(カンマ区切り)。Web 画面のデバイスの一覧に出さない。秘書のデバイスは書かなくても出ない | なし |  |  | serve |
 | `WARIFURI_GATE` | タスク確認。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
+| `WARIFURI_STOP` | 作業の終わりの確認。エージェントが作業を終えるとき、持ったままのタスクがあれば、会話ごとに一度だけ、閉じるか手放すよう伝える。off にすると伝えない | `on` |  |  | hook |
 | `WARIFURI_CALENDAR_CLAUDE` | この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_CALENDAR_CODEX` | この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_SECRETARY` | 秘書の定時の仕事。on にすると、serve が決まった時刻に秘書(claude -p)を起こす。warifuri secretary enable と disable が書く | `off` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_NIGHTLY` | 毎晩の見張りと組み直しの時刻。HH:MM で毎日、曜日を前に付けると(mon,thu 23:00)その曜日だけ。off で止める | `23:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_MORNING` | 朝の時刻。秘書との会話に「朝の時間です」を送り、会話の秘書が朝の言葉を書いて質問する。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ | `07:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_INBOX` | 受信箱の整理の時刻。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。毎晩の仕事と同じ時刻なら、その終わりを待って動く | `sun 23:00` |  |  | serve、secretary |
+| `WARIFURI_SECRETARY_WEEKLY` | 週の完了確認の時刻。秘書との会話に「週の完了確認の時間です」を送り、会話の秘書が、開いたタスクのうち終わっていそうなものを根拠つきで本人に確かめる。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。夜の時間帯には送らない | `sun 10:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_SYNC` | カレンダーの同期の間隔。every 60m のように書く(15m から 24h、0時から数える)。書き方は WARIFURI_SECRETARY_NIGHTLY の時刻でもよい。秘書にカレンダーを渡していないときは動かない。夜の時間帯には動かない | `every 60m` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_NIGHT` | 夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く | `23:00-07:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_TIMEOUT` | 秘書の1回の仕事の上限(分)。超えたら止める | `20` |  |  | serve、secretary |

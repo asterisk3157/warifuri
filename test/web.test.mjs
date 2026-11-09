@@ -521,6 +521,29 @@ test('devices: the secretary and the server machine\'s programs are kept apart; 
   assert.ok(thesis.last_active_at >= ledger.listPlaces().find((p) => p.name === 'thesis').updated_at);
 });
 
+test('settings: 自身について shows the settings scheduling reads, with the unset ones and the profiles', async (t) => {
+  const { base, ledger, home } = await start(t);
+  let st = await (await get(base, '/web/api/settings')).json();
+  assert.deepEqual(st.life.life, { rules: [] });
+  assert.deepEqual(st.life.limits, { day_max_hours: 8, block_min_minutes: 30, block_max_minutes: 120, earliest: '09:00', latest: '21:00' });
+  assert.deepEqual(st.life.onboarding, { state: null });
+  assert.deepEqual(st.life.defaults.limits.sort(), ['block_max_minutes', 'block_min_minutes', 'day_max_hours', 'earliest', 'latest']);
+  assert.deepEqual(st.life.profiles, [{ name: 'hobby', human_led: false }, { name: 'research', human_led: false }]);
+  assert.equal(st.profiles.hobby, '#123abc');
+
+  fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'profile.yaml'), 'color: "#123abc"\nhuman_led: true\n');
+  ledger.setSettings('life', { rules: JSON.stringify(['平日は 0:00 から 7:00 まで寝る']) }, ACTOR);
+  ledger.setSettings('limits', { earliest: JSON.stringify('08:00') }, { ...ACTOR, action: 'decide' });
+  ledger.setSettings('week', { slots: JSON.stringify([{ days: ['月'], start: '13:00', end: '18:00', place: '研究室', profile: 'research' }]) }, ACTOR);
+  st = await (await get(base, '/web/api/settings')).json();
+  assert.deepEqual(st.life.life.rules, ['平日は 0:00 から 7:00 まで寝る']);
+  assert.equal(st.life.limits.earliest, '08:00');
+  assert.ok(!st.life.defaults.limits.includes('earliest'));
+  assert.equal(st.life.week.slots[0].place, '研究室');
+  assert.deepEqual(st.life.profiles.find((x) => x.name === 'hobby'), { name: 'hobby', human_led: true });
+  assert.ok(!('calendar' in st.life), 'the events not taken in stay with the secretary');
+});
+
 test('logging in again from the same app on the same device ends the older login', () => {
   const ledger = openLedger(':memory:');
   ledger.issueKey('desk', ACTOR);
@@ -558,19 +581,26 @@ test('the badge on 秘書: what the secretary said since the person last saw the
 });
 
 test('ナレッジ: the profiles with their counts, one profile\'s files, and a file split out of them, read only', async (t) => {
-  const { base, home } = await start(t);
+  const { base, home, ledger } = await start(t);
   fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'knowledge.md'), '- 2026-10-27 「本人の言葉」 苗は朝に水をやる (laptop)\n');
+  const person = ledger.people.create({ name: '田中さん', role: '園芸部の部長', items: { 好きなもの: 'トマト' }, add_memos: [{ text: '朝に来る', mark: '未確認' }] }, { profile: 'hobby' }, { actor: 'human' });
+  ledger.people.learn({ profile: 'hobby', text: '鈴木さん: 新しく来た' }, { actor: 'human' });
+  ledger.people.create({ name: '別の領域の人' }, { profile: 'research' }, { actor: 'human' });
   fs.mkdirSync(path.join(home, 'profiles', 'hobby', 'procedures'));
   fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'procedures', '植え替え.md'), '# 植え替え\n\n1. 鉢を用意する\n');
   const list = await (await get(base, '/web/api/knowledge')).json();
   assert.ok(list.profiles.some((p) => p.name === 'research'));
   const hobby = list.profiles.find((p) => p.name === 'hobby');
-  assert.deepEqual([hobby.people, hobby.knowledge, hobby.inbox, hobby.files], [0, 1, 0, 1]);
+  assert.deepEqual([hobby.people, hobby.knowledge, hobby.inbox, hobby.files], [1, 1, 0, 1]);
   assert.equal(list.colors.hobby, '#123abc');
   const one = await (await get(base, '/web/api/knowledge/hobby')).json();
   assert.equal(one.profile, 'hobby');
   assert.match(one.knowledge.text, /苗は朝に水をやる/);
   assert.deepEqual(one.files.procedures, ['procedures/植え替え.md']);
+  // People come from the ledger, in full, with only this profile's items and memos.
+  assert.deepEqual(one.people.people.map((p) => [p.id, p.role, p.items, p.memos.map((f) => f.text)]), [[person.id, '園芸部の部長', [{ label: '好きなもの', value: 'トマト' }], ['朝に来る']]]);
+  assert.deepEqual(one.people.unassigned.map((f) => f.text), ['鈴木さん: 新しく来た']);
+  assert.equal(one.people_md, null);
   const file = await (await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('procedures/植え替え.md')}`)).json();
   assert.match(file.text, /鉢を用意する/);
   assert.equal((await get(base, '/web/api/knowledge/nobody')).status, 404);

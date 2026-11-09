@@ -35,7 +35,7 @@ import { calendarSvg } from '../calendar/image.mjs';
 import { readSettings, weekBands } from '../ledger/settings.mjs';
 import { fetchDetail } from '../monitor/detail.mjs';
 import { localMachine, secretaryJobs } from '../monitor/local.mjs';
-import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
+import { profileDir, profileName, readContext, readProfileDefaults, profileFolders, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
 
@@ -449,9 +449,11 @@ export function createWeb({
     });
   });
 
-  // ナレッジ: the profiles (those with a folder, and those named by places and goals), and for
-  // one profile its people, knowledge, inbox and the names in knowledge/ and procedures/, or
-  // one of those files with ?name=. It only reads; changes go through the agents' note.
+  // ナレッジ: the profiles (those with a folder, those named by places and goals, and those with
+  // people), and for one profile its people (from the ledger, each in full with that profile's
+  // items and facts), knowledge, inbox, the old people.md while it is there, and the names in
+  // knowledge/ and procedures/, or one of those files with ?name=. It only reads; changes go
+  // through the agents' tools.
   const profileNames = () => {
     const names = new Set();
     if (home) {
@@ -462,10 +464,12 @@ export function createWeb({
       }
     }
     for (const p of ledger.listPlaces()) if (p.profile) names.add(p.profile);
+    for (const p of Object.keys(ledger.people.counts())) names.add(p);
     return [...names].sort();
   };
   const lines = (f) => (f?.text ? f.text.split('\n').filter((l) => l.trim().startsWith('- ')).length : 0);
   api.get('/knowledge', (req, res) => {
+    const peopleCounts = ledger.people.counts();
     const profiles = profileNames().map((name) => {
       let c = null;
       try {
@@ -474,7 +478,7 @@ export function createWeb({
         c = null;
       }
       return {
-        name, people: lines(c?.people), knowledge: lines(c?.knowledge), inbox: lines(c?.inbox),
+        name, people: peopleCounts[name] ?? 0, knowledge: lines(c?.knowledge), inbox: lines(c?.inbox),
         files: (c?.files?.knowledge?.length ?? 0) + (c?.files?.procedures?.length ?? 0),
       };
     });
@@ -487,7 +491,10 @@ export function createWeb({
     try {
       if (typeof req.query.name === 'string') return res.json(readContext(home, name, { name: req.query.name }));
       const c = readContext(home, name);
-      return res.json({ profile: name, people: c.people, knowledge: c.knowledge, inbox: c.inbox, files: c.files, more: c.more });
+      const scope = { profile: name };
+      const listed = ledger.people.list(scope);
+      const people = { people: listed.people.map((p) => ledger.people.get(p.id, scope)), more: listed.more, unassigned: listed.unassigned };
+      return res.json({ profile: name, people, people_md: c.people_md, knowledge: c.knowledge, inbox: c.inbox, files: c.files, more: c.more });
     } catch (err) {
       if (err instanceof LedgerError) return res.status(404).json({ error: 'not found', problems: err.problems });
       throw err;
@@ -916,7 +923,14 @@ export function createWeb({
       .sort((a, b) => (a.last_token_at < b.last_token_at ? 1 : -1));
     // The secretary's autonomy, to look at only: it changes in the conversation with the secretary.
     const autonomy = { secretary: Boolean(chat?.on), ...ledger.listAutonomy() };
-    res.json({ now: nowIso(), places, devices, apps, autonomy, profiles: profileColors(home, places.map((p) => p.profile)) });
+    // The person's settings that scheduling reads, to look at only: they change in the conversation with the secretary.
+    const { life, places: where, limits, week, onboarding, defaults } = readSettings(ledger);
+    // The profiles (生活の分け方) with whether their goals are led by the person, from their folders and places.
+    const profileNames = [...new Set([...(home ? profileFolders(home) : []), ...places.map((p) => p.profile?.normalize('NFC')).filter(Boolean)])].sort();
+    const kinds = profileNames.map((name) => ({ name, human_led: home ? readProfileDefaults(home, name).human_led === true : false }));
+    const lifeView = { life, places: where, limits, week, onboarding, profiles: kinds, defaults: { life: defaults.life, places: defaults.places, limits: defaults.limits, week: defaults.week } };
+    const weekProfiles = week.slots.map((x) => x.profile).filter(Boolean);
+    res.json({ now: nowIso(), places, devices, apps, autonomy, life: lifeView, profiles: profileColors(home, [...profileNames, ...weekProfiles]) });
   });
 
   const profileOut = () => {

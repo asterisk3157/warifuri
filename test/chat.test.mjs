@@ -12,8 +12,9 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { openLedger } from '../src/ledger/ledger.mjs';
 import { loadConfig } from '../src/config.mjs';
-import { createChat, readResult } from '../src/secretary/chat.mjs';
-import { writeMcpConfig, paths } from '../src/secretary/secretary.mjs';
+import { createChat, readResult, buildChatPrompt } from '../src/secretary/chat.mjs';
+import { writeSettings } from '../src/ledger/settings.mjs';
+import { writeMcpConfig, paths, scheduleFrom } from '../src/secretary/secretary.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-chat-'));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -150,6 +151,46 @@ test('chat: the first turn starts a session with --session-id, the next resumes 
   }
   // Records name the thread and messages, written by the secretary's device.
   assert.ok(w.ledger.records(thread.id).every((r) => r.entity === 'thread'));
+});
+
+test('chat: on a new install the person\'s first conversation carries the onboarding instructions, until it is done', async (t) => {
+  const w = world(t);
+  w.chat.send('こんにちは', WEB);
+  await w.chat.idle();
+  assert.match(w.claude.calls[0].input, /# 最初の会話\(設定を一緒に作る\)/);
+  assert.match(w.claude.calls[0].input, /onboarding: \{ state: "asking" \}/);
+
+  // Started and one section written: still given, so the secretary goes on from there.
+  writeSettings(w.ledger, { onboarding: { state: 'asking' }, life: { rules: ['平日は 0:00 から 7:00 まで寝る'] } }, {}, WEB);
+  w.chat.send('続けて', WEB);
+  await w.chat.idle();
+  assert.match(w.claude.calls[1].input, /# 最初の会話/);
+
+  writeSettings(w.ledger, { onboarding: { state: 'done' } }, {}, WEB);
+  w.chat.send('ありがとう', WEB);
+  await w.chat.idle();
+  assert.ok(!w.claude.calls[2].input.includes('# 最初の会話'));
+});
+
+test('chat: settings made by hand, a skipped onboarding and a turn with no words of the person get no onboarding', async (t) => {
+  const w = world(t);
+  writeSettings(w.ledger, { limits: { earliest: '08:00' } }, { byPerson: true }, WEB);
+  w.chat.send('今日なにやる?', WEB);
+  await w.chat.idle();
+  assert.ok(!w.claude.calls[0].input.includes('# 最初の会話'));
+
+  const v = world(t);
+  writeSettings(v.ledger, { onboarding: { state: 'skipped' } }, {}, WEB);
+  v.chat.send('今日なにやる?', WEB);
+  await v.chat.idle();
+  assert.ok(!v.claude.calls[0].input.includes('# 最初の会話'));
+
+  // The prompt alone: a thread of its own never gets it.
+  const sub = { parent: { created_at: '2026-10-25T03:00:00.000Z', role: 'secretary', body: '元の発言' } };
+  const schedule = scheduleFrom({});
+  const feed = [{ id: 'm1', role: 'user', kind: 'text', body: 'やあ', created_at: '2026-10-25T03:00:00.000Z' }];
+  assert.match(buildChatPrompt({ now: new Date(), schedule, feed, onboarding: true }), /# 最初の会話/);
+  assert.ok(!buildChatPrompt({ now: new Date(), schedule, feed, onboarding: true, sub }).includes('# 最初の会話'));
 });
 
 test('chat: messages sent during a reply wait, then go together in one turn; never two runs at once', async (t) => {

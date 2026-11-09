@@ -80,7 +80,7 @@ export function denyOutput(reason) {
 }
 
 // Asks the server about one directory: { place, task } or null when anything goes wrong.
-async function askHeld({ url, key, dir, fetchImpl, signal }) {
+export async function askHeld({ url, key, dir, fetchImpl, signal }) {
   try {
     const res = await fetchImpl(`${url.replace(/\/+$/, '')}/api/held?dir=${encodeURIComponent(dir)}`, {
       headers: { authorization: `Bearer ${key}` },

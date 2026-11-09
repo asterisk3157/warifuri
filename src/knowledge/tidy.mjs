@@ -180,13 +180,14 @@ function inboxBody(entry) {
     .join('\n');
 }
 
-// Sorts the inbox. moves: [{ entries: [id], to, text?, checked?, reason? }]. to is
-// 'knowledge' (knowledge.md), 'people' (people.md), a 'knowledge/<topic>.md', or 'drop' (left
+// Sorts the inbox. moves: [{ entries: [id], to, text?, checked?, reason?, person? }]. to is
+// 'knowledge' (knowledge.md), 'people' (a memo about a person, handed to toPeople, which puts it
+// in the ledger's people; person names who), a 'knowledge/<topic>.md', or 'drop' (left
 // out, with a reason). The entry written is "- <date> 「未確認」 <text> (<device> / 受信箱から)";
 // text is the wording to keep (needed when several entries are merged into one; one entry
 // alone keeps its own words and source), and checked: true leaves out 未確認 for what was
 // confirmed. The entries named leave the inbox; the rest stay. Returns what went where.
-export function sortInbox(home, profile, { moves, device, now = new Date() }) {
+export function sortInbox(home, profile, { moves, device, toPeople = null, now = new Date() }) {
   const dir = profileDir(home, profile);
   const inboxFile = path.join(dir, 'inbox.md');
   const { lines, entries } = parseEntries(readWhole(inboxFile, 'inbox.md'));
@@ -201,7 +202,10 @@ export function sortInbox(home, profile, { moves, device, now = new Date() }) {
     const taken = take(entries, ids, used, problems, 'inbox.md');
     let target = null;
     if (move?.to === 'knowledge') target = 'knowledge.md';
-    else if (move?.to === 'people') target = 'people.md';
+    else if (move?.to === 'people') {
+      if (!toPeople) problems.push(`${at}: 人に移す先がありません`);
+      target = 'people';
+    }
     else if (move?.to === 'drop') {
       if (typeof move.reason !== 'string' || move.reason.trim() === '') problems.push(`${at}: 外す(drop)ときは、理由(reason)を書きます`);
     } else {
@@ -219,15 +223,25 @@ export function sortInbox(home, profile, { moves, device, now = new Date() }) {
         problems.push(`${at}: 2件以上をまとめるときは、まとめた文(text)を渡します`);
       }
     }
-    plan.push({ taken, target, text, checked: move?.checked === true, reason: move?.reason?.trim?.() ?? null });
+    plan.push({ taken, target, text, checked: move?.checked === true, reason: move?.reason?.trim?.() ?? null, person: move?.person });
   }
   if (problems.length) throw new LedgerError(problems);
 
   const date = localDate(now);
   const writes = new Map(); // target → text
   const done = [];
+  // People first: a refusal there (an unknown person, a number not kept) leaves every file as it was.
+  for (const step of plan.filter((x) => x.target === 'people')) {
+    const body = step.text !== null ? step.text : inboxBody(step.taken[0]);
+    const m = /\s\(([^()]*)\)$/.exec(body);
+    const text = step.text !== null || !m ? body : body.slice(0, m.index);
+    const source = step.text !== null ? `${device} / 受信箱から` : (m ? `${m[1]} / 受信箱から` : `${device} / 受信箱から`);
+    const out = toPeople({ text, mark: step.checked ? null : MARK_UNCONFIRMED, source, person: step.person });
+    step.done = { to: 'people', entries: step.taken.map((e) => e.id), memo: out.memo, person: out.person, from: step.taken.map((e) => e.text) };
+  }
   for (const step of plan) {
-    if (step.target) {
+    if (step.target === 'people') done.push(step.done);
+    else if (step.target) {
       const mark = step.checked ? '' : ` 「${MARK_UNCONFIRMED}」`;
       const body = step.text !== null ? `${step.text} (${device} / 受信箱から)` : inboxBody(step.taken[0]);
       const entryText = `- ${date}${mark} ${body.split('\n').join('\n  ')}`;
