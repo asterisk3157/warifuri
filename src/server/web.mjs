@@ -35,7 +35,7 @@ import { calendarSvg } from '../calendar/image.mjs';
 import { readSettings, weekBands } from '../ledger/settings.mjs';
 import { fetchDetail } from '../monitor/detail.mjs';
 import { localMachine, secretaryJobs } from '../monitor/local.mjs';
-import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
+import { profileDir, profileName, readContext, readProfileDefaults, profileFolders, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
 
@@ -916,7 +916,14 @@ export function createWeb({
       .sort((a, b) => (a.last_token_at < b.last_token_at ? 1 : -1));
     // The secretary's autonomy, to look at only: it changes in the conversation with the secretary.
     const autonomy = { secretary: Boolean(chat?.on), ...ledger.listAutonomy() };
-    res.json({ now: nowIso(), places, devices, apps, autonomy, profiles: profileColors(home, places.map((p) => p.profile)) });
+    // The person's settings that scheduling reads, to look at only: they change in the conversation with the secretary.
+    const { life, places: where, limits, week, onboarding, defaults } = readSettings(ledger);
+    // The profiles (生活の分け方) with whether their goals are led by the person, from their folders and places.
+    const profileNames = [...new Set([...(home ? profileFolders(home) : []), ...places.map((p) => p.profile?.normalize('NFC')).filter(Boolean)])].sort();
+    const kinds = profileNames.map((name) => ({ name, human_led: home ? readProfileDefaults(home, name).human_led === true : false }));
+    const lifeView = { life, places: where, limits, week, onboarding, profiles: kinds, defaults: { life: defaults.life, places: defaults.places, limits: defaults.limits, week: defaults.week } };
+    const weekProfiles = week.slots.map((x) => x.profile).filter(Boolean);
+    res.json({ now: nowIso(), places, devices, apps, autonomy, life: lifeView, profiles: profileColors(home, [...profileNames, ...weekProfiles]) });
   });
 
   const profileOut = () => {

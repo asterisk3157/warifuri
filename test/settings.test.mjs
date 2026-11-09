@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
-import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../src/ledger/settings.mjs';
+import { readSettings, writeSettings, weekBands, onboardingDue, LIMIT_DEFAULTS } from '../src/ledger/settings.mjs';
 import { createServer } from '../src/server/mcp.mjs';
 
 const AGENT = { actor: 'device-key', device: 'laptop' };
@@ -37,7 +37,7 @@ test('unset settings read as their defaults, and say which fields are unset', (t
   assert.deepEqual(s.limits, { day_max_hours: 8, block_min_minutes: 30, block_max_minutes: 120, earliest: '09:00', latest: '21:00' });
   assert.deepEqual(s.limits, LIMIT_DEFAULTS);
   assert.deepEqual(s.calendar, { skip: [] });
-  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'], week: ['slots'] });
+  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'], week: ['slots'], onboarding: ['state'] });
   // The profile written by the Web screen is a different section and is not touched.
   L.setSettings('profile', { name: 'Aoi' }, AGENT);
   assert.deepEqual(readSettings(L).life, { rules: [] });
@@ -212,4 +212,39 @@ test('MCP: settings reads with no section, writes as the device, and refuses lim
   const yes = await call({ limits: { day_max_hours: 4 }, by_person: true });
   assert.equal(yes.data.limits.day_max_hours, 4);
   assert.equal((await call()).data.limits.day_max_hours, 4);
+});
+
+test('onboarding: due on a new install, while asking, and not once done, skipped or made by hand', (t) => {
+  const L = fresh(t);
+  assert.deepEqual(readSettings(L).onboarding, { state: null });
+  assert.equal(onboardingDue(readSettings(L)), true, 'nothing set yet: the first conversation makes them');
+
+  // Started: still due after the first section is written, until it says done.
+  writeSettings(L, { onboarding: { state: 'asking' } }, {}, AGENT);
+  writeSettings(L, { life: { rules: ['平日は 0:00 から 7:00 まで寝る'] } }, {}, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), true);
+  writeSettings(L, { onboarding: { state: 'done' } }, {}, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), false);
+
+  // Skipped with nothing written: not asked again.
+  writeSettings(L, { life: null, onboarding: { state: 'skipped' } }, {}, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), false);
+
+  // Unset again, but settings already made by hand (any of life, places, limits, week): not due.
+  writeSettings(L, { onboarding: null }, {}, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), true);
+  writeSettings(L, { limits: { latest: '22:00' } }, { byPerson: true }, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), false);
+  writeSettings(L, { limits: null }, { byPerson: true }, AGENT);
+  writeSettings(L, { week: { slots: [{ days: 'weekdays', start: '09:00', end: '12:00', place: '家' }] } }, {}, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), false);
+  // The events not taken in do not count: they come later, from the calendar.
+  writeSettings(L, { week: null, calendar: { skip: [{ title: '昼休み' }] } }, {}, AGENT);
+  assert.equal(onboardingDue(readSettings(L)), true);
+
+  const problems = refused(() => writeSettings(L, { onboarding: { state: 'later', note: 'x' } }, {}, AGENT));
+  assert.ok(problems.some((p) => /note/.test(p)));
+  assert.ok(problems.some((p) => /asking、done、skipped/.test(p)));
+  const recs = L.records('onboarding');
+  assert.ok(recs.length >= 4 && recs.every((r) => r.entity === 'settings' && r.action === 'update'));
 });

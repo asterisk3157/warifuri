@@ -214,6 +214,8 @@ warifuri secretary enable
 
 To stop it, run `warifuri secretary disable` and restart `warifuri serve`. The times can be changed in [Configuration](configuration.md) (in Japanese).
 
+The first time you talk to the secretary on its screen, it offers to make the settings it schedules with (daily routine, the hours tasks may go in, where you are each week, profiles) together with you. It shows what it will write and asks before writing; the result is shown under 自身について in the settings.
+
 <details>
 <summary>What the secretary can use</summary>
 

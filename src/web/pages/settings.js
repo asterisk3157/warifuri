@@ -12,7 +12,7 @@ const SECTIONS = {
   devices: 'デバイスとシークレット',
   apps: '接続済みのAIエージェント',
 };
-const CATS = [['display', 'display', '#8cc4ea'], ['secretary', 'secretary', '#f4b9a8'], ['life', 'life', '#f1c47e', true], ['places', 'folder', '#8fd3b2'], ['devices', 'laptop', '#a9a3ec'], ['apps', 'apps', '#e7a9d8']];
+const CATS = [['display', 'display', '#8cc4ea'], ['secretary', 'secretary', '#f4b9a8'], ['life', 'life', '#f1c47e'], ['places', 'folder', '#8fd3b2'], ['devices', 'laptop', '#a9a3ec'], ['apps', 'apps', '#e7a9d8']];
 const COLORS = [['水色', '#8cc4ea'], ['ミント', '#8fd3b2'], ['ラベンダー', '#a9a3ec'], ['桃', '#e7a9d8'], ['山吹', '#f1c47e'], ['灰', '#c9ced6']];
 
 const sectionOf = () => {
@@ -204,13 +204,53 @@ function secretarySection(a) {
   ];
 }
 
-function lifeSection() {
-  const pair = () => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, skel('40%', '12px'), skel('100%', '32px'));
-  return h('section', { class: 'wf-placeholder', 'aria-disabled': 'true' },
-    h('div', { class: 'wf-placeholder-head' }, h('h2', { text: '自身について' }), soonBadge()),
-    h('p', { text: '秘書が予定を組むときに使う、生活の決まりと場所です。' }),
-    h('div', { 'aria-hidden': 'true', style: { display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: 'var(--fill)' } },
-      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' } }, pair(), pair(), pair(), pair()), pair()));
+// The person's settings that scheduling reads, to look at only. They are made and changed in
+// the conversation with the secretary (最初の会話 makes them on a new install).
+const DAY_WORDS = { daily: '毎日', weekdays: '平日' };
+const daysText = (d) => DAY_WORDS[d] ?? (Array.isArray(d) ? d.join('・') : '');
+
+function lifeSection(life, colors) {
+  const unset = (section, k) => (life.defaults?.[section] ?? []).includes(k);
+  const fresh = ['life', 'places', 'week'].every((s) => Object.keys(life[s]).every((k) => unset(s, k))) && Object.keys(life.limits).every((k) => unset('limits', k));
+  const state = life.onboarding?.state ?? null;
+  const intro = h('section', { class: 'wf-surface wf-autonomy-intro' },
+    h('p', { text: fresh && state !== 'skipped'
+      ? 'まだ設定がありません。秘書と話すと、最初の会話で生活の決まりと場所を一緒に作ります。'
+      : '秘書が予定を組むときに使う設定です。変えるときは、秘書に話しかけてください。' }),
+    h('a', { class: 'wf-btn-line wf-autonomy-go', href: '/secretary', text: '秘書と話す' }));
+  const L = life.limits;
+  const limitRow = (label, value, keys) => h('div', { class: 'wf-row wf-row-life2' },
+    h('span', { class: 'wf-muted', text: label }),
+    h('span', { class: 'wf-cell' }, h('b', { text: value }), keys.every((k) => unset('limits', k)) ? h('span', { class: 'wf-muted wf-small', text: '既定値' }) : null));
+  const limits = [
+    limitRow('予定を置く時間', `${L.earliest}〜${L.latest}`, ['earliest', 'latest']),
+    limitRow('1日の上限', `${L.day_max_hours}時間`, ['day_max_hours']),
+    limitRow('1つの予定の長さ', `${L.block_min_minutes}〜${L.block_max_minutes}分`, ['block_min_minutes', 'block_max_minutes']),
+  ];
+  const rules = life.life.rules.map((r) => h('div', { class: 'wf-row wf-row-life1' }, h('span', { text: r })));
+  const slots = life.week.slots.map((x) => h('div', { class: 'wf-row wf-row-week' },
+    h('span', { text: daysText(x.days) }),
+    h('span', { class: 'wf-tm-num', text: `${x.start}〜${x.end}` }),
+    h('span', { class: 'wf-ellipsis', text: x.place }),
+    h('span', {}, x.profile ? profileChip(x.profile, colors, 15) : h('span', { class: 'wf-muted', text: 'なし' }))));
+  const places = life.places.places.map((x) => h('div', { class: 'wf-row wf-row-life2' },
+    h('span', { class: 'wf-ellipsis', style: { fontWeight: '600' }, text: x.name }),
+    h('span', { class: 'wf-muted', text: x.note ?? '' })));
+  const travel = life.places.travel.map((x) => h('div', { class: 'wf-row wf-row-life2' },
+    h('span', { class: 'wf-ellipsis', text: `${x.from} → ${x.to}` }),
+    h('span', { class: 'wf-tm-num', text: `${x.minutes}分` })));
+  const kinds = (life.profiles ?? []).map((x) => h('div', { class: 'wf-row wf-row-life2' },
+    h('span', {}, profileChip(x.name, colors, 15)),
+    h('span', { text: x.human_led ? 'ユーザー' : 'エージェント' })));
+  return [
+    intro,
+    table('生活の決まり', `${rules.length}件`, 'life1', ['決まり'], rules, 'まだありません'),
+    table('上限', '', 'life2', ['項目', '値'], limits, ''),
+    table('週の型', `${slots.length}件`, 'week', ['曜日', '時間', '場所', 'プロフィール'], slots, 'まだありません'),
+    table('場所', `${places.length}件`, 'life2', ['名前', 'メモ'], places, 'まだありません'),
+    table('プロフィール', `${kinds.length}件`, 'life2', ['プロフィール', 'ゴールを主導する人'], kinds, 'まだありません'),
+    places.length > 1 || travel.length ? table('移動時間', `${travel.length}件`, 'life2', ['場所', '片道'], travel, 'まだありません') : null,
+  ];
 }
 
 function table(title, count, kind, heads, rows, empty) {
@@ -281,7 +321,7 @@ function render(data, ctx) {
   if (view.sec === 'profile') content = profileSection(data.profile, ctx);
   else if (view.sec === 'display') content = displaySection(ctx);
   else if (view.sec === 'secretary') content = secretarySection(st.autonomy);
-  else if (view.sec === 'life') content = lifeSection();
+  else if (view.sec === 'life') content = lifeSection(st.life, st.profiles);
   else if (view.sec === 'places') content = placesSection(st, ctx);
   else if (view.sec === 'devices') content = devicesSection(st);
   else content = appsSection(st, ctx);
