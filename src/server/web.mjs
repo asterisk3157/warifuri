@@ -290,7 +290,7 @@ function notice(res, status, title, text, link) {
     .type('html')
     .send(
       `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${refresh}` +
-        `<title>warifuri · ${escapeHtml(title)}</title><link rel="stylesheet" href="/web/app.css"></head>` +
+        `<title>warifuri · ${escapeHtml(title)}</title><link rel="stylesheet" href="/web/app.css"><script src="/web/theme.js"></script></head>` +
         `<body class="wf-notice"><main><h1>${escapeHtml(title)}</h1>${text ? `<p>${escapeHtml(text)}</p>` : ''}${a}</main></body></html>`,
     );
 }
@@ -384,7 +384,7 @@ export function createWeb({
       .type('html')
       .send(
         '<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-          '<title>warifuri · ログイン</title><link rel="stylesheet" href="/web/app.css"><script src="/web/login.js" defer></script></head>' +
+          '<title>warifuri · ログイン</title><link rel="stylesheet" href="/web/app.css"><script src="/web/theme.js"></script><script src="/web/login.js" defer></script></head>' +
           '<body class="wf-notice"><main><h1 id="title">ログインしています</h1><p id="text">少し待ってください。</p>' +
           '<noscript><p>ログインには JavaScript が要ります。</p></noscript></main></body></html>',
       );
@@ -914,7 +914,9 @@ export function createWeb({
       .filter((a) => a.live && !hidden.has(a.device))
       .map((a) => ({ client_id: a.client_id, client_name: names.get(a.client_id) ?? null, device: a.device, last_token_at: a.last_at }))
       .sort((a, b) => (a.last_token_at < b.last_token_at ? 1 : -1));
-    res.json({ now: nowIso(), places, devices, apps, profiles: profileColors(home, places.map((p) => p.profile)) });
+    // The secretary's autonomy, to look at only: it changes in the conversation with the secretary.
+    const autonomy = { secretary: Boolean(chat?.on), ...ledger.listAutonomy() };
+    res.json({ now: nowIso(), places, devices, apps, autonomy, profiles: profileColors(home, places.map((p) => p.profile)) });
   });
 
   const profileOut = () => {

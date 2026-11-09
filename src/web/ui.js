@@ -37,7 +37,12 @@ function append(el, children) {
 // An SVG element; s('path', { d: '…' }).
 export function s(tag, attrs = {}, ...children) {
   const el = document.createElementNS(SVG_NS, tag);
-  for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) el.setAttribute(k, String(v));
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null) continue;
+    // Colours that follow the theme go through style, since attributes do not read variables.
+    if (k === 'style') Object.assign(el.style, v);
+    else el.setAttribute(k, String(v));
+  }
   for (const c of children) if (c) el.append(c);
   return el;
 }
@@ -69,7 +74,14 @@ const ICONS = {
   after: [['path', { d: 'M7 4v8a4 4 0 0 0 4 4h8' }], ['path', { d: 'M15 12l4 4-4 4' }]],
 };
 
+// The machine pictures take their greys from the theme.
+const MACHINE_PAINT = { '#f2f2f4': 'var(--machine-body)', '#bfe3fb': 'var(--machine-screen)', '#e5e5ea': 'var(--machine-part)', '#d2d2d7': 'var(--line)' };
+const paint = ({ fill, stroke, ...rest }) => ({
+  ...rest,
+  style: { ...(fill ? { fill: MACHINE_PAINT[fill] ?? fill } : {}), ...(stroke ? { stroke: MACHINE_PAINT[stroke] ?? stroke } : {}) },
+});
 const build = ([tag, attrs, kids]) => s(tag, attrs, ...(kids ?? []).map(build));
+const buildMachine = ([tag, attrs, kids]) => s(tag, paint(attrs), ...(kids ?? []).map(buildMachine));
 
 export function icon(name, size = 20, width = 1.75) {
   return s(
@@ -94,7 +106,7 @@ const MACHINES = {
 };
 
 export function machinePicture(kind) {
-  return s('svg', { width: 190, height: 118, viewBox: '0 0 190 118', 'aria-hidden': 'true' }, ...(MACHINES[kind] ?? MACHINES.linux).map(build));
+  return s('svg', { width: 190, height: 118, viewBox: '0 0 190 118', 'aria-hidden': 'true' }, ...(MACHINES[kind] ?? MACHINES.linux).map(buildMachine));
 }
 
 // Gray blocks standing in for what is not there yet (loading, 準備中). Never animated.
@@ -157,9 +169,8 @@ export function profileChip(name, colors, size = 13) {
     name ?? 'プロフィールなし');
 }
 
-// A pale tint of a colour, for backgrounds (share: how much of the colour).
-export function tint(hex, share = 0.28) {
-  const n = parseInt(hex.slice(1), 16);
-  const mix = (c) => Math.round(c * share + 255 * (1 - share));
-  return `rgb(${mix((n >> 16) & 255)}, ${mix((n >> 8) & 255)}, ${mix(n & 255)})`;
+// A pale tint of a colour over the surface, for backgrounds. How much of the colour comes from
+// the theme (--tint-share), so it stays pale on white and dim on dark.
+export function tint(hex) {
+  return `color-mix(in srgb, ${hex} var(--tint-share), var(--surface))`;
 }
