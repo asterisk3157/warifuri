@@ -30,6 +30,7 @@ import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
 import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
+import { timetableFor, TIMETABLE_MAX_DAYS } from '../ledger/timetable.mjs';
 import {
   readContext, writeNote, noteRecordChanges, secretaryConfigured, readProfileDefaults, writeProfileDefaults, profileFolders, PROFILE_FIELDS, RECORD_TEXT_CHARS,
 } from '../knowledge/profiles.mjs';
@@ -285,6 +286,27 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       annotations: readOnly,
     },
     guarded(async ({ from, to }) => result(freeTimeFor(ledger, { from, to }))),
+  );
+
+  server.registerTool(
+    'timetable',
+    {
+      description:
+        "A draft of the person's timetable in [from, to): blocks of work for their tasks in the free time, for you to " +
+        'check and book; it books nothing. from and to as in schedule, but from defaults to tomorrow; at most ' +
+        `${TIMETABLE_MAX_DAYS} days. Drafted are the open tasks that take the person's time (human, human_with_ai), ready or ` +
+        'running, not delegated, with every task before them closed, for the minutes their estimate has left after ' +
+        'their bookings from now on; nearer due dates (the task\'s or its goal\'s) first. A band of the week type with a ' +
+        "profile takes only that profile's tasks and is filled first. A block is block_min_minutes to " +
+        'block_max_minutes long; a task gets one block a day, none on a day it is already booked, and the daily cap is ' +
+        'kept, so the day is not filled for its own sake. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
+        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes }], left: [{ task_id, ' +
+        'title, left_min, reason }] (tasks that got no block, and tasks with no estimate), habits_left (habits that ' +
+        'fit nowhere) }.',
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+      annotations: readOnly,
+    },
+    guarded(async ({ from, to }) => result(timetableFor(ledger, { from, to }))),
   );
 
   server.registerTool(
