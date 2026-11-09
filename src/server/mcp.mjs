@@ -527,29 +527,34 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'Close a goal or task once you have checked the real thing: state done with a one-line result, or discarded ' +
       'with a reason. A held task is let go; next may leave a line for whoever reopens it. learned: what the work ' +
       'taught that is worth keeping, in 1–3 lines; it is kept in the record of this close and also written as an ' +
-      "agent's note to the profile of the goal or task (as note with kind agent does). noted says where it went.",
+      "agent's note to the profile of the goal or task (as note with kind agent does). learned_people: what the work " +
+      'taught about people (who they are, their role, what they want; each line begins with their name), written ' +
+      'to the people of that profile (as note with people: true). noted says where each went.',
     {
       id: z.string().min(1),
       state: z.enum(['done', 'discarded']),
       result: z.string().optional(),
       reason: z.string().optional(),
       learned: z.string().optional(),
+      learned_people: z.string().optional(),
       next: z.string().optional(),
     },
-    async ({ id, state, ...extra }) => {
+    async ({ id, state, learned_people: learnedPeople, ...extra }) => {
       const closed = ledger.setState(id, state, given(extra), writer);
-      if (extra.learned === undefined) return result(closed);
-      return result({ ...closed, noted: noteLearned(id, extra.learned) });
+      const out = { ...closed };
+      if (extra.learned !== undefined) out.noted = noteLearned(id, extra.learned);
+      if (learnedPeople !== undefined && learnedPeople.trim() !== '') out.noted_people = noteLearned(id, learnedPeople, { people: true });
+      return result(out);
     },
   );
 
   // The close is already written, so a note that cannot be written is reported, not thrown.
-  function noteLearned(id, text) {
+  function noteLearned(id, text, { people = false } = {}) {
     const profile = ledger.get(id)?.profile ?? null;
     if (!knowledge?.home) return { skipped: 'このサーバーには、プロフィールのフォルダが設定されていません。閉じたときの記録にだけ残しました' };
     if (!profile) return { skipped: 'プロフィールが分からないので、閉じたときの記録にだけ残しました' };
     try {
-      const n = addNote(ledger, knowledge, profile, { text, kind: 'agent', task: id }, device, writer);
+      const n = addNote(ledger, knowledge, profile, { text, kind: 'agent', task: id, people }, device, writer);
       return { profile, file: n.file, mark: n.mark };
     } catch (err) {
       const why = err instanceof LedgerError ? err.problems.join('。') : err.message;
@@ -563,7 +568,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'conversation; they go straight into knowledge.md marked 本人の言葉. kind agent: your own insight; it goes ' +
       "to the profile's inbox.md for the secretary to sort, or, with no secretary, into knowledge.md marked 未確認. " +
       'people: true when it is about a person (who they are, their role, what they like, what came of talking with ' +
-      'them; begin with their name): it goes to people.md instead of knowledge.md (in the inbox it is marked 人のこと). ' +
+      'them; begin with their name): it goes straight to people.md, never through the inbox (an agent\'s marked 未確認). ' +
+      'Write what you learn about people as you work, without being asked: the participants of a meeting, a client\'s ' +
+      'wishes, who does what. ' +
       'The secretary\'s own notes are already sorted and go where they belong, not to the inbox. ' +
       'Write facts and rules of the area in 1–3 lines, not progress. profile, or place (the place id or the directory ' +
       'you work in) to use its profile. At most 4000 characters.',
