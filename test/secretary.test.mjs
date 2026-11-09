@@ -15,7 +15,7 @@ import { Writable } from 'node:stream';
 import { cli } from './cli.mjs';
 import { openLedger } from '../src/ledger/ledger.mjs';
 import { loadConfig } from '../src/config.mjs';
-import { parseWhen, parseNight, inNight, latestSlot, nextSlot, countSlots, localIso } from '../src/secretary/schedule.mjs';
+import { parseWhen, parseNight, inNight, latestSlot, nextSlot, countSlots, localIso, showWhen, JOBS, CHAT_JOBS } from '../src/secretary/schedule.mjs';
 import { createScheduler } from '../src/secretary/scheduler.mjs';
 import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, writeClaudeSettings, readSecretaryKey, paths, openLog, LOG_KEEP } from '../src/secretary/secretary.mjs';
 import { decideTools, isReadTool } from '../src/secretary/tool-hook.mjs';
@@ -99,6 +99,13 @@ test('jobs due together run one after another: the Sunday inbox waits for the ni
   r.set('2026-10-26T23:00:05');
   r.s.tick();
   assert.deepEqual(r.started, ['nightly', 'inbox', 'morning']);
+});
+
+test('the weekly check is on Sunday 10:00 by default and can be moved or turned off', () => {
+  assert.equal(showWhen(scheduleFrom({}).jobs.weekly), 'sun 10:00');
+  assert.equal(showWhen(scheduleFrom({ WARIFURI_SECRETARY_WEEKLY: 'sat 18:30' }).jobs.weekly), 'sat 18:30');
+  assert.equal(scheduleFrom({ WARIFURI_SECRETARY_WEEKLY: 'off' }).jobs.weekly.off, true);
+  assert.ok(CHAT_JOBS.includes('weekly') && JOBS.includes('weekly'));
 });
 
 test('a job that comes due while a run is still going is skipped with one line', async () => {
@@ -192,7 +199,7 @@ test('enable issues the key once, writes an owner-only config and turns the sche
   assert.match(key, /^wf_/);
   assert.ok(!`${r.stdout}${r.stderr}`.includes(key));
   assert.match(r.stdout, /Log in to Claude Code once/);
-  assert.match(r.stdout, /schedule: nightly 23:00, morning 07:00, inbox sun 23:00, sync off \(night 23:00-07:00\)/);
+  assert.match(r.stdout, /schedule: nightly 23:00, morning 07:00, inbox sun 23:00, weekly sun 10:00, sync off \(night 23:00-07:00\)/);
   const mcp = paths(w.home).mcp;
   assert.equal(JSON.parse(read(mcp)).mcpServers.warifuri.url, 'http://127.0.0.1:8787/mcp');
   if (process.platform !== 'win32') {

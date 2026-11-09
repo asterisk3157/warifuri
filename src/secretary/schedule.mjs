@@ -6,7 +6,9 @@
 // "every <n>h" (from local midnight on, such as "every 60m": 00:00, 01:00, …), or "off". The
 // night is "HH:MM-HH:MM" and may cross midnight.
 
-export const JOBS = ['nightly', 'morning', 'inbox', 'sync'];
+export const JOBS = ['nightly', 'morning', 'inbox', 'weekly', 'sync'];
+// The jobs that are calls into the secretary's conversation (chat.mjs), not runs of their own.
+export const CHAT_JOBS = ['morning', 'weekly'];
 // The shortest and longest interval of an "every" time, in minutes.
 export const EVERY_MIN = 15;
 export const EVERY_MAX = 24 * 60;

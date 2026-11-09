@@ -193,6 +193,14 @@ export const SETTINGS = [
     check: (v) => parseWhen(v).error ?? null,
   },
   {
+    name: 'WARIFURI_SECRETARY_WEEKLY',
+    section: 'secretary',
+    about: '週の完了確認の時刻。秘書との会話に「週の完了確認の時間です」を送り、会話の秘書が、開いたタスクのうち終わっていそうなものを根拠つきで本人に確かめる。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。夜の時間帯には送らない',
+    def: 'sun 10:00',
+    commands: SECRETARY,
+    check: (v) => parseWhen(v).error ?? null,
+  },
+  {
     name: 'WARIFURI_SECRETARY_SYNC',
     section: 'secretary',
     about: 'カレンダーの同期の間隔。every 60m のように書く(15m から 24h、0時から数える)。書き方は WARIFURI_SECRETARY_NIGHTLY の時刻でもよい。秘書にカレンダーを渡していないときは動かない。夜の時間帯には動かない',
