@@ -521,6 +521,29 @@ test('devices: the secretary and the server machine\'s programs are kept apart; 
   assert.ok(thesis.last_active_at >= ledger.listPlaces().find((p) => p.name === 'thesis').updated_at);
 });
 
+test('settings: 自身について shows the settings scheduling reads, with the unset ones and the profiles', async (t) => {
+  const { base, ledger, home } = await start(t);
+  let st = await (await get(base, '/web/api/settings')).json();
+  assert.deepEqual(st.life.life, { rules: [] });
+  assert.deepEqual(st.life.limits, { day_max_hours: 8, block_min_minutes: 30, block_max_minutes: 120, earliest: '09:00', latest: '21:00' });
+  assert.deepEqual(st.life.onboarding, { state: null });
+  assert.deepEqual(st.life.defaults.limits.sort(), ['block_max_minutes', 'block_min_minutes', 'day_max_hours', 'earliest', 'latest']);
+  assert.deepEqual(st.life.profiles, [{ name: 'hobby', human_led: false }, { name: 'research', human_led: false }]);
+  assert.equal(st.profiles.hobby, '#123abc');
+
+  fs.writeFileSync(path.join(home, 'profiles', 'hobby', 'profile.yaml'), 'color: "#123abc"\nhuman_led: true\n');
+  ledger.setSettings('life', { rules: JSON.stringify(['平日は 0:00 から 7:00 まで寝る']) }, ACTOR);
+  ledger.setSettings('limits', { earliest: JSON.stringify('08:00') }, { ...ACTOR, action: 'decide' });
+  ledger.setSettings('week', { slots: JSON.stringify([{ days: ['月'], start: '13:00', end: '18:00', place: '研究室', profile: 'research' }]) }, ACTOR);
+  st = await (await get(base, '/web/api/settings')).json();
+  assert.deepEqual(st.life.life.rules, ['平日は 0:00 から 7:00 まで寝る']);
+  assert.equal(st.life.limits.earliest, '08:00');
+  assert.ok(!st.life.defaults.limits.includes('earliest'));
+  assert.equal(st.life.week.slots[0].place, '研究室');
+  assert.deepEqual(st.life.profiles.find((x) => x.name === 'hobby'), { name: 'hobby', human_led: true });
+  assert.ok(!('calendar' in st.life), 'the events not taken in stay with the secretary');
+});
+
 test('logging in again from the same app on the same device ends the older login', () => {
   const ledger = openLedger(':memory:');
   ledger.issueKey('desk', ACTOR);
