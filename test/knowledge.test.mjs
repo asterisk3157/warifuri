@@ -85,7 +85,7 @@ test('readContext reads only files listed in knowledge/ and procedures/', (t) =>
 
   const ctx = readContext(home, '研究');
   assert.equal(ctx.exists, true);
-  assert.equal(ctx.people.text, '- 指導教員: 山田さん\n');
+  assert.equal(ctx.people_md.text, '- 指導教員: 山田さん\n');
   assert.equal(ctx.knowledge, null);
   assert.equal(ctx.inbox, null);
   fs.writeFileSync(path.join(dir, 'inbox.md'), '- 2026-10-24 気づき (laptop)\n');
@@ -104,7 +104,7 @@ test('readContext reads only files listed in knowledge/ and procedures/', (t) =>
   }
   // A profile with no folder yet reads as empty.
   const none = readContext(home, 'まだない');
-  assert.deepEqual([none.exists, none.people, none.knowledge, none.files.knowledge], [false, null, null, []]);
+  assert.deepEqual([none.exists, none.people_md, none.knowledge, none.files.knowledge], [false, null, null, []]);
   t.diagnostic('ok');
 });
 
@@ -121,7 +121,7 @@ test('readContext caps the text and the listings', () => {
   assert.equal(ctx.knowledge.bytes, MAX_FILE_BYTES * 3);
   assert.ok(Buffer.byteLength(ctx.knowledge.text) <= MAX_FILE_BYTES);
   assert.doesNotMatch(ctx.knowledge.text, /\uFFFD/);
-  assert.equal(ctx.people.truncated, false);
+  assert.equal(ctx.people_md.truncated, false);
   assert.equal(ctx.files.procedures.length, MAX_LIST);
   assert.equal(ctx.more.procedures, 5);
 });
@@ -145,21 +145,14 @@ test('writeNote appends, keeps what is there, and marks each kind', () => {
   assert.throws(() => writeNote(home, 'hobby', { text: 'x', kind: 'guess' }), /kind は/);
 });
 
-test('writeNote: a note about a person goes straight to people.md; the secretary\'s sorted notes skip the inbox', () => {
+test('writeNote: the secretary\'s sorted notes skip the inbox', () => {
   const home = freshHome();
   const now = new Date(2026, 10, 9, 12);
-  writeNote(home, '研究', { text: '田中先生: 前提の違いを先に聞く', kind: 'human', people: true, now });
-  writeNote(home, '研究', { text: '田中先生は朝が早い', kind: 'agent', people: true, secretary: true, now });
-  writeNote(home, '研究', { text: '田中先生は図を先に見る', kind: 'agent', people: true, secretary: true, sorted: true, from: { device: 'secretary' }, now });
   writeNote(home, '研究', { text: '発表は15分', kind: 'agent', secretary: true, sorted: true, now });
   const dir = profileDir(home, '研究');
-  assert.equal(
-    fs.readFileSync(path.join(dir, 'people.md'), 'utf8'),
-    '- 2026-11-09 「本人の言葉」 田中先生: 前提の違いを先に聞く\n- 2026-11-09 「未確認」 田中先生は朝が早い\n- 2026-11-09 「未確認」 田中先生は図を先に見る (secretary)\n',
-  );
   assert.ok(!fs.existsSync(path.join(dir, 'inbox.md')));
+  assert.ok(!fs.existsSync(path.join(dir, 'people.md')));
   assert.equal(fs.readFileSync(path.join(dir, 'knowledge.md'), 'utf8'), '- 2026-11-09 「未確認」 発表は15分\n');
-  assert.match(readContext(home, '研究').people.text, /田中先生: 前提の違いを先に聞く/);
 });
 
 test('secretaryConfigured reads plugins.yaml', () => {
@@ -257,10 +250,12 @@ test('note: with a secretary, an agent note goes to inbox.md and human words sti
   assert.equal((await call('note', { profile: '研究', text: 'said so', kind: 'human' })).data.file, 'knowledge.md');
   assert.match(fs.readFileSync(path.join(dir, 'inbox.md'), 'utf8'), /^- \d{4}-\d{2}-\d{2} a guess \(laptop\)\n$/);
 
-  // About a person: straight to people.md, an agent's marked 未確認, even with a secretary.
-  assert.equal((await call('note', { profile: '研究', text: '田中先生: 図を先に見る', kind: 'human', people: true })).data.file, 'people.md');
+  // About a person: straight to the people, an agent's marked 未確認, even with a secretary.
+  const humanNote = await call('note', { profile: '研究', text: '田中先生: 図を先に見る', kind: 'human', people: true });
+  assert.deepEqual([humanNote.data.to, humanNote.data.mark, humanNote.data.person], ['people', '本人の言葉', null]);
   const agentNote = await call('note', { profile: '研究', text: '田中先生は朝が早い', kind: 'agent', people: true });
-  assert.deepEqual([agentNote.data.file, agentNote.data.mark], ['people.md', '未確認']);
+  assert.deepEqual([agentNote.data.to, agentNote.data.mark], ['people', '未確認']);
+  assert.equal(fs.existsSync(path.join(dir, 'people.md')), false);
 
   // The secretary option of createApp wins over plugins.yaml.
   const off = await start(t, { home, secretary: false });
@@ -318,8 +313,11 @@ test('close with learned writes an agent note to the profile of the task, and ke
   // learned_people goes to the people of the profile, apart from learned.
   const meet = (await call('create_task', { title: 'Meet', mode: 'ai_worker', place_id: places.lab.id })).data;
   const met = (await call('close', { id: meet.id, state: 'done', result: 'met', learned: '議事録は当日中に回す', learned_people: '田中先生: 図を先に見る' })).data;
-  assert.deepEqual(met.noted_people, { profile: '研究', file: 'people.md', mark: '未確認' });
-  assert.match(fs.readFileSync(path.join(dir, 'people.md'), 'utf8'), new RegExp(`「未確認」 田中先生: 図を先に見る \\(laptop / ${meet.id}\\)\\n$`));
+  assert.equal(met.noted_people.length, 1);
+  assert.deepEqual([met.noted_people[0].profile, met.noted_people[0].person], ['研究', null]);
+  const waiting = ledger.people.list({ profile: '研究' }).unassigned;
+  assert.deepEqual(waiting.map((f) => [f.text, f.mark, f.source]), [['田中先生: 図を先に見る', '未確認', `laptop / ${meet.id}`]]);
+  assert.equal(fs.existsSync(path.join(dir, 'people.md')), false);
 
   // Without learned, close answers as before.
   const plain = (await call('create_task', { title: 'Plain', mode: 'ai_worker', place_id: places.lab.id })).data;

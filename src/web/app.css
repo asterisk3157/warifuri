@@ -812,3 +812,14 @@ button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight:
 .wf-rich ul, .wf-rich ol { padding-left: 1.2em; }
 .wf-rich a { color: var(--accent); }
 .wf-know-empty { font-size: 14px; color: var(--sub); }
+.wf-know-people { display: flex; flex-direction: column; }
+.wf-know-person { display: flex; flex-direction: column; border-top: 1px solid var(--hair); }
+.wf-know-person:first-child { border-top: none; }
+.wf-know-who { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font: inherit; color: inherit; background: none; border: none; padding: 10px 0; cursor: pointer; }
+.wf-know-name-text { font-size: 15px; font-weight: 600; color: var(--accent); }
+.wf-know-detail { display: flex; flex-direction: column; gap: 10px; padding: 0 0 12px; }
+.wf-know-fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+.wf-know-fields dt { color: var(--sub); }
+.wf-know-fields dd { margin: 0; overflow-wrap: anywhere; }
+.wf-know-sub { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.wf-know-sub h3 { font-size: 14px; font-weight: 600; color: var(--sub); margin: 0; }
