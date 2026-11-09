@@ -230,7 +230,7 @@ function lifeSection(life, colors) {
   const rules = life.life.rules.map((r) => h('div', { class: 'wf-row wf-row-life1' }, h('span', { text: r })));
   const slots = life.week.slots.map((x) => h('div', { class: 'wf-row wf-row-week' },
     h('span', { text: daysText(x.days) }),
-    h('span', { class: 'wf-tm-num', text: `${x.start}〜${x.end}` }),
+    h('span', { text: `${x.start}〜${x.end}` }),
     h('span', { class: 'wf-ellipsis', text: x.place }),
     h('span', {}, x.profile ? profileChip(x.profile, colors, 15) : h('span', { class: 'wf-muted', text: 'なし' }))));
   const places = life.places.places.map((x) => h('div', { class: 'wf-row wf-row-life2' },
@@ -238,25 +238,27 @@ function lifeSection(life, colors) {
     h('span', { class: 'wf-muted', text: x.note ?? '' })));
   const travel = life.places.travel.map((x) => h('div', { class: 'wf-row wf-row-life2' },
     h('span', { class: 'wf-ellipsis', text: `${x.from} → ${x.to}` }),
-    h('span', { class: 'wf-tm-num', text: `${x.minutes}分` })));
+    h('span', { text: `${x.minutes}分` })));
   const kinds = (life.profiles ?? []).map((x) => h('div', { class: 'wf-row wf-row-life2' },
     h('span', {}, profileChip(x.name, colors, 15)),
     h('span', { text: x.human_led ? 'ユーザー' : 'エージェント' })));
+  // Before anything is set, the intro says so once, instead of a まだありません under each table.
+  const shown = (rows) => !fresh || rows.length > 0;
   return [
     intro,
-    table('生活の決まり', `${rules.length}件`, 'life1', ['決まり'], rules, 'まだありません'),
-    table('上限', '', 'life2', ['項目', '値'], limits, ''),
-    table('週の型', `${slots.length}件`, 'week', ['曜日', '時間', '場所', 'プロフィール'], slots, 'まだありません'),
-    table('場所', `${places.length}件`, 'life2', ['名前', 'メモ'], places, 'まだありません'),
-    table('プロフィール', `${kinds.length}件`, 'life2', ['プロフィール', 'ゴールを主導する人'], kinds, 'まだありません'),
+    shown(rules) ? table('生活の決まり', `${rules.length}件`, 'life1', [], rules, 'まだありません') : null,
+    table('上限', '', 'life2', [], limits, ''),
+    shown(slots) ? table('週の型', `${slots.length}件`, 'week', ['曜日', '時間', '場所', 'プロフィール'], slots, 'まだありません') : null,
+    shown(places) ? table('場所', `${places.length}件`, 'life2', ['名前', 'メモ'], places, 'まだありません') : null,
     places.length > 1 || travel.length ? table('移動時間', `${travel.length}件`, 'life2', ['場所', '片道'], travel, 'まだありません') : null,
+    shown(kinds) ? table('プロフィール', `${kinds.length}件`, 'life2', ['プロフィール', 'ゴールを主導する人'], kinds, 'まだありません') : null,
   ];
 }
 
 function table(title, count, kind, heads, rows, empty) {
   return h('section', { class: 'wf-surface wf-table' },
     h('div', { class: 'wf-table-head' }, h('h2', { text: title }), h('span', { class: 'wf-muted', text: count })),
-    h('div', { class: `wf-cols wf-cols-${kind}` }, ...heads.map((x) => h('span', { text: x }))),
+    heads.length ? h('div', { class: `wf-cols wf-cols-${kind}` }, ...heads.map((x) => h('span', { text: x }))) : null,
     ...rows,
     rows.length ? null : h('div', { class: 'wf-empty', text: empty }));
 }
