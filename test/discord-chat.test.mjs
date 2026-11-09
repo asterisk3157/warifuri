@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { chunks } from '../src/notify/discord.mjs';
-import { createDiscordChat, askComponents, replyComponents } from '../src/notify/discord-chat.mjs';
+import { createDiscordChat, askComponents, askMessages, replyComponents } from '../src/notify/discord-chat.mjs';
 import { createGateway, INTENTS } from '../src/notify/gateway.mjs';
 import { createNotifier } from '../src/notify/notifier.mjs';
 
@@ -94,6 +94,49 @@ test('discord chat: a question as buttons and a menu; pressing answers it', asyn
   await w.talk.onEvent('INTERACTION_CREATE', { id: 'i2', token: 'tk', type: 3, member: { user: { id: '999' } }, data: { custom_id: `wf:a:${q.id}:0:0` } });
   assert.equal(w.calls.at(-1).data.content, 'このボタンは使えません');
   assert.deepEqual(w.ledger.getMessage(q.id).data.answers[0].picked, ['そのまま']);
+});
+
+test('discord chat: a question with two questions goes as a message per question, each with its own buttons', async (t) => {
+  const w = world(t);
+  const q = ask(w.ledger);
+  const msgs = askMessages(q);
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[0].text, '秘書から質問が2つあります。\n\n質問1【期日】延ばしますか？');
+  assert.equal(msgs[1].text, '質問2【分野】どれに入れますか？');
+  const ids = (m) => m.components.flatMap((r) => r.components.map((c) => c.custom_id));
+  assert.deepEqual(ids(msgs[0]), [`wf:a:${q.id}:0:0`, `wf:a:${q.id}:0:1`], 'the first holds only its own buttons');
+  assert.deepEqual(ids(msgs[1]), [`wf:a:${q.id}:1`, `wf:l:${q.id}`], 'まとめてあとで goes under the last');
+  assert.equal(msgs[1].components[1].components[0].label, 'まとめてあとで');
+  // One question: one message with あとで, as before.
+  const one = { id: 'm_x', state: 'open', data: { questions: [{ header: '期日', question: '延ばしますか？', options: [{ label: '延ばす' }, { label: 'そのまま' }] }] } };
+  assert.equal(askMessages(one).length, 1);
+  assert.equal(askMessages(one)[0].components.at(-1).components[0].label, 'あとで');
+  // Pressing on the first message rewrites it with its own question only.
+  const press = (m, custom_id, extra = {}) => w.talk.onEvent('INTERACTION_CREATE', { id: 'i1', token: 'tk', type: 3, user: { id: PERSON }, message: { content: m.text, components: m.components }, data: { custom_id, ...extra } });
+  await press(msgs[0], `wf:a:${q.id}:0:0`);
+  assert.deepEqual(w.calls.at(-1).data.components.flatMap((r) => r.components.map((c) => [c.custom_id, c.style])), [[`wf:a:${q.id}:0:0`, 3], [`wf:a:${q.id}:0:1`, 2]]);
+  assert.equal(w.calls.at(-1).data.content, msgs[0].text);
+  // まとめてあとで on the last one: it keeps its menu, あとで goes.
+  await press(msgs[1], `wf:l:${q.id}`);
+  assert.equal(w.ledger.getMessage(q.id).state, 'later');
+  assert.deepEqual(w.calls.at(-1).data.components.flatMap((r) => r.components.map((c) => c.custom_id)), [`wf:a:${q.id}:1`]);
+});
+
+test('notifier: a question with two questions is posted as two messages, the person pinged once', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-ask-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const ledger = openLedger(':memory:');
+  t.after(() => ledger.close());
+  ledger.ensureThread('secretary', S);
+  const posts = [];
+  const notifier = createNotifier({ ledger, discord: { post: async (text, opts) => posts.push({ text, ...opts }) }, file: path.join(dir, 'd.json'), publicUrl: 'https://w.example.com' });
+  await notifier.tick();
+  const q = ask(ledger);
+  assert.equal(await notifier.tick(), 1);
+  assert.deepEqual(posts.map((p) => p.mention), [true, false]);
+  assert.match(posts[0].text, /^秘書から質問が2つあります。/);
+  assert.match(posts[1].text, /^質問2【分野】.*\nhttps:\/\/w\.example\.com\/secretary$/);
+  assert.equal(posts[1].components.at(-1).components[0].custom_id, `wf:l:${q.id}`);
 });
 
 test('discord chat: a reply button sends its words; the thread pair is not offered', async (t) => {

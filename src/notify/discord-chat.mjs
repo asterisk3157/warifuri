@@ -27,9 +27,12 @@ const row = (...components) => ({ type: ROW, components });
 // The rows under a question of the secretary: one per question (buttons, or a menu when more
 // than one may be picked), then あとで. Once answered, a question's row shows what was picked
 // and can still be pressed to change it; when all are answered, あとで goes.
-export function askComponents(ask) {
+// only: the questions to give rows to (by index; all by default); later: whether あとで goes
+// under them (while the question is open).
+export function askComponents(ask, { only = null, later = true } = {}) {
   const { questions = [], answers = [] } = ask.data ?? {};
   const rows = questions.slice(0, 4).map((q, qi) => {
+    if (only && !only.includes(qi)) return null;
     const picked = new Set(answers[qi]?.picked ?? []);
     if (q.multiSelect) {
       return row({
@@ -45,9 +48,31 @@ export function askComponents(ask) {
       type: BUTTON, custom_id: `wf:a:${ask.id}:${qi}:${oi}`, label: clip(o.label, LABEL_MAX),
       style: picked.has(o.label) ? STYLE.success : oi === 0 && !picked.size ? STYLE.primary : STYLE.secondary,
     })));
-  });
-  if (ask.state === 'open') rows.push(row({ type: BUTTON, custom_id: `wf:l:${ask.id}`, label: 'あとで', style: STYLE.secondary }));
+  }).filter(Boolean);
+  const label = questions.length > 1 ? 'まとめてあとで' : 'あとで';
+  if (later && ask.state === 'open') rows.push(row({ type: BUTTON, custom_id: `wf:l:${ask.id}`, label, style: STYLE.secondary }));
   return rows;
+}
+
+// The messages a question of the secretary goes as ({ text, components } each). One question:
+// one message, its buttons and あとで under it. More: a message per question, each with its own
+// buttons and numbered, so it is clear which buttons answer which; まとめてあとで goes under the
+// last one.
+export function askMessages(ask) {
+  const questions = (ask.data?.questions ?? []).slice(0, 4);
+  if (questions.length < 2) return [{ text: askText(ask), components: askComponents(ask) }];
+  return questions.map((q, qi) => ({
+    text: `${qi === 0 ? `秘書から質問が${questions.length}つあります。\n\n` : ''}質問${qi + 1}【${q.header}】${q.question}`,
+    components: askComponents(ask, { only: [qi], later: qi === questions.length - 1 }),
+  }));
+}
+
+// The rows of a question for the message a button was pressed on: the questions and あとで that
+// message had (a message sent before questions went one per message holds them all).
+function rowsFor(ask, components = []) {
+  const ids = components.flatMap((r) => r.components ?? []).map((c) => String(c.custom_id ?? '').split(':'));
+  const only = [...new Set(ids.filter((x) => x[1] === 'a').map((x) => Number(x[3])))];
+  return askComponents(ask, { only: only.length ? only : null, later: ids.some((x) => x[1] === 'l') || !only.length });
 }
 
 // The reply buttons under a reply of the secretary (reply_options), less the thread pair: a
@@ -127,7 +152,7 @@ export function createDiscordChat({ chat, ledger, discord, log = () => {} }) {
         return;
       }
       const ask = ledger.getMessage(id);
-      await discord.respond(d, { type: UPDATE, data: { content: d.message?.content ?? askText(ask), components: askComponents(ask) } });
+      await discord.respond(d, { type: UPDATE, data: { content: d.message?.content ?? askText(ask), components: rowsFor(ask, d.message?.components) } });
     } catch (err) {
       await say(d, problemText(err));
     }

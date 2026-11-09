@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { inNight } from '../secretary/schedule.mjs';
 import { chunks, clip } from './discord.mjs';
-import { askComponents, askText, replyComponents } from './discord-chat.mjs';
+import { askMessages, replyComponents } from './discord-chat.mjs';
 
 const BODY_MAX = 1500;
 // The first line of a copy of what the person wrote on the screen.
@@ -27,8 +27,8 @@ export const WEB_MARK = '(Web から)';
 // How long after the person last wrote from Discord the secretary's replies go there too.
 export const TALK_MS = 30 * 60 * 1000;
 
-// The text to send for one message ({ text, mention, components }), or null when it is not
-// sent. talking: the person is talking now (from Discord, or anywhere with mirror).
+// The text to send for one message ({ text, mention, components }, or { messages: [{ text,
+// components }], mention } when it goes as more than one), or null when it is not sent. talking: the person is talking now (from Discord, or anywhere with mirror).
 export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   const tail = link ? `\n${link}` : '';
   if (mirror && m.role === 'user' && m.actor !== 'discord') {
@@ -36,7 +36,9 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
     return words ? { text: `${WEB_MARK}\n${words}`, mention: false, whole: true } : null;
   }
   if (m.kind === 'ask' && m.state === 'open') {
-    return { text: `${askText(m)}${tail}`, mention: true, components: askComponents(m) };
+    const messages = askMessages(m);
+    messages.at(-1).text += tail;
+    return { messages, mention: true };
   }
   if (m.role === 'secretary' && m.data?.scheduled === 'morning') {
     return { text: `朝の報告です。\n${clip(m.body, BODY_MAX)}${tail}`, mention: false, components: replyComponents(m) };
@@ -69,6 +71,21 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
     fs.writeFileSync(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
   };
   let running = false;
+  // Posts a notice: its messages, or its text (cut when whole), the buttons and the picture
+  // under the last part. channel: a thread of the channel, or the channel itself.
+  async function post(notice, png, channel) {
+    const parts = notice.messages
+      ?? (notice.whole ? chunks(notice.text) : [notice.text]).map((text, i, all) => ({ text, components: i === all.length - 1 ? notice.components ?? [] : [] }));
+    for (const [i, part] of parts.entries()) {
+      const lastPart = i === parts.length - 1;
+      await discord.post(part.text, {
+        mention: notice.mention && i === 0,
+        files: lastPart && png ? [{ name: 'calendar.png', data: png, type: 'image/png' }] : [],
+        components: part.components ?? [],
+        ...(channel ? { channel } : {}),
+      });
+    }
+  }
 
   // Sends what came since the last call. Resolves to the number sent.
   async function tick() {
@@ -113,15 +130,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         if (notice) {
           try {
             const png = m.data?.calendar ? await picture(m).catch(() => null) : null;
-            const parts = notice.whole ? chunks(notice.text) : [notice.text];
-            for (const [i, part] of parts.entries()) {
-              const lastPart = i === parts.length - 1;
-              await discord.post(part, {
-                mention: notice.mention && i === 0,
-                files: lastPart && png ? [{ name: 'calendar.png', data: png, type: 'image/png' }] : [],
-                components: lastPart ? notice.components ?? [] : [],
-              });
-            }
+            await post(notice, png);
             sent += 1;
             if (failure) state.failure = failure;
           } catch (err) {
