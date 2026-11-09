@@ -3,6 +3,10 @@
 // with its choices as buttons (a menu when more than one may be picked), and its reply with
 // the reply buttons. Pressing one answers there and then. Only the person (the user set) is
 // heard: anyone else in the channel, and other bots, are not.
+// スレッドで話す under a reply opens a Discord thread from that message, tied to the thread of
+// the secretary's conversation started from it (threads, kind 'sub'; the tie is kept by
+// src/notify/discord-threads.mjs). What the person writes in that Discord thread goes into
+// that thread; its replies go back there (src/notify/notifier.mjs).
 //
 // The custom ids of the buttons: wf:a:<ask>:<question>:<option> (a choice), wf:a:<ask>:<question>
 // (a menu), wf:l:<ask> (あとで), wf:r:<message>:<n> (a reply button).
@@ -75,11 +79,11 @@ function rowsFor(ask, components = []) {
   return askComponents(ask, { only: only.length ? only : null, later: ids.some((x) => x[1] === 'l') || !only.length });
 }
 
-// The reply buttons under a reply of the secretary (reply_options), less the thread pair: a
-// thread is opened on the screen.
+// The reply buttons under a reply of the secretary (reply_options). スレッドで話す opens a
+// Discord thread from the message.
 export function replyComponents(m) {
   const options = m.data?.options ?? [];
-  if (!options.length || options.includes(THREAD_OPTION)) return [];
+  if (!options.length) return [];
   return [row(...options.map((o, i) => ({ type: BUTTON, custom_id: `wf:r:${m.id}:${i}`, label: clip(o, LABEL_MAX), style: i === 0 ? STYLE.primary : STYLE.secondary })))];
 }
 
@@ -91,36 +95,68 @@ export function askText(ask) {
 
 // { onEvent(type, data) } for the gateway. chat: the secretary's conversation
 // (src/secretary/chat.mjs); discord: the REST client (src/notify/discord.mjs).
-export function createDiscordChat({ chat, ledger, discord, log = () => {} }) {
+// threads: the tie of Discord threads to the conversation's threads
+// (src/notify/discord-threads.mjs); without it, no thread is opened in Discord.
+export function createDiscordChat({ chat, ledger, discord, threads = null, log = () => {} }) {
   const WRITER = { actor: 'discord', device: null };
   const person = (d) => d.member?.user?.id ?? d.user?.id ?? d.author?.id ?? null;
   const say = (d, text) => discord.respond(d, { type: REPLY, data: { content: text, flags: EPHEMERAL } });
   const problemText = (err) => (err instanceof LedgerError ? err.problems.join('\n') : '送れませんでした。もう一度押してください');
 
-  // Shows "writing…" while the secretary replies in the main conversation.
-  let typingAt = 0;
+  // Shows "writing…" while the secretary replies, in the channel for the main conversation and
+  // in its Discord thread for a thread.
+  const typingAt = new Map();
+  const typing = (channel) => {
+    if (Date.now() - (typingAt.get(channel) ?? 0) < 8000) return;
+    typingAt.set(channel, Date.now());
+    discord.typing(channel).catch(() => {});
+  };
   chat.subscribe?.((e) => {
-    if (e.type !== 'live' || e.thread !== ledger.getThread()?.id) return;
-    if (Date.now() - typingAt < 8000) return;
-    typingAt = Date.now();
-    discord.typing().catch(() => {});
+    if (e.type !== 'live') return;
+    if (e.thread === ledger.getThread()?.id) typing(discord.channel);
+    else if (threads) {
+      const channel = threads.channelOf(e.thread);
+      if (channel) typing(channel);
+    }
   });
 
   async function message(d) {
-    if (d.channel_id !== discord.channel || d.author?.bot || person(d) !== discord.user) return;
+    if (d.author?.bot || person(d) !== discord.user) return;
+    // The channel, or a Discord thread tied to a thread of the conversation.
+    const thread = d.channel_id === discord.channel ? null : threads?.thread(d.channel_id) ?? undefined;
+    if (thread === undefined) return;
+    const where = { channel: d.channel_id };
+    const tell = (text) => discord.post(text, where).catch(() => {});
     const text = String(d.content ?? '').trim();
     if (!text) {
-      if (d.attachments?.length) await discord.post('Discord からはファイルを送れません。ファイルは画面から送ってください').catch(() => {});
+      if (d.attachments?.length) await tell('Discord からはファイルを送れません。ファイルは画面から送ってください');
       return;
     }
     try {
-      chat.send(text, WRITER);
-      typingAt = Date.now();
-      discord.typing().catch(() => {});
-      if (d.attachments?.length) await discord.post('文字だけを秘書に渡しました。ファイルは画面から送ってください').catch(() => {});
+      chat.send(text, WRITER, thread ? { thread } : undefined);
+      typingAt.set(d.channel_id, Date.now());
+      discord.typing(d.channel_id).catch(() => {});
+      if (d.attachments?.length) await tell('文字だけを秘書に渡しました。ファイルは画面から送ってください');
     } catch (err) {
-      await discord.post(problemText(err)).catch(() => {});
+      await tell(problemText(err));
     }
+  }
+
+  // スレッドで話す: a Discord thread from the message the button is on, tied to the thread of
+  // the conversation started from the reply (the one there is, when it was opened on the
+  // screen). One Discord thread per thread.
+  async function openThread(d, m) {
+    const t = ledger.openThread(m.id, WRITER);
+    const known = threads.channelOf(t.id);
+    if (known) {
+      await say(d, `スレッドはこちらです: <#${known}>`);
+      return;
+    }
+    const last = ledger.listMessages(t.id).at(-1)?.id ?? null;
+    const channel = await discord.startThread(d.message?.id, t.title);
+    threads.add(channel.id, t.id, last);
+    await discord.respond(d, { type: UPDATE, data: { content: clip(`${d.message?.content ?? ''}\n→ ${THREAD_OPTION}`, 2000), components: [] } });
+    await discord.post(last ? '画面で始めたスレッドです。続きをここに書けます' : 'ここに書くと、このスレッドで秘書と話せます', { channel: channel.id }).catch(() => {});
   }
 
   async function interaction(d) {
@@ -136,7 +172,12 @@ export function createDiscordChat({ chat, ledger, discord, log = () => {} }) {
         const m = ledger.getMessage(id);
         const option = m?.data?.options?.[Number(a)];
         if (!option) throw new LedgerError(['この返事の候補は、もうありません']);
-        chat.send(option, WRITER);
+        const main = ledger.getThread()?.id;
+        if (option === THREAD_OPTION && threads && m.thread_id === main) {
+          await openThread(d, m);
+          return;
+        }
+        chat.send(option, WRITER, m.thread_id !== main ? { thread: m.thread_id } : undefined);
         await discord.respond(d, { type: UPDATE, data: { content: clip(`${d.message?.content ?? ''}\n→ ${option}`, 2000), components: [] } });
         return;
       }
@@ -154,7 +195,8 @@ export function createDiscordChat({ chat, ledger, discord, log = () => {} }) {
       const ask = ledger.getMessage(id);
       await discord.respond(d, { type: UPDATE, data: { content: d.message?.content ?? askText(ask), components: rowsFor(ask, d.message?.components) } });
     } catch (err) {
-      await say(d, problemText(err));
+      if (!(err instanceof LedgerError)) log(`discord: ${err.message}`);
+      await say(d, problemText(err)).catch(() => {});
     }
   }
 

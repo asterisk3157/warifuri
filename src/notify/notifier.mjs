@@ -10,6 +10,9 @@
 // to it go there too.
 // Nothing goes in the night, but while the person is talking; what came then goes once the
 // night is over, oldest first.
+// A thread of the conversation opened in Discord (threads, src/notify/discord-threads.mjs)
+// is a talk of its own: everything said in it goes to its Discord thread, as with mirror,
+// at night too: the person started it.
 //
 // The notifier reads the conversation after the last message it handled (kept in a file in
 // the data directory), so a restart neither loses nor repeats anything. The first time it
@@ -56,8 +59,9 @@ const personVia = (m) => (m.role === 'user' ? (m.actor === 'discord' ? 'discord'
 // discord: { post } (src/notify/discord.mjs). night: the secretary's night ({ start, end }).
 // picture(m): the PNG of the calendar under a message (show_calendar), or null; it goes with
 // the notice as a file.
-// mirror: Discord holds the whole conversation (see above).
-export function createNotifier({ ledger, discord, file, publicUrl = null, night = null, mirror = false, now = () => new Date(), log = () => {}, picture = async () => null }) {
+// mirror: Discord holds the whole conversation (see above). threads: the Discord threads tied
+// to threads of the conversation.
+export function createNotifier({ ledger, discord, file, publicUrl = null, night = null, mirror = false, threads = null, now = () => new Date(), log = () => {}, picture = async () => null }) {
   const link = publicUrl ? `${publicUrl.replace(/\/$/, '')}/secretary` : null;
   const read = () => {
     try {
@@ -87,6 +91,40 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
     }
   }
 
+  // What came in each thread tied to a Discord thread, sent there. Resolves to the number sent.
+  async function tickThreads() {
+    let sent = 0;
+    for (const { channel, thread, last } of threads?.list() ?? []) {
+      let list;
+      try {
+        list = last ? ledger.listMessages(thread, { after: last }) : ledger.listMessages(thread);
+      } catch {
+        // The thread or the message it stopped at is gone: start again from now.
+        try {
+          threads.setLast(channel, ledger.listMessages(thread).at(-1)?.id ?? null);
+        } catch {
+          // The thread itself is gone: nothing to send.
+        }
+        continue;
+      }
+      for (const m of list) {
+        const notice = noticeOf(m, null, { talking: true, mirror: true });
+        if (notice) {
+          try {
+            const png = m.data?.calendar ? await picture(m).catch(() => null) : null;
+            await post(notice, png, channel);
+            sent += 1;
+          } catch (err) {
+            log(`discord: not sent to the thread, tried again later: ${err.message}`);
+            break;
+          }
+        }
+        threads.setLast(channel, m.id);
+      }
+    }
+    return sent;
+  }
+
   // Sends what came since the last call. Resolves to the number sent.
   async function tick() {
     if (!discord || running) return 0;
@@ -96,6 +134,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
     running = true;
     let sent = 0;
     try {
+      sent += await tickThreads();
       const state = read();
       let list;
       try {
@@ -108,13 +147,13 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
       if (!state.started) {
         // The first run: start from now.
         write({ started: true, last: list.at(-1)?.id ?? null });
-        return 0;
+        return sent;
       }
       // In the night, nothing goes unless the person is talking from Discord now (by what the
       // person wrote last); then all of it goes, in order.
       const newest = [...list].reverse().find((m) => personVia(m));
       const now_ = newest ? { via: personVia(newest), viaAt: newest.created_at } : state;
-      if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) return 0;
+      if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) return sent;
       const save = () => write({ started: true, last: state.last, failure: state.failure ?? null, via: state.via ?? null, viaAt: state.viaAt ?? null });
       for (const m of list) {
         const via = personVia(m);
