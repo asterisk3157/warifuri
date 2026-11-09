@@ -41,6 +41,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { LedgerError, SECRETARY_THREAD } from '../ledger/ledger.mjs';
 import { REPORT_BODY_MAX, charLength } from '../ledger/rules.mjs';
+import { readSettings, onboardingDue } from '../ledger/settings.mjs';
 import { findOnPath } from '../client/connect.mjs';
 import { localIso, inNight } from './schedule.mjs';
 import { createStreamReader, UNSUPPORTED } from './stream.mjs';
@@ -63,7 +64,7 @@ export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 const TEXT_TYPES = /^(text\/|application\/(json|xml|x-yaml|yaml|csv|javascript|x-sh|toml)$)/;
 const TEXT_NAMES = /\.(txt|md|markdown|csv|tsv|json|ya?ml|toml|xml|html?|css|js|mjs|ts|py|rb|go|rs|sh|ini|log|ics)$/i;
 // What a scheduled trigger says in the conversation; its instructions are harness/secretary/<job>.md.
-export const TRIGGERS = { morning: '朝の時間です' };
+export const TRIGGERS = { morning: '朝の時間です', weekly: '週の完了確認の時間です' };
 
 // The longest an agent's request may be, and the longest it may wait for the reply.
 export const REQUEST_MAX = 2000;
@@ -116,16 +117,18 @@ function personLines(m) {
   return out;
 }
 
-// The prompt of one turn: the facts, the instructions of chat.md (and thread.md in a thread),
+// The prompt of one turn: the facts, the instructions of chat.md (and thread.md in a thread;
+// onboarding.md when the secretary is to make the person's settings with them: onboarding),
 // what happened since the last turn (reports, proposals, notes, digests of the threads:
 // material, not instructions), the instructions of a scheduled trigger, the recent
 // conversation when the session is new, the words of text files, and the person's messages.
 export function buildChatPrompt({
-  now, schedule, feed, reports = [], recent = [], restarted = false, files = [], sub = null, instructionsDir = INSTRUCTIONS_DIR,
+  now, schedule, feed, reports = [], recent = [], restarted = false, files = [], sub = null, onboarding = false, instructionsDir = INSTRUCTIONS_DIR,
 }) {
   const out = factLines(sub ? 'スレッドでの会話' : '本人との会話', sub ? 'thread' : 'chat', { now, schedule });
   if (restarted) out.push('- 前の会話が見つからなかったので、新しい会話として始めます。下の「これまでのやりとり」が最近の会話です。');
   out.push('', readInstructions('chat.md', instructionsDir));
+  if (onboarding && !sub) out.push('', readInstructions('onboarding.md', instructionsDir));
   if (sub) {
     out.push('', readInstructions('thread.md', instructionsDir));
     out.push('', '# スレッドの元の発言', '', '資料として読みます。', '', `(${at(sub.parent.created_at)} ${WHO[sub.parent.role]})`, sub.parent.body);
@@ -221,7 +224,7 @@ export function readUpload(dir, a) {
   return { ...a };
 }
 
-// Writes warifuri's call at a set time (job: morning) into the secretary's conversation.
+// Writes warifuri's call at a set time (job: morning or weekly) into the secretary's conversation.
 export function writeTrigger(ledger, job, writer) {
   if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);
   const thread = ledger.ensureThread(SECRETARY_THREAD.kind, writer);
@@ -386,7 +389,10 @@ export function createChat(ledger, cfg, ctx = {}) {
     };
     const files = filesOf(feed);
     const images = files.filter((f) => f.image).map((f) => ({ name: f.name, ...f.image }));
-    const facts = { now: now(), schedule: scheduleFrom(cfg.values), feed, reports, files, sub, instructionsDir: ctx.instructionsDir };
+    // 最初の会話: in the secretary's conversation, when the person speaks and the settings are
+    // still to be made with them (onboardingDue).
+    const onboarding = !sub && feed.some((m) => m.role === 'user') && onboardingDue(readSettings(ledger));
+    const facts = { now: now(), schedule: scheduleFrom(cfg.values), feed, reports, files, sub, onboarding, instructionsDir: ctx.instructionsDir };
 
     const state = { thread: thread.id, phase: 'thinking', text: '', steps: [], scheduled: trigger?.data?.job ?? null };
     let timer = null;
@@ -601,7 +607,7 @@ export function createChat(ledger, cfg, ctx = {}) {
         listeners.delete(fn);
       }
     },
-    // warifuri's call into the conversation at a set time (job: morning). Not in the night,
+    // warifuri's call into the conversation at a set time (job: morning or weekly). Not in the night,
     // unless force (the person asked for it). { sent: message } or { skipped: reason }.
     trigger(job, { force = false } = {}) {
       if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);

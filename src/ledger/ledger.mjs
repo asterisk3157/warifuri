@@ -2180,6 +2180,9 @@ export function openLedger(path, options = {}) {
     setAutonomyByPerson,
     get,
     board,
+    openBefore,
+    // The ledger's clock, so tools that read it (timetable) see the same now as the ledger.
+    now: () => now(),
     search,
     flow,
     stale,

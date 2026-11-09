@@ -374,6 +374,64 @@ test('warifuri secretary run morning writes the call into the conversation for s
   L.close();
 });
 
+test('the weekly check: a call into the same session with the weekly instructions, sent by the clock on its day and not in the night', async (t) => {
+  const w = world(t);
+  w.chat.send('おはよう', WEB);
+  await w.chat.idle();
+  const sid = w.main().session_id;
+  const out = w.chat.trigger('weekly');
+  assert.equal(out.sent.body, '週の完了確認の時間です');
+  await w.chat.idle();
+  const call = w.claude.calls[1];
+  assert.equal(call.at('--resume'), sid, 'the weekly check resumes the conversation\'s session, so what the person said there is at hand');
+  assert.match(call.input, /# 決まった時刻の仕事[\s\S]*「週の完了確認の時間です」[\s\S]*# 週の完了確認\(weekly\)/);
+  assert.ok(!call.input.includes('# 朝の時間(morning)'));
+  // The instructions never let it close a task on its own, and keep Git out.
+  assert.match(call.input, /閉じるのは、本人が了承したタスクだけです/);
+  assert.match(call.input, /Git のコミット[^\n]*探しません/);
+  const reply = w.ledger.listMessages(w.main().id).at(-1);
+  assert.deepEqual([reply.role, reply.data.scheduled], ['secretary', 'weekly']);
+
+  w.clock.now = new Date(2026, 10, 8, 23, 30, 0);
+  assert.deepEqual(w.chat.trigger('weekly'), { skipped: 'it is the night' });
+
+  // The clock: Sunday 10:00 only.
+  const ran = [];
+  const logs = [];
+  let at = new Date(2026, 10, 7, 9, 59, 30);
+  const s = createScheduler({
+    jobs: { nightly: parseWhen('off'), morning: parseWhen('off'), inbox: parseWhen('off'), weekly: parseWhen('sun 10:00') },
+    now: () => at,
+    log: (l) => logs.push(l),
+    run: async (job) => (ran.push(job), w.chat.trigger(job)),
+  });
+  s.start();
+  s.stop();
+  at = new Date(2026, 10, 7, 10, 0, 10); // a Saturday
+  w.clock.now = at;
+  await s.tick();
+  assert.deepEqual(ran, []);
+  at = new Date(2026, 10, 8, 10, 0, 10); // Sunday
+  w.clock.now = at;
+  await s.tick();
+  assert.deepEqual(ran, ['weekly']);
+  assert.ok(logs.includes('secretary: weekly sent into the conversation'));
+  await w.chat.idle();
+});
+
+test('warifuri secretary run weekly writes the call into the conversation; the weekly check is not a run of its own', async () => {
+  const home = fs.mkdtempSync(path.join(tmp, 'cli-'));
+  const r = cli(['secretary', 'run', 'weekly'], { home });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /sent 週の完了確認の時間です into the conversation/);
+  const L = openLedger(path.join(home, 'ledger.sqlite'));
+  const [m] = L.listMessages(L.getThread().id);
+  assert.deepEqual([m.kind, m.data.job, m.actor], ['trigger', 'weekly', 'cli']);
+  L.close();
+  const { runJob } = await import('../src/secretary/secretary.mjs');
+  assert.match((await runJob('weekly', loadConfig({ env: { WARIFURI_HOME: home }, command: 'secretary' }))).error, /weekly runs in the conversation/);
+});
+
 test('threads: their own session and MCP config naming the thread; each exchange queues a digest that the main session takes, in order, without a visible reply', async (t) => {
   const w = world(t);
   w.chat.send('おはよう', WEB);

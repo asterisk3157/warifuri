@@ -15,11 +15,12 @@
 //   warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]
 //                    [--no-hook] [--no-skills] [--force] [--dry-run]
 //   warifuri hook gate               (the start gate; a PreToolUse hook, JSON on stdin)
+//   warifuri hook stop               (the end-of-work reminder; a Stop hook, JSON on stdin)
 //   warifuri hook calendar [claude|codex]  (stops calendar writes while the secretary runs, and
 //                                    every calendar tool of a harness on the gcp route)
 //   warifuri hook tools <tool> ...   (the secretary's: stops all but the reads of the tools given)
 //   warifuri secretary enable|disable
-//   warifuri secretary run <nightly|morning|inbox>
+//   warifuri secretary run <nightly|morning|inbox|weekly>
 //   warifuri --version               (also -v; the version of this package)
 //
 // Every command takes --home <dir> (the data directory) and --db <ledger.sqlite>. The flags
@@ -44,10 +45,11 @@ import { PROFILES_DIR } from './knowledge/profiles.mjs';
 import { connect, redact } from './client/connect.mjs';
 import { decide, readKey } from './client/gate.mjs';
 import { decideCalendar } from './client/calendar-hook.mjs';
+import { decideStop, STATE_FILE as STOP_STATE_FILE } from './client/stop-hook.mjs';
 import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
-import { createChat, writeTrigger } from './secretary/chat.mjs';
+import { createChat, writeTrigger, TRIGGERS } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
 import { createGateway } from './notify/gateway.mjs';
@@ -56,7 +58,7 @@ import { createThreadMap } from './notify/discord-threads.mjs';
 import { parseAliases } from './monitor/detail.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
-import { JOBS } from './secretary/schedule.mjs';
+import { JOBS, CHAT_JOBS } from './secretary/schedule.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -75,9 +77,10 @@ const USAGE = [
   '       warifuri connect [--url <server url>] [--device <name>] [--harness claude|codex|all]',
   '                        [--no-hook] [--no-skills] [--force] [--dry-run]',
   '       warifuri hook gate',
+  '       warifuri hook stop',
   '       warifuri hook calendar [claude|codex]',
   '       warifuri secretary enable|disable',
-  '       warifuri secretary run <nightly|morning|inbox>',
+  '       warifuri secretary run <nightly|morning|inbox|weekly>',
   '       warifuri --version',
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
@@ -101,11 +104,12 @@ const USAGE = [
   'connect sets up this machine to use a server (--url, or WARIFURI_SERVER_URL; a server on',
   'this machine when neither is given): it registers the MCP server in Claude Code and Codex,',
   'puts the device key in WARIFURI_DEVICE_KEY_FILE (issued here when the ledger is on this',
-  'machine), wires the start gate and calendar hooks and copies the skills. --dry-run only',
-  'shows the plan. hook gate is the start gate: it reads the harness JSON on stdin and stops',
-  'an edit in a place where this device holds no task. hook calendar stops a write to a',
-  'calendar through the agent\'s own MCP while the secretary runs. Both let the call through',
-  'whenever they cannot ask.',
+  'machine), wires the start gate, stop and calendar hooks and copies the skills. --dry-run',
+  'only shows the plan. hook gate is the start gate: it reads the harness JSON on stdin and',
+  'stops an edit in a place where this device holds no task. hook stop reminds an agent',
+  'ending its turn, once per conversation, to close or release the task it still holds.',
+  'hook calendar stops a write to a calendar through the agent\'s own MCP while the',
+  'secretary runs. All of them let the call through whenever they cannot ask.',
   '',
   'secretary enable, on the server machine, gives the secretary (claude -p, logged in by you)',
   'its key and MCP config and turns its schedule on (WARIFURI_SECRETARY=on); serve then wakes',
@@ -443,10 +447,10 @@ function runServe(args) {
 }
 
 // The secretary's clock in serve, when WARIFURI_SECRETARY is on: { stop } or null. Only one
-// line per run start and end is printed; claude's output goes to its log file. The morning is
-// not a run of its own: it is a call into the conversation (chat.trigger), answered by the
-// secretary of the conversation. Each check also looks for calls written by
-// `warifuri secretary run morning` from another process.
+// line per run start and end is printed; claude's output goes to its log file. The morning
+// and the weekly check are not runs of their own: they are calls into the conversation
+// (chat.trigger), answered by the secretary of the conversation. Each check also looks for
+// calls written by `warifuri secretary run morning` (or weekly) from another process.
 function startSecretary(cfg, chat, ledger) {
   if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
   const ready = secretary.readyToSchedule(cfg);
@@ -498,7 +502,7 @@ function startSecretary(cfg, chat, ledger) {
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
-    run: (job) => (job === 'morning' ? chat.trigger(job) : runJob(job)),
+    run: (job) => (CHAT_JOBS.includes(job) ? chat.trigger(job) : runJob(job)),
     onTick: () => {
       chat.kick();
       notifier.tick().catch((err) => log(`discord: ${err.message}`));
@@ -532,18 +536,20 @@ async function runSecretary(args) {
   const cfg = settingsFor('secretary', values);
   if (cfg === 2) return 2;
   warn(cfg);
-  if (sub === 'run' && positionals[0] === 'morning') {
-    // The morning goes into the conversation: warifuri serve answers it at its next check.
+  if (sub === 'run' && CHAT_JOBS.includes(positionals[0])) {
+    // The morning and the weekly check go into the conversation: warifuri serve answers them
+    // at its next check.
+    const job = positionals[0];
     let ledger;
     try {
       ledger = openConfiguredLedger(cfg);
-      writeTrigger(ledger, 'morning', { actor: 'cli', device: null });
+      writeTrigger(ledger, job, { actor: 'cli', device: null });
     } catch (err) {
       return fail(err, 'cannot write to the ledger');
     } finally {
       ledger?.close();
     }
-    process.stdout.write('secretary: sent 朝の時間です into the conversation; warifuri serve answers it within a minute\n');
+    process.stdout.write(`secretary: sent ${TRIGGERS[job]} into the conversation; warifuri serve answers it within a minute\n`);
     return 0;
   }
   if (sub === 'run') {
@@ -630,7 +636,7 @@ async function runHook(args) {
     await new Promise((resolve) => (out ? process.stdout.write(`${out}\n`, resolve) : resolve()));
     process.exit(0);
   }
-  const which = args[0] === 'calendar' ? decideCalendar : decide;
+  const which = args[0] === 'calendar' ? decideCalendar : args[0] === 'stop' ? decideStop : decide;
   // hook calendar names the harness it runs in (claude or codex), for its calendar route.
   const harness = args[0] === 'calendar' && ['claude', 'codex'].includes(args[1]) ? args[1] : null;
   const rest = args.slice(harness ? 2 : 1);
@@ -650,6 +656,7 @@ async function runHook(args) {
       output = await which(payload, {
         url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE,
         ...(setting ? { route: v[setting], setting } : {}),
+        ...(args[0] === 'stop' ? { stop: v.WARIFURI_STOP, stateFile: path.join(cfg.home, STOP_STATE_FILE) } : {}),
       });
     }
   } catch {
@@ -677,7 +684,7 @@ function main(argv) {
     return undefined;
   }
   if (command === 'hook') {
-    if (!['gate', 'calendar', 'tools'].includes(rest[0])) return usage('hook takes gate, calendar or tools');
+    if (!['gate', 'stop', 'calendar', 'tools'].includes(rest[0])) return usage('hook takes gate, stop, calendar or tools');
     runHook(rest);
     return undefined;
   }
