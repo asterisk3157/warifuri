@@ -1,10 +1,9 @@
-// The numbers of the performance view of the home lab, as a task manager shows them: for each
-// machine its CPU (per thread, over the last hour), memory, disks, and GPU; the power of the whole lab; and the list of guests. Out of the monitoring
+// The numbers of the home lab for the server screen, as a task manager shows them: for each
+// machine its CPU (per thread, over the last hour), memory, disks, and GPU; the power of the
+// whole lab; and the list of guests with what each was given and uses. Out of the monitoring
 // (Prometheus with node_exporter, the Proxmox collector, and, where there are, the NVIDIA and
 // smart plug exporters). No machine or disk is named in the code: they are what the
 // monitoring reports. detailData is pure; fetchDetail asks the monitoring.
-
-import { LIMITS, QUERIES } from './homelab.mjs';
 
 const GUEST = 'id=~"(qemu|lxc)/.*"';
 const DISKS = 'device!~"dm-.*|loop.*|zd.*|sr.*|nbd.*|md.*"';
@@ -27,9 +26,9 @@ export const DETAIL_QUERIES = Object.freeze({
     gpuMemTotal: 'nvidia_gpu_memory_total_bytes',
     energyToday: 'tapo_energy_today_watt_hours',
     energyMonth: 'tapo_energy_month_watt_hours',
-    guests: QUERIES.guests,
-    up: QUERIES.up,
-    onboot: QUERIES.onboot,
+    guests: 'pve_guest_info',
+    up: `pve_up{${GUEST}}`,
+    onboot: 'pve_onboot_status',
     guestCpu: `pve_cpu_usage_ratio{${GUEST}}`,
     guestCpuLimit: `pve_cpu_usage_limit{${GUEST}}`,
     guestMemUsed: `pve_memory_usage_bytes{${GUEST}}`,
@@ -176,7 +175,7 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
       return {
         name: row.labels.name ?? row.labels.modelName ?? null,
         utilization: lastOf(util) ?? whole(pick('gpuUtil', match)),
-        tempC: lastOf(temp) ?? whole(num(row.value)), warnC: LIMITS.gpuWarn,
+        tempC: lastOf(temp) ?? whole(num(row.value)),
         memoryUsedBytes: whole(pick('gpuMemUsed', match)), memoryTotalBytes: whole(pick('gpuMemTotal', match)),
         powerWatts: whole(pick('gpuPower', match)), powerLimitWatts: whole(pick('gpuPowerLimit', match)),
         series: { utilization: util, temp, memory: series('gpuMemory', within100), power: series('gpuPower') },
@@ -238,4 +237,14 @@ export async function fetchDetail(url, { fetchFn = globalThis.fetch, aliases = {
   } catch (err) {
     return { at: new Date(now()).toISOString(), error: '監視サーバーに接続できません', reason: err.message };
   }
+}
+
+// The aliases setting, "nas=nas-01,other=name", as an object.
+export function parseAliases(text) {
+  const out = {};
+  for (const part of String(text ?? '').split(',')) {
+    const [from, to] = part.split('=').map((x) => x?.trim());
+    if (from && to) out[from] = to;
+  }
+  return out;
 }

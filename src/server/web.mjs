@@ -33,7 +33,6 @@ import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
 import { calendarSvg } from '../calendar/image.mjs';
 import { readSettings, weekBands } from '../ledger/settings.mjs';
-import { fetchHomelab } from '../monitor/homelab.mjs';
 import { fetchDetail } from '../monitor/detail.mjs';
 import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, PROFILES_DIR } from '../knowledge/profiles.mjs';
@@ -598,20 +597,8 @@ export function createWeb({
       }));
   }
 
-  // 自宅サーバー: the monitoring is asked at most every HOMELAB_TTL_MS, whoever looks.
-  let homelab = null;
-  let homelabAt = 0;
-  const readHomelab = async () => {
-    if (!monitor?.url) return null;
-    if (!homelab || now() - homelabAt > HOMELAB_TTL_MS) {
-      homelabAt = now();
-      homelab = await fetchHomelab(monitor.url, { aliases: monitor.aliases ?? {}, now });
-    }
-    return homelab;
-  };
-
-  // The performance view of the home lab (src/monitor/detail.mjs): the last hour, asked at most
-  // every HOMELAB_TTL_MS, with the summary of what is worth telling.
+  // The home lab as the server screen shows it (src/monitor/detail.mjs): the last hour, asked
+  // at most every HOMELAB_TTL_MS, whoever looks.
   let detail = null;
   let detailAt = 0;
   api.get('/server/monitor', async (req, res) => {
@@ -620,7 +607,7 @@ export function createWeb({
       detailAt = now();
       detail = await fetchDetail(monitor.url, { aliases: monitor.aliases ?? {}, now });
     }
-    return res.json({ configured: true, summary: await readHomelab(), detail });
+    return res.json({ configured: true, detail });
   });
 
   api.get('/server', async (req, res) => {

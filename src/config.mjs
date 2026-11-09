@@ -248,7 +248,7 @@ export const SETTINGS = [
   },
   {
     name: 'WARIFURI_MONITOR_URL',
-    about: '自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面に機械と VM の様子を出す。http か https で始まり、道を含まない',
+    about: '自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない',
     commands: ['serve'],
     check: (v) => (/^https?:\/\/[^/\s]+\/?$/.test(v) ? null : 'must be an http(s) URL with no path'),
   },
