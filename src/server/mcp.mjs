@@ -995,7 +995,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'source (such as google-calendar) and external_id (the event id there) name the outside event the booking is: ' +
       'without id, a pair already in the ledger changes that booking instead of making a second one, so importing ' +
       'an event again is safe; with id, attaches the pair (for an event you just wrote there), unless another ' +
-      'booking has it. external_id needs source. note: a note, such as an outside event\'s description; location: where it is; organizer: who made it (such as an email address).',
+      'booking has it. external_id needs source. note: a note, such as an outside event\'s description; location: where it is ' +
+      '(put a place the person named here, not in the title); organizer: who made it (such as an email address). A new ' +
+      'booking made here without source and organizer is marked as made by the secretary, or by this device.',
     {
       id: z.string().min(1).optional(),
       kind: z.enum(BOOKING_KINDS).optional(),
@@ -1010,7 +1012,12 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       source: clearable,
       external_id: clearable,
     },
-    async (args) => result(ledger.book(given(args), writer)),
+    async (args) => {
+      const fields = given(args);
+      // Who made a booking made in warifuri, as the calendar shows it under 作成者.
+      if (!fields.id && !fields.source && fields.organizer === undefined) fields.organizer = device.name === secretaryDevice ? '秘書' : device.name;
+      return result(ledger.book(fields, writer));
+    },
   );
 
   tool(
