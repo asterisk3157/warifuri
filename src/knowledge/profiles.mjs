@@ -219,3 +219,97 @@ export function noteRecordChanges({ kind, file, mark, text, from = {} }) {
     : { excerpt: chars.slice(0, 200).join(''), chars: chars.length, sha256: createHash('sha256').update(t, 'utf8').digest('hex') };
   return { kind, file, mark, ...kept, ...(from.task ? { task: from.task } : {}) };
 }
+
+// A profile's defaults (原則8, 20), in profile.yaml: human_led (whether its goals are led by
+// the person, the first value of a new goal's mark) and color (the dot of its schedule, read
+// by the Web screens too). Only these two lines are read and written; other lines of the
+// file stay as they are.
+export const PROFILE_FIELDS = ['human_led', 'color'];
+const COLOR = /^#[0-9a-fA-F]{6}$/;
+const lineOf = (field) => new RegExp(`^${field}:\\s*("[^"]*"|'[^']*'|[^#\\s]*)\\s*(#.*)?$`);
+
+// { human_led: true | false | null, color: '#rrggbb' | null } as profile.yaml says (null: not
+// written there), and whether the file exists.
+export function readProfileDefaults(home, profile) {
+  const file = path.join(profileDir(home, profile), 'profile.yaml');
+  let text = null;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') throw err;
+  }
+  const lines = (text ?? '').split(/\r?\n/);
+  const value = (field) => {
+    for (const l of lines) {
+      const m = lineOf(field).exec(l);
+      if (m) return m[1].replace(/^["']|["']$/g, '');
+    }
+    return null;
+  };
+  const led = value('human_led');
+  const color = value('color');
+  return {
+    exists: text !== null,
+    human_led: led === 'true' ? true : led === 'false' ? false : null,
+    color: color && COLOR.test(color) ? color.toLowerCase() : null,
+  };
+}
+
+// Writes the fields given ({ human_led?: boolean | null, color?: '#rrggbb' | null }; null
+// removes the line, so the default applies again) and returns the fields as written.
+export function writeProfileDefaults(home, profile, fields) {
+  const problems = [];
+  const given = Object.keys(fields).filter((k) => fields[k] !== undefined);
+  for (const k of Object.keys(fields)) if (!PROFILE_FIELDS.includes(k)) problems.push(`${k} はプロフィールの既定値にありません(human_led、color)`);
+  if (given.length === 0) problems.push('直す既定値(human_led か color)を1つ以上渡します');
+  if (fields.human_led != null && typeof fields.human_led !== 'boolean') problems.push('human_led は true か false です(null で既定に戻す)');
+  if (fields.color != null && (typeof fields.color !== 'string' || !COLOR.test(fields.color))) problems.push('color は #rrggbb の形です(null で既定に戻す)');
+  if (problems.length) throw new LedgerError(problems);
+  const dir = profileDir(home, profile);
+  const file = path.join(dir, 'profile.yaml');
+  let lines = [];
+  try {
+    lines = fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n').split('\n');
+    if (lines.at(-1) === '') lines.pop();
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  for (const field of given) {
+    const v = fields[field];
+    const line = v === null ? null : field === 'color' ? `color: "${v.toLowerCase()}"` : `human_led: ${v}`;
+    const at = lines.findIndex((l) => lineOf(field).test(l));
+    if (at >= 0) {
+      if (line === null) lines.splice(at, 1);
+      else lines[at] = line;
+      lines = lines.filter((l, i) => i <= at || !lineOf(field).test(l));
+    } else if (line !== null) {
+      lines.push(line);
+    }
+  }
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, lines.length ? `${lines.join('\n')}\n` : '', { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(tmp, file);
+  return readProfileDefaults(home, profile);
+}
+
+// The names of the profiles that have a folder in <home>/profiles, sorted.
+export function profileFolders(home) {
+  let entries;
+  try {
+    entries = fs.readdirSync(path.resolve(home, PROFILES_DIR), { withFileTypes: true });
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return [];
+    throw err;
+  }
+  const names = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.')) continue;
+    try {
+      names.push(profileName(e.name).normalize('NFC'));
+    } catch {
+      // A folder whose name is not one warifuri made: not a profile.
+    }
+  }
+  return names.sort();
+}

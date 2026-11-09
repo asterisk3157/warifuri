@@ -1179,9 +1179,15 @@ export function openLedger(path, options = {}) {
   // A note written to a profile's knowledge or inbox (src/knowledge/profiles.mjs writes the
   // file): entity 'knowledge', the profile as its id, and what was written as the changes.
   function recordNote(profile, changes, opts) {
+    recordKnowledge(profile, 'note', changes, opts);
+  }
+
+  // Records a change to a profile's files (entity 'knowledge', the profile's name as its id):
+  // action note, sort (the inbox sorted), split, stale, or defaults (profile.yaml).
+  function recordKnowledge(profile, action, changes, opts) {
     const w = requireWriter(opts);
     if (typeof profile !== 'string' || profile === '') throw new LedgerError(['プロフィールの名前がありません']);
-    transaction(() => record(w, 'knowledge', profile, 'note', changes));
+    transaction(() => record(w, 'knowledge', profile, action, changes));
   }
 
   // Stores a report ({ kind, title, body }) from the writer's device. Line ends become \n and
@@ -2175,6 +2181,7 @@ export function openLedger(path, options = {}) {
     stale,
     records,
     recordNote,
+    recordKnowledge,
     writeReport,
     listReports,
     getThread,
