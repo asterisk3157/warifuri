@@ -1,7 +1,8 @@
 // カレンダー: the bookings of a day or a week, with today's list beside them.
 
-import { h, skel, soonBadge, hhmm, mdw, dayStart, addDays, isoLocal, profileColor, tint, WEEKDAYS } from '../ui.js';
+import { h, s, skel, soonBadge, hhmm, mdw, dayStart, addDays, isoLocal, profileColor, tint, WEEKDAYS } from '../ui.js';
 import { renderRichNote } from '../md.js';
+import { GOOGLE_G } from '../google-mark.js';
 
 const ROW = 52;
 const H0 = 8;
@@ -33,6 +34,10 @@ function category(b, colors) {
   if (b.profile) return { label: b.profile, color: profileColor(b.profile, colors) };
   return { label: 'タスク', color: profileColor(null, colors) };
 }
+
+// The Google "G" on a booking that is in the person's Google Calendar.
+const gMark = () => s('svg', { class: 'wf-ev-g', viewBox: '0 0 48 48', role: 'img', 'aria-label': 'Google カレンダーにある' },
+  ...GOOGLE_G.map(([fill, d]) => s('path', { fill, d })));
 
 const fmt = (d) => hhmm(d);
 const span = (b) => `${fmt(new Date(Date.parse(b.starts_at)))}–${fmt(new Date(Date.parse(b.ends_at)))}`;
@@ -139,7 +144,7 @@ export function weekGrid({ from, days, shown, now, sel = null, onPick = null, ba
     ? h('div', { class: 'wf-grid wf-allday', style: { gridTemplateColumns: columns } }, h('span', { class: 'wf-allday-label', text: '終日' }),
       ...allDay.map((bs) => h('div', { class: 'wf-allday-cell' }, ...bs.map((b) => {
         const c = category(b, colors);
-        return h('button', { type: 'button', class: ['wf-allday-ev', sel === b.id && 'wf-ev-picked'], title: b.title, style: { background: tint(c.color) }, onclick: onPick ? () => onPick(sel === b.id ? null : b.id) : null }, b.title);
+        return h('button', { type: 'button', class: ['wf-allday-ev', sel === b.id && 'wf-ev-picked'], title: b.title, style: { background: tint(c.color) }, onclick: onPick ? () => onPick(sel === b.id ? null : b.id) : null }, b.title, b.in_google ? gMark() : null);
       }))))
     : null;
   const cols = list.map((d, i) => {
@@ -157,7 +162,7 @@ export function weekGrid({ from, days, shown, now, sel = null, onPick = null, ba
         title: `${x.b.title}\n${withLabel(c, span(x.b))}`, 'aria-pressed': String(picked),
         style: { top: `${top}px`, height: `${ht}px`, left: `calc(${(x.col / x.n) * 100}% + 4px)`, width: `calc(${100 / x.n}% - 8px)`, background: tint(c.color) },
         onclick: onPick ? () => onPick(picked ? null : x.b.id) : null,
-      }, h('span', { class: 'wf-ev-title', text: x.b.title }));
+      }, h('span', { class: 'wf-ev-title', text: x.b.title }), x.b.in_google ? gMark() : null);
     });
     // The week type (where the person is then): a light band behind the bookings.
     const dayEnd = addDays(d, 1).getTime();

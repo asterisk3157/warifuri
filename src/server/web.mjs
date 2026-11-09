@@ -492,6 +492,8 @@ export function createWeb({
   const bookingOut = (b) => ({
     id: b.id, title: b.title, kind: b.kind, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note, location: b.location ?? null, organizer: b.organizer ?? null,
     task: b.task, habit: b.habit, goal: b.goal, profile: b.profile,
+    // In the person's Google Calendar: taken in from it, or written out to it.
+    in_google: typeof b.source === 'string' && b.source.startsWith('google-calendar'),
   });
 
   api.get('/calendar', (req, res) => {
