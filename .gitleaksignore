@@ -1,0 +1,4 @@
+# 本物の秘密ではないと確かめたものだけを、1件ずつ書く(コミット:ファイル:ルール:行)。
+# docs/integrations.md の Discord の設定の例(作った値の id)
+3fe823b81fae3f5258c19b4eb32529f7fa49567d:docs/integrations.md:discord-client-id:64
+3fe823b81fae3f5258c19b4eb32529f7fa49567d:docs/integrations.md:discord-client-id:65
