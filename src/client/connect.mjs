@@ -2,7 +2,8 @@
 // on PATH (Claude Code, Codex), registers the server's MCP endpoint in each, puts this
 // machine's device key in its file (issuing it when the server's ledger is on this machine),
 // wires the start gate hook (`warifuri hook gate`), the end-of-work reminder (`warifuri hook
-// stop`) and the calendar hook, and copies the package's skills.
+// stop`), the session brief (`warifuri hook brief`) and the calendar hook, and copies the
+// package's skills.
 //
 // Every step looks at what is already there first, so running it again changes nothing.
 // A harness file that is changed is copied next to itself first (<file>.bak-warifuri-<time>);
@@ -141,6 +142,7 @@ const isHook = (which) => (h) => !!h && typeof h.command === 'string' && new Reg
 export const isGateHook = isHook('gate');
 export const isCalendarHook = isHook('calendar');
 export const isStopHook = isHook('stop');
+export const isBriefHook = isHook('brief');
 
 // The hooks JSON with exactly one start gate in PreToolUse: { changed, json }. Other hooks,
 // other events and other keys are kept as they are.
@@ -179,7 +181,7 @@ export function mergeHook(json, { event = 'PreToolUse', matcher, handler, isOurs
 // npm also puts a warifuri.ps1 there, which PowerShell may refuse to run under its execution
 // policy. Otherwise node and this package's bin.
 export function gateCommand({ env, platform, home, homeIsDefault, which = 'gate' }) {
-  // which: 'gate', 'stop', or 'calendar <harness>'.
+  // which: 'gate', 'stop', 'brief', or 'calendar <harness>'.
   const q = (s) => `"${s}"`;
   const onPath = findOnPath('warifuri', env, platform) ? (platform === 'win32' ? 'warifuri.cmd' : 'warifuri') : null;
   const head = onPath ?? `${q(process.execPath)} ${q(BIN)}`;
@@ -340,6 +342,7 @@ export function connect(cfg, opts, ctx = {}) {
 
   const command = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true });
   const stopCommand = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: 'stop' });
+  const briefCommand = gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: 'brief' });
   const calendarCommand = (harness) => gateCommand({ env, platform, home: cfg.home, homeIsDefault: ctx.homeIsDefault ?? true, which: `calendar ${harness}` });
   const skills = opts.skills ? packageSkills(ctx.packageRoot) : [];
   const skillTargets = new Set();
@@ -356,7 +359,8 @@ export function connect(cfg, opts, ctx = {}) {
 
     const dir = h.name === 'claude' ? env.CLAUDE_CONFIG_DIR || path.join(home, '.claude') : env.CODEX_HOME || path.join(home, '.codex');
 
-    // The start gate, the end-of-work reminder and the calendar hook, in one write of the file.
+    // The start gate, the end-of-work reminder, the session brief and the calendar hook, in
+    // one write of the file.
     if (opts.hook) {
       const file = h.name === 'claude' ? path.join(dir, 'settings.json') : path.join(dir, 'hooks.json');
       const handler = (cmd, status) =>
@@ -364,6 +368,7 @@ export function connect(cfg, opts, ctx = {}) {
       const hooks = [
         { what: 'the start gate', matcher: h.name === 'claude' ? CLAUDE_MATCHER : CODEX_MATCHER, handler: handler(command, 'warifuri: checking the held task'), isOurs: isGateHook },
         { what: 'the stop reminder', event: 'Stop', handler: handler(stopCommand, 'warifuri: checking the held task'), isOurs: isStopHook },
+        { what: 'the session brief', event: 'SessionStart', handler: handler(briefCommand, 'warifuri: reading the brief'), isOurs: isBriefHook },
         { what: 'the calendar hook', matcher: CALENDAR_MATCHER, handler: handler(calendarCommand(h.name), 'warifuri: checking the calendar'), isOurs: isCalendarHook },
       ];
       const read = readJson(file);

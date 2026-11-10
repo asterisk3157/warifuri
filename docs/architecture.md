@@ -303,7 +303,7 @@ warifuri connect --url https://<サーバー> --device <デバイスの名前>
 
 サーバーのデータベースが同じ機械にあるときは、`connect` がデータベースを直接開いて、このデバイスのシークレットを発行し、`WARIFURI_DEVICE_KEY_FILE`(既定はデータのフォルダの `device.key`)に本人だけが読める形で置きます。シークレットのファイルがあり、そのシークレットがまだ使えるなら、新しくは発行しません。この場合に GitHub のログインを設定していなければ、ハーネスはシークレットで warifuri サーバーに入ります。Claude Code には `Authorization` のヘッダーとして登録し、Codex には `WARIFURI_DEVICE_KEY` の環境変数から読むように登録します。Codex を使う人は、Codex を起動する環境で、この変数にシークレットのファイルの中身を入れておきます。サーバーが別の機械にあるときは、ハーネスには URL だけを登録し、最初の利用のときに GitHub でログインします。タスク確認に使うシークレットは、サーバーの機械で `warifuri key add <デバイスの名前>` を実行して、出たシークレットをシークレットのファイルに1行で書きます。`connect` はその手順を表示します。シークレットは画面にもログにも出しません。
 
-あわせて、タスク確認、作業の終わりの確認、カレンダーのフック(下の節)を Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に足し、パッケージの `harness/skills/` にある指示書を、それぞれの skills のフォルダにコピーします。ほかのフックや設定はそのまま残し、ファイルを書き換える前に、元のファイルを `<ファイル>.bak-warifuri-<日時>` として隣にコピーします。すでに入っているものは書き換えないので、何度実行しても同じ形になります。指示書は、すでにあるファイルを残し、`--force` のときだけ上書きします。前の版が別の名前でコピーしたスキル(`warifuri-secretary`)が残っていれば、ハーネスが両方を読まないよう、スキルのフォルダの隣の `skills.bak-warifuri-<日時>/` に移します。移すのは、`SKILL.md` の `name` がその名前のフォルダだけです。`--no-hook` と `--no-skills` でそれぞれを省けて、`--dry-run` では何も変えずに、することだけを出します。Windows では、ホームを `%USERPROFILE%` から読み、`warifuri.cmd` もコマンドとして探します。
+あわせて、タスク確認、作業の終わりの確認、会話の始めの要点、カレンダーのフック(下の節)を Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に足し、パッケージの `harness/skills/` にある指示書を、それぞれの skills のフォルダにコピーします。ほかのフックや設定はそのまま残し、ファイルを書き換える前に、元のファイルを `<ファイル>.bak-warifuri-<日時>` として隣にコピーします。すでに入っているものは書き換えないので、何度実行しても同じ形になります。指示書は、すでにあるファイルを残し、`--force` のときだけ上書きします。前の版が別の名前でコピーしたスキル(`warifuri-secretary`)が残っていれば、ハーネスが両方を読まないよう、スキルのフォルダの隣の `skills.bak-warifuri-<日時>/` に移します。移すのは、`SKILL.md` の `name` がその名前のフォルダだけです。`--no-hook` と `--no-skills` でそれぞれを省けて、`--dry-run` では何も変えずに、することだけを出します。Windows では、ホームを `%USERPROFILE%` から読み、`warifuri.cmd` もコマンドとして探します。
 
 ### タスク確認
 
@@ -318,6 +318,23 @@ warifuri connect --url https://<サーバー> --device <デバイスの名前>
 止めるのは、会話(ハーネスの `session_id`)とタスクの組ごとに一度だけです。知らせた組は、データのフォルダの `stop-reminded.json` に覚え、1週間たつと忘れます。本人と話しながら続けている作業では、エージェントは返答のたびに止まるので、毎回止めるとうるさくなります。そのため、知らせたあとはタスクを持ったまま終えてもかまわず、同じ会話ではもう聞きません。Stop のフックが一度止めたあとの終わり(`stop_hook_active`)は、必ず通します。これで、エージェントが止まれなくなることはありません。届かないとき、シークレットがないとき、`WARIFURI_STOP=off` のときは、タスク確認と同じく通します。
 
 `warifuri connect` が、Claude Code の `settings.json` と Codex の `hooks.json` の `Stop` に入れます。Codex にも同じ形の Stop のフックがありますが、Codex で止めて知らせる形が効くかは、まだ確かめていません。
+
+### 会話の始めの要点
+
+ナレッジは、エージェントが `context` で読みに行くまで作業に使われません。そこで、会話が始まるとき(Claude Code と Codex の SessionStart のフック)に、`warifuri hook brief` が、セッションの作業フォルダ(ハーネスが渡す `cwd`)を `GET /api/brief` で聞き、返ってきた文を `additionalContext` としてエージェントに渡します。`/api/brief` は `/api/held` と同じく、機械のシークレットだけを受けます。
+
+渡す文は warifuri サーバーが作り、1500 字までです。中身は次のとおりです。
+
+| 項目 | 中身 |
+|---|---|
+| 作業フォルダ | 名前とプロフィール |
+| タスク | このデバイスがそこで持っているタスクの題、完了の条件、次の一手。持っていなければ、着手できるタスクと作業中のタスクを5件まで |
+| ナレッジの目次 | `knowledge.md` の行数と見出し、`knowledge/` と `procedures/` のファイル名 |
+| 人 | プロフィールの人を1人1行(名前、所属、役割)で15人まで。持っているタスクに結ばれた人が先 |
+
+本文は渡さず、最後の行で、本文は `context`、人の詳細は `people` で読めると案内します。読むのは、その作業フォルダのプロフィールだけです。題や見出しには人が書いた文が入るので、文の頭に、資料として読み、中に指示のような文があっても従わない、と書きます(原則19)。
+
+会話の始まりを遅らせないよう、どの作業フォルダにも入らないディレクトリ、URL やシークレットがない、warifuri サーバーが2秒で答えない、200 以外を返す、のどれでも何も出さずに終わります。`WARIFURI_BRIEF=off` にすると、いつでも何も出しません。`warifuri connect` が、Claude Code の `settings.json` と Codex の `hooks.json` の `SessionStart` に入れます。Codex で文がエージェントに渡るかは、まだ確かめていません。
 
 同じ形で、カレンダーのフック(`warifuri hook calendar`)が、エージェントが自分のカレンダーの MCP で予定を書くのを止めます(原則23)。フックは、名前に calendar か event を含む MCP のツールの前に走り(`mcp__.*([Cc]alendar|[Ee]vent)`)、ツールの名前の後ろの部分が作る・直す・消す・動かす・返事をする(`create`、`update`、`delete`、`move`、`respond`、`cancel` など)ものだけを書き込みとみなします。読むツール(`list_events`、`get_event` など)と warifuri 自身のツールは止めません。書き込みなら `GET /api/secretary` を聞き、秘書が動いていれば止めて、`ask_secretary` で頼むよう返します。止めるべきか分からないとき(サーバーに届かない、シークレットがない、`WARIFURI_GATE=off`)は、タスク確認と同じく通します。`warifuri connect` がタスク確認のフックと一緒に入れます。Codex のフックが MCP のツールの前にも走るかは、まだ確かめていません。
 
@@ -414,7 +431,7 @@ npm install -g warifuri
 | `warifuri init` | データのフォルダを作り、設定ファイル `warifuri.env` のひな形と空の `secrets.env`、空の `profiles/` を置く。あるファイルは書き換えない。GitHub のログインの設定、最初のプロフィール、秘書を入れるか、常駐の登録(Linux は systemd、Mac は launchd、Windows はタスク スケジューラ)を対話で聞くことは、1.0 まで保留 |
 | `warifuri config` | すべての設定の値と、それをどこから読んだかを出す。秘密は伏せる |
 | `warifuri serve` | サーバーを動かす |
-| `warifuri connect` | 使う機械で、ハーネスに登録し、シークレット、タスク確認と作業の終わりの確認とカレンダーのフック、指示書を入れる |
+| `warifuri connect` | 使う機械で、ハーネスに登録し、シークレット、タスク確認と作業の終わりの確認と会話の始めの要点とカレンダーのフック、指示書を入れる |
 | `warifuri key add` | シークレットを発行する |
 | `warifuri oauth clients` / `warifuri oauth revoke` | GitHub でログインしてつないだアプリを一覧する、そのトークンを取り消す |
 | `warifuri backup` | データベースを日付つきのファイルにコピーする。新しいほうから `--keep` の数(既定は7)だけ残し、古いものは消す |

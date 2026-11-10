@@ -150,6 +150,9 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
     assert.equal(json.hooks.Stop.length, 1);
     assert.equal(json.hooks.Stop[0].matcher, undefined);
     assert.match(json.hooks.Stop[0].hooks[0].command, /warifuri\.mjs" hook stop --home "[^"]+"$/);
+    assert.equal(json.hooks.SessionStart.length, 1);
+    assert.equal(json.hooks.SessionStart[0].matcher, undefined);
+    assert.match(json.hooks.SessionStart[0].hooks[0].command, /warifuri\.mjs" hook brief --home "[^"]+"$/);
   }
   assert.match(r.stdout, /trust the new hooks/);
 
@@ -164,6 +167,8 @@ test('connects a local server: key issued once, MCP registered with it, gate wir
   assert.match(again.stdout, /claude: kept the calendar hook/);
   assert.match(again.stdout, /claude: kept the stop reminder/);
   assert.match(again.stdout, /codex: kept the stop reminder/);
+  assert.match(again.stdout, /claude: kept the session brief/);
+  assert.match(again.stdout, /codex: kept the session brief/);
   assert.equal(w.calls().length, 2);
   assert.equal(fs.readFileSync(keyFile, 'utf8').trim(), key);
   assert.deepEqual(listing(path.join(w.user, '.claude')), before.user);
@@ -183,6 +188,7 @@ test('other hooks are kept, the old file is backed up, and an old gate is replac
         { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'lint.sh' }, { type: 'command', command: 'warifuri hook gate' }] },
       ],
       Stop: [{ hooks: [{ type: 'command', command: 'stop.sh' }] }],
+      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'hello.sh' }, { type: 'command', command: 'warifuri hook brief' }] }],
     },
   };
   fs.writeFileSync(file, JSON.stringify(original, null, 2));
@@ -193,6 +199,9 @@ test('other hooks are kept, the old file is backed up, and an old gate is replac
   assert.deepEqual(now.hooks.Stop[0], original.hooks.Stop[0]);
   assert.equal(now.hooks.Stop.length, 2);
   assert.match(now.hooks.Stop[1].hooks[0].command, / hook stop/);
+  assert.deepEqual(now.hooks.SessionStart[0], { matcher: 'startup', hooks: [{ type: 'command', command: 'hello.sh' }] });
+  assert.equal(now.hooks.SessionStart.length, 2);
+  assert.equal(now.hooks.SessionStart.flatMap((g) => g.hooks).filter((h) => /hook brief/.test(h.command)).length, 1);
   assert.deepEqual(now.hooks.PreToolUse[0], original.hooks.PreToolUse[0]);
   assert.deepEqual(now.hooks.PreToolUse[1], { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'lint.sh' }] });
   assert.equal(now.hooks.PreToolUse.length, 4);
