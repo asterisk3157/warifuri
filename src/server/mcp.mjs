@@ -39,6 +39,7 @@ import {
 import { briefFor } from '../knowledge/brief.mjs';
 import { listEntries, sortInbox, splitKnowledge, markStale, SPLIT_LINES } from '../knowledge/tidy.mjs';
 import { profileColors } from './web.mjs';
+import { NOTIFY_PATH as CALENDAR_NOTIFY_PATH } from '../calendar/watch.mjs';
 
 // The version the MCP server reports: the package's.
 const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
@@ -1449,6 +1450,7 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
 // (and chat, when given, can answer), only that device may book and unbook; the others ask it
 // with ask_secretary. githubWebhookSecret: the secret of GitHub's webhook (github.mjs); without
 // it /api/github/webhook answers 404. githubLimit: its rate limit per address.
+// calendarWatch: the calendar watch ({ notify(headers) }), when Google calls this server.
 export function createApp({
   ledger,
   home = null,
@@ -1466,6 +1468,7 @@ export function createApp({
   monitor = null,
   githubWebhookSecret = null,
   githubLimit,
+  calendarWatch = null,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1495,6 +1498,14 @@ export function createApp({
   app.delete('/mcp', auth, mcp);
   // Before /api, which takes device keys: GitHub signs its requests instead.
   app.use('/api/github/webhook', githubWebhook({ ledger, secret: githubWebhookSecret, ...(githubLimit ? { limit: githubLimit } : {}) }));
+  // Google's call when a watched calendar changed (src/calendar/watch.mjs). It has no login:
+  // the watch takes it only when it names one of its channels with that channel's token.
+  // Nothing of the request is read but its headers, and the answer says nothing.
+  if (calendarWatch) {
+    app.post(CALENDAR_NOTIFY_PATH, rateLimit(apiLimit), (req, res) => {
+      res.status(calendarWatch.notify(req.headers) ? 204 : 404).end();
+    });
+  }
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
     ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,

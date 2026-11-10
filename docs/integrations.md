@@ -19,7 +19,7 @@ WARIFURI_SECRETARY_CONNECTORS=on
 
 `own` は「warifuri が作ったものだけ書く」範囲です。秘書はカレンダーを読み、自分が入れた予定だけを書き出します。ユーザーが入れた予定は書き換えません。
 
-秘書は1時間ごとに(夜を除く)、カレンダーの予定を warifuri に取り込みます。カレンダーで消した予定は、warifuri からも消えます。
+秘書は1時間ごとに(夜を除く)、カレンダーの予定を warifuri に取り込みます。カレンダーで消した予定は、warifuri からも消えます。もっと早く取り込みたいときは、下の「カレンダーの変更をすぐに取り込む」の設定をします。
 
 ### 3. 動作の確認
 
@@ -44,6 +44,83 @@ WARIFURI_CALENDAR_CODEX=gcp
 ```
 
 Claude Code なら `WARIFURI_CALENDAR_CLAUDE=gcp` です。書いたあとに `warifuri connect` を実行し直すと、そのエージェントがカレンダーのツールを使おうとしたとき、止めて warifuri を使うよう伝えるようになります。
+
+</details>
+
+### カレンダーの変更をすぐに取り込む
+
+上の設定だけでは、Google カレンダーで予定を変えても、warifuri に入るのは次の同期(1時間ごと)のときです。warifuri に自分の Google Cloud の OAuth クライアントを渡すと、warifuri が AI を使わずにカレンダーを読み、変更を1分以内に取り込みます。渡さなければ、これまでどおり秘書が同期します。
+
+warifuri が Google に求めるのは、カレンダーを読む許可だけです。カレンダーに書くのは、これまでどおり秘書のコネクタです。
+
+#### 1. Google Cloud の用意
+
+1. [Google Cloud コンソール](https://console.cloud.google.com/)でプロジェクトを作り、「API とサービス」のライブラリで Google Calendar API を有効にします。
+2. 「OAuth 同意画面」を作ります。ユーザーの種類は「外部」にし、公開ステータスを「本番環境」にします。「テスト」のままだと、許可が7日で切れて、ログインし直すことになります。
+3. 「認証情報」で OAuth クライアント ID を作ります。アプリケーションの種類は「デスクトップ アプリ」にします。クライアント ID とクライアント シークレットをコピーします。
+
+#### 2. warifuri への受け渡し
+
+サーバーの PC の `warifuri.env` にクライアント ID を、`secrets.env` にクライアント シークレットを書きます。
+
+```
+# warifuri.env
+WARIFURI_GOOGLE_CLIENT_ID=1234567890-example.apps.googleusercontent.com
+```
+
+```
+# secrets.env
+WARIFURI_GOOGLE_CLIENT_SECRET=...
+```
+
+サーバーの PC で次のコマンドを実行します。
+
+```bash
+warifuri google login
+```
+
+表示された URL をブラウザで開き、予定を見たい Google のアカウントで許可します。「このアプリは Google で確認されていません」と出たら、「詳細」から先に進みます。ブラウザがサーバーの PC と別の PC にあるときは、許可のあとに開けないページ(`http://127.0.0.1:…`)に移るので、そのページの URL をアドレスバーからコピーし、コマンドに貼り付けて Enter を押します。許可のトークンは `secrets.env` に入り、画面には出ません。
+
+最後に `warifuri serve` を起動し直します。
+
+#### 3. 動作の確認
+
+起動のログに `calendar: watching Google Calendar every 1 min` が出ていれば、取り込みが始まっています。Google カレンダーで予定を動かし、1〜2分後に warifuri のカレンダーの画面で同じように動いていれば完了です。新しく作った予定だけは、作ってから2分たつまで取り込みません。秘書がカレンダーに書いた予定を、warifuri の予定と結びつけ終えるのを待つためです。
+
+予定が増えた、動いた、消えたときは、秘書の会話に1行ずつ残り、秘書は次に話すときにそれを読みます。
+
+<details>
+<summary>変更のたびに秘書に見てもらう場合</summary>
+
+`warifuri.env` に次の1行を足すと、予定が変わるたびに秘書が起き、タスクの予定と重なっていないか、その予定の前に終えるタスクがないかを見て、あれば聞いてきます。変更のたびに秘書が1回動くので、その分 Claude の利用枠を使います。夜の時間帯には起こしません。
+
+```
+WARIFURI_GOOGLE_CALENDAR_WAKE=on
+```
+
+</details>
+
+<details>
+<summary>数秒で取り込みたい場合</summary>
+
+`warifuri.env` に次の1行を足すと、カレンダーが変わったときに Google から warifuri に知らせが届き、数秒で取り込みます。
+
+```
+WARIFURI_GOOGLE_CALENDAR_PUSH=on
+```
+
+`WARIFURI_PUBLIC_URL` が https で、Google から届く必要があります。知らせは `<WARIFURI_PUBLIC_URL>/api/google/calendar/notify` に届くので、トンネルや逆プロキシでログインを求めているときは、この道だけログインなしで通します。warifuri は、自分が開いたチャンネルの合言葉が付いた知らせだけを受け取ります。
+
+知らせを受け取れないカレンダーは、起動のログに `calendar: no push for one calendar` と出て、1分ごとの確認で取り込みます。
+
+</details>
+
+<details>
+<summary>取り込みの間隔を変える、同期の仕事を減らす場合</summary>
+
+カレンダーに変更がないかを聞く間隔は、`WARIFURI_GOOGLE_CALENDAR_POLL` に分で書きます(既定は 1)。
+
+warifuri が自分で取り込んでいるあいだ、秘書の同期の仕事は取り込みをせず、カレンダーへの書き出しだけをします。回数を減らすときは `WARIFURI_SECRETARY_SYNC=every 6h` のように、止めるときは `off` と書きます。
 
 </details>
 

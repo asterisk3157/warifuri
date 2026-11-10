@@ -255,7 +255,8 @@ test('tasks: a task is tied to an item only when its text names it', (t) => {
   L.createTask({ title: 'Add the thing', mode: 'ai_worker', body: 'on feat/thing, see example-org/widgets#70' }, ACTOR);
 
   takeGithubEvent(L, 'pull_request', pr());
-  assert.deepEqual(githubItems(L).items[0].tasks.map((x) => x.id), [named.id, next.id, done.id]);
+  // Made in the same second, so their order by id is not fixed: compared as a set.
+  assert.deepEqual(githubItems(L).items[0].tasks.map((x) => x.id).sort(), [named.id, next.id, done.id].sort());
   // Open, so nothing to say yet.
   assert.deepEqual(githubMergedOpen(L), []);
 

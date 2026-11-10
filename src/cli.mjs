@@ -22,6 +22,7 @@
 //   warifuri hook tools <tool> ...   (the secretary's: stops all but the reads of the tools given)
 //   warifuri secretary enable|disable
 //   warifuri secretary run <nightly|morning|inbox|weekly>
+//   warifuri google login            (lets warifuri read Google Calendar by itself)
 //   warifuri --version               (also -v; the version of this package)
 //
 // Every command takes --home <dir> (the data directory) and --db <ledger.sqlite>. The flags
@@ -61,6 +62,9 @@ import { parseAliases } from './monitor/detail.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
 import { JOBS, CHAT_JOBS } from './secretary/schedule.mjs';
+import { createGoogle, googleConfig } from './calendar/google.mjs';
+import { createCalendarWatch, NOTIFY_PATH } from './calendar/watch.mjs';
+import { login as googleLogin } from './calendar/login.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -84,6 +88,7 @@ const USAGE = [
   '       warifuri hook calendar [claude|codex]',
   '       warifuri secretary enable|disable',
   '       warifuri secretary run <nightly|morning|inbox|weekly>',
+  '       warifuri google login',
   '       warifuri --version',
   '',
   'Every command also takes --home <dir> (the data directory, or WARIFURI_HOME; ~/.warifuri',
@@ -119,6 +124,10 @@ const USAGE = [
   'secretary enable, on the server machine, gives the secretary (claude -p, logged in by you)',
   'its key and MCP config and turns its schedule on (WARIFURI_SECRETARY=on); serve then wakes',
   'it at the set times. disable turns it off and revokes its key. run starts one job now.',
+  '',
+  'google login, on the server machine, lets warifuri read your Google Calendar with your own',
+  'OAuth client (WARIFURI_GOOGLE_CLIENT_ID and WARIFURI_GOOGLE_CLIENT_SECRET): it prints a URL',
+  'to open and writes the token to secrets.env. serve then takes calendar changes in by itself.',
 ].join('\n');
 
 function usage(message) {
@@ -393,6 +402,7 @@ function runServe(args) {
   }
   // The conversation on the 秘書 screen, when the secretary is on (the same check as its clock).
   const chat = createChat(ledger, cfg, { log: (line) => process.stdout.write(`warifuri: ${line}\n`) });
+  const watch = startCalendarWatch(cfg, chat, ledger);
   let server;
   try {
     server = createServer({
@@ -403,6 +413,7 @@ function runServe(args) {
       serverDevices: (values.WARIFURI_SERVER_DEVICES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES) } : null,
       githubWebhookSecret: values.WARIFURI_GITHUB_WEBHOOK_SECRET ?? null,
+      calendarWatch: watch,
     });
   } catch (err) {
     chat.stop();
@@ -435,11 +446,13 @@ function runServe(args) {
     }
     // Messages sent before a restart and not answered yet get their reply now.
     chat.kickAll();
+    watch?.start();
   });
   let stopping = false;
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    watch?.stop();
     sched?.stop();
     chat.stop();
     server.close(() => {
@@ -451,6 +464,41 @@ function runServe(args) {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
   return undefined;
+}
+
+// The calendar watch in serve (src/calendar/watch.mjs), when the person gave warifuri their
+// Google OAuth client and logged in (warifuri google login): { start, stop, notify } or null.
+// What changed in the calendar is said in the secretary's conversation; a login Google no
+// longer takes is said there once.
+function startCalendarWatch(cfg, chat, ledger) {
+  const { values } = cfg;
+  const google = googleConfig(values);
+  const log = (line) => process.stdout.write(`warifuri: ${line}\n`);
+  if (!google) {
+    if (values.WARIFURI_GOOGLE_CLIENT_ID) log('calendar: not watching Google Calendar: run warifuri google login');
+    return null;
+  }
+  let pushAddress = null;
+  if (values.WARIFURI_GOOGLE_CALENDAR_PUSH === 'on') {
+    if (/^https:\/\//.test(values.WARIFURI_PUBLIC_URL ?? '')) pushAddress = `${values.WARIFURI_PUBLIC_URL.replace(/\/$/, '')}${NOTIFY_PATH}`;
+    else log('calendar: no push: WARIFURI_GOOGLE_CALENDAR_PUSH needs an https WARIFURI_PUBLIC_URL; polling only');
+  }
+  const pollMin = Number(values.WARIFURI_GOOGLE_CALENDAR_POLL ?? '1');
+  let failed = false;
+  const watch = createCalendarWatch({
+    ledger, google: createGoogle(google), home: cfg.home, pollMs: pollMin * 60_000, pushAddress, log,
+    onChanges: (changes) => chat.calendarChanged(changes, { wake: values.WARIFURI_GOOGLE_CALENDAR_WAKE === 'on' }),
+    onOk: () => {
+      failed = false;
+    },
+    onProblem: (err) => {
+      if (failed || !chat.on || !['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(err.reason)) return;
+      failed = true;
+      chat.failure({ reason: 'google', text: 'Google カレンダーを読めませんでした。サーバーの機械で warifuri google login をやり直してください。' });
+    },
+  });
+  log(`calendar: watching Google Calendar every ${pollMin} min${pushAddress ? ', with push' : ''}`);
+  return watch;
 }
 
 // The secretary's clock in serve, when WARIFURI_SECRETARY is on: { stop } or null. Only one
@@ -525,6 +573,30 @@ function startSecretary(cfg, chat, ledger) {
       abort.abort();
     },
   };
+}
+
+// warifuri google login: see src/calendar/login.mjs.
+async function runGoogle(args) {
+  const [sub, ...rest] = args;
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, options: flagOptions('google') });
+  } catch (err) {
+    return usage(err.message);
+  }
+  if (sub !== 'login') return usage('google takes login');
+  const cfg = settingsFor('google', parsed.values);
+  if (cfg === 2) return 2;
+  warn(cfg);
+  const out = await googleLogin(cfg, { out: (line) => process.stdout.write(`${line}\n`), input: process.stdin });
+  // stdin would keep the command open.
+  process.stdin.pause();
+  if (out.problem) {
+    process.stderr.write(`warifuri: google login failed: ${redact(out.problem)}\n`);
+    return 1;
+  }
+  process.stdout.write(`google: logged in; the token is in ${out.file} (readable only by you). Restart warifuri serve, so that it watches the calendar.\n`);
+  return 0;
 }
 
 // warifuri secretary enable|disable|run <job>: see src/secretary/secretary.mjs.
@@ -687,6 +759,12 @@ function main(argv) {
   if (command === 'connect') return runConnect(rest);
   if (command === 'secretary') {
     runSecretary(rest).then((code) => {
+      process.exitCode = code;
+    });
+    return undefined;
+  }
+  if (command === 'google') {
+    runGoogle(rest).then((code) => {
       process.exitCode = code;
     });
     return undefined;

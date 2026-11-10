@@ -36,13 +36,17 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 ## 使う機械の設定
 
-`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_STOP`、`WARIFURI_BRIEF`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認、作業の終わりの確認、会話の始めの要点、カレンダーのフック(`warifuri hook gate`、`warifuri hook stop`、`warifuri hook brief`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使わず、warifuri を通して予定を読み書きします。warifuri が自分の Google の資格情報でカレンダーを触る道は、次の版で作ります。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_STOP`、`WARIFURI_BRIEF`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認、作業の終わりの確認、会話の始めの要点、カレンダーのフック(`warifuri hook gate`、`warifuri hook stop`、`warifuri hook brief`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使わず、warifuri を通して予定を読み書きします。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
 ## 秘書の設定
 
 `WARIFURI_SECRETARY` で始まる項目は、秘書の定時の仕事の設定です。`warifuri serve` と `warifuri secretary` が読みます。`WARIFURI_SECRETARY` は `warifuri secretary enable` と `disable` が書くので、手で書く必要はありません。時刻はサーバーの機械の時刻で読みます。変えたら `warifuri serve` を動かし直します。
 
 秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` と `WARIFURI_SECRETARY_TOOLS` に書いたツールだけです。メールや Notion などを渡すときは、`WARIFURI_SECRETARY_TOOLS` に `mcp__claude_ai_Gmail=read` のように、道具と範囲(`read`、`own`、`write`)を書きます。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+
+## Google カレンダーの設定
+
+`WARIFURI_GOOGLE` で始まる項目は、warifuri が自分で Google カレンダーを読むための設定です。`WARIFURI_GOOGLE_CLIENT_ID`、`WARIFURI_GOOGLE_CLIENT_SECRET`、`WARIFURI_GOOGLE_REFRESH_TOKEN` の3つがそろうと、`warifuri serve` がカレンダーの変更を取り込みます。1つでも欠けていれば何もせず、秘書の同期だけが動きます。`WARIFURI_GOOGLE_REFRESH_TOKEN` は `warifuri google login` が `secrets.env` に書くので、手で書く必要はありません。同期の印と、Google の知らせのチャンネルは、データのフォルダの `google/calendar.json` に、ユーザーだけが読める形で置きます。手順は[連携の例](integrations.md)にあります。
 
 ## 項目
 
@@ -87,6 +91,12 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_DISCORD_CHANNEL` | 送る先の Discord のチャンネルの id。本人だけが見るチャンネルにする | なし |  |  | serve、secretary |
 | `WARIFURI_DISCORD_USER` | 本人の Discord のユーザーの id。質問と失敗のときにメンションし、Discord で話すときは、この人の書いたことだけを秘書に渡す | なし |  |  | serve、secretary |
 | `WARIFURI_DISCORD_CHAT` | Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。画面で書いたことも Discord に写す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る | `off` |  |  | serve、secretary |
+| `WARIFURI_GOOGLE_CLIENT_ID` | Google カレンダーを warifuri が自分で読むための、ユーザーの Google Cloud の OAuth クライアントの ID。下の2つと一緒に設定すると、カレンダーの変更を AI なしで取り込む | なし |  |  | serve、secretary、google |
+| `WARIFURI_GOOGLE_CLIENT_SECRET` | その OAuth クライアントのシークレット | なし |  | 秘密 | serve、secretary、google |
+| `WARIFURI_GOOGLE_REFRESH_TOKEN` | Google カレンダーを読む許可のトークン。warifuri google login が書く | なし |  | 秘密 | serve、secretary、google |
+| `WARIFURI_GOOGLE_CALENDAR_POLL` | Google カレンダーに変更がないかを聞く間隔(分)。1 から 60 | `1` |  |  | serve |
+| `WARIFURI_GOOGLE_CALENDAR_PUSH` | Google カレンダーの変更を、Google からの知らせでも受け取る。on にすると、WARIFURI_PUBLIC_URL の /api/google/calendar/notify に知らせが届き、数秒で取り込む。WARIFURI_PUBLIC_URL が https で、Google から届く必要がある | `off` |  |  | serve |
+| `WARIFURI_GOOGLE_CALENDAR_WAKE` | Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く | `off` |  |  | serve |
 <!-- settings:end -->
 
 一覧はコードの中の1つの表から作っています。項目を足したり変えたりしたら、`node scripts/settings-table.mjs --write` でこの表を書き直します。食い違ったままだとテストが落ちます。

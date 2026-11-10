@@ -2266,6 +2266,12 @@ export function openLedger(path, options = {}) {
       const row = getBookingRow(id);
       return row ? { ...row } : null;
     },
+    // The booking that has this pair of source and external_id, or null.
+    bookingFor: (source, externalId) => {
+      if (blank(source) || blank(externalId)) return null;
+      const row = one('SELECT * FROM bookings WHERE source = ? AND external_id = ?', source, externalId);
+      return row ? { ...row } : null;
+    },
     schedule,
     activity,
     oauth,

@@ -33,6 +33,7 @@ import { openLedger } from '../ledger/ledger.mjs';
 import { initHome, decodeText } from '../config.mjs';
 import { secretaryConfigured } from '../knowledge/profiles.mjs';
 import { findOnPath, setEnvLine, PACKAGE_ROOT, SERVER_NAME, BIN } from '../client/connect.mjs';
+import { googleConfig } from '../calendar/google.mjs';
 import { JOBS, CHAT_JOBS, parseWhen, parseNight, inNight, localIso, showWhen } from './schedule.mjs';
 
 export const DEVICE = 'secretary';
@@ -140,6 +141,8 @@ export function scheduleFrom(values) {
     calendarTools,
     tools,
     connectors: values.WARIFURI_SECRETARY_CONNECTORS === 'on',
+    // warifuri reads Google Calendar by itself (the calendar watch), so the secretary need not.
+    watch: Boolean(googleConfig(values)),
   };
 }
 
@@ -310,6 +313,9 @@ export function factLines(title, name, { now, schedule }) {
     `- いまの日時: ${localIso(now)}(サーバーの機械の時刻)`,
     `- 夜の時間帯: ${fmtNight(schedule.night).replace('-', '〜')}`,
     `- ${calendar}`,
+    ...(schedule.watch
+      ? ['- カレンダーの予定は、warifuri が Google カレンダーから自分で取り込んでいます(変更は数分以内に入ります)。手引きの中の、カレンダーを読んで写し(固定の予定)を入れる、直す、消す手順は飛ばし、予定は `schedule` で読みます。カレンダーに書く手順と、本人に頼まれた予定を直す手順は、手引きのとおりに行います。']
+      : []),
     ...(tools.length ? [`- 使える外の道具: ${tools.join('、')}。この範囲の外のことはしません。`] : []),
     ...(tools.length || schedule.connectors
       ? ['- 外の道具は、起きた直後はまだ読み込み中で、ツールの一覧に出ていないことがあります。見えないときは ToolSearch で探してから使い、探しても見つからないときだけ、つながっていないとみなします。']
