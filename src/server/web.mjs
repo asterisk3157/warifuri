@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
 import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger.mjs';
@@ -262,9 +263,34 @@ function readCookie(req, name) {
   return '';
 }
 
+// The voice input's Whisper (src/web/pages/voice-whisper-worker.js) adds three things; the same
+// policy is sent with the worker's script, which a worker follows instead of the page's:
+// - 'wasm-unsafe-eval': the ONNX runtime is WebAssembly, and compiling it needs this (not eval).
+// - worker-src 'self': the worker and the audio worklet come from this server only.
+// - connect-src to Hugging Face: the model's files, fetched once and kept in the browser's cache.
+//   huggingface.co answers with a redirect to its file CDN (us.aws.cdn.hf.co and the like under
+//   hf.co; older files on cdn-lfs.huggingface.co). The voice itself goes nowhere.
 const PAGE_CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
+  "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; " +
+  "connect-src 'self' https://huggingface.co https://cdn-lfs.huggingface.co https://*.hf.co; " +
   "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+// The files of transformers.js and the ONNX runtime that the browser's Whisper loads, served
+// from node_modules at /web/vendor/<name>, so no script comes from a CDN. Only these files.
+const VENDOR_FILES = (() => {
+  try {
+    const require = createRequire(import.meta.url);
+    const transformers = path.dirname(require.resolve('@huggingface/transformers'));
+    const ort = path.dirname(createRequire(path.join(transformers, 'x.js')).resolve('onnxruntime-web'));
+    return new Map([
+      ['transformers.min.js', transformers],
+      ['ort-wasm-simd-threaded.asyncify.mjs', ort],
+      ['ort-wasm-simd-threaded.asyncify.wasm', ort],
+    ]);
+  } catch {
+    return new Map();
+  }
+})();
 
 function guard(res) {
   res.set({
@@ -418,12 +444,21 @@ export function createWeb({
     });
   }
 
-  // The scripts and stylesheet: public code, served to anyone.
+  // The libraries of the browser's Whisper: public code too.
+  router.get('/web/vendor/:file', (req, res, next) => {
+    const dir = VENDOR_FILES.get(req.params.file);
+    if (!dir) return next();
+    res.set({ 'Content-Security-Policy': PAGE_CSP, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
+    return res.sendFile(req.params.file, { root: dir, dotfiles: 'deny' });
+  });
+
+  // The scripts and stylesheet: public code, served to anyone. The policy goes with them for
+  // the worker's sake (a worker follows the policy of its own script).
   router.use(
     '/web',
     (req, res, next) => {
       if (req.path.startsWith('/api/')) return next();
-      res.set({ 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
+      res.set({ 'Content-Security-Policy': PAGE_CSP, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
       return next();
     },
     express.static(assetsDir, { index: false, dotfiles: 'ignore', redirect: false }),

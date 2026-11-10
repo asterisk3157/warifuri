@@ -115,6 +115,35 @@ test('open on this machine: pages and endpoints answer without a login', async (
   assert.equal((await get(base, '/health')).status, 200);
 });
 
+test('the policy lets the voice input run Whisper in the browser, and nothing more', async (t) => {
+  const { base } = await start(t);
+  const csp = (await get(base, '/secretary')).headers.get('content-security-policy');
+  assert.match(csp, /script-src 'self' 'wasm-unsafe-eval';/);
+  assert.match(csp, /worker-src 'self';/);
+  assert.match(csp, /connect-src 'self' https:\/\/huggingface\.co https:\/\/cdn-lfs\.huggingface\.co https:\/\/\*\.hf\.co;/);
+  assert.doesNotMatch(csp, /unsafe-inline|'unsafe-eval'|blob:|jsdelivr/);
+  // A worker follows the policy of its own script.
+  const worker = await get(base, '/web/pages/voice-whisper-worker.js');
+  assert.equal(worker.status, 200);
+  assert.equal(worker.headers.get('content-security-policy'), csp);
+});
+
+test('the libraries of the browser Whisper come from node_modules, only the files it needs', async (t) => {
+  const { base } = await start(t);
+  const js = await get(base, '/web/vendor/transformers.min.js');
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get('content-type'), /javascript/);
+  const mjs = await get(base, '/web/vendor/ort-wasm-simd-threaded.asyncify.mjs');
+  assert.equal(mjs.status, 200);
+  assert.match(mjs.headers.get('content-type'), /javascript/);
+  const wasm = await get(base, '/web/vendor/ort-wasm-simd-threaded.asyncify.wasm');
+  assert.equal(wasm.status, 200);
+  assert.equal(wasm.headers.get('content-type'), 'application/wasm');
+  for (const p of ['/web/vendor/transformers.node.mjs', '/web/vendor/ort.min.js', '/web/vendor/..%2Fpackage.json', '/web/vendor/%2E%2E%2Fpackage.json', '/web/vendor/']) {
+    assert.equal((await get(base, p)).status, 404, p);
+  }
+});
+
 test('open mode still refuses a forwarded request or a foreign Host (DNS rebinding)', async (t) => {
   const { base } = await start(t);
   assert.equal(await rawStatus(base, '/web/api/about', { Host: 'evil.example' }), 401);
