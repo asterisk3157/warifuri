@@ -8,7 +8,10 @@
 //   ready or running, not handed over (delegated), with every task before them closed, and with
 //   minutes left: the estimate minus the minutes of the task's bookings that end after now.
 //   Tasks with no estimate are not drafted; they come back in left.
-// - They go in order of the nearer due date (the task's or its goal's), then as board lists them.
+// - They go in the order the person gave (priority: 1 first; tasks with none after those with
+//   one), then the nearer due date (the task's or its goal's), then as board lists them.
+// - Where the person is (whereabouts.mjs): a task with only_at 'home' goes only in free time at
+//   home. The rest goes anywhere.
 // - The free time is free_time's, before the daily cap; the cap is kept here, with the hours
 //   free_time leaves for the day. Habits to place come first, as free_time places them.
 // - The free time is cut at the bands of the week type. A band with a profile takes only that
@@ -19,7 +22,7 @@
 //   that already has a booking of it, so the work is spread and the day is not filled for the
 //   sake of it (原則12).
 
-import { freeTime } from './freetime.mjs';
+import { freeTime, whereaboutsFor } from './freetime.mjs';
 import { HUMAN_TIME_MODES } from './rules.mjs';
 import { readSettings, weekBands } from './settings.mjs';
 import { LedgerError } from './ledger.mjs';
@@ -35,7 +38,7 @@ const iso = (n) => new Date(n).toISOString();
 
 // The pieces of [s, e) cut at the bands: [{ s, e, profile }] by start. profile: the band's
 // profile, or null outside every band with a profile.
-function cutAtBands(s, e, bands) {
+function cutAtBands(s, e, bands, home = true) {
   const edges = new Set([s, e]);
   for (const b of bands) {
     if (b.e > s && b.s < e) {
@@ -49,15 +52,15 @@ function cutAtBands(s, e, bands) {
     const ps = points[i];
     const pe = points[i + 1];
     const band = bands.find((b) => b.s <= ps && b.e >= pe);
-    out.push({ s: ps, e: pe, profile: band?.profile ?? null });
+    out.push({ s: ps, e: pe, profile: band?.profile ?? null, home });
   }
   return out;
 }
 
-// days: [{ date, budget_min, free: [{ starts_at, ends_at }], habits_to_place, booked_task_ids }],
-// one per local day; free is the free time before the daily cap, budget_min the minutes the cap
-// leaves. bands: [{ starts_at, ends_at, profile }]. tasks: [{ task_id, title, goal, profile,
-// due, human_led, remaining_min }] in the order to place them. limits: block_min_minutes and
+// days: [{ date, budget_min, free: [{ starts_at, ends_at, home? }], habits_to_place, booked_task_ids }],
+// one per local day; free is the free time before the daily cap (home false: not at home),
+// budget_min the minutes the cap leaves. bands: [{ starts_at, ends_at, profile }]. tasks:
+// [{ task_id, title, goal, profile, due, human_led, remaining_min, only_at? }] in the order to place them. limits: block_min_minutes and
 // block_max_minutes. Returns { blocks, left }: blocks by start (habits too), and left, the tasks
 // that got no block, with left_min.
 export function planTimetable({ days, bands = [], tasks, limits }) {
@@ -76,13 +79,14 @@ export function planTimetable({ days, bands = [], tasks, limits }) {
     }
     const used = new Set(day.booked_task_ids ?? []);
     let budget = day.budget_min;
-    const pieces = day.free.flatMap((f) => cutAtBands(ms(f.starts_at), ms(f.ends_at), withProfile));
+    const pieces = day.free.flatMap((f) => cutAtBands(ms(f.starts_at), ms(f.ends_at), withProfile, f.home !== false));
     // The bands with a profile first: they are where that work goes.
     pieces.sort((a, b) => Number(b.profile !== null) - Number(a.profile !== null) || a.s - b.s);
     for (const piece of pieces) {
       let at = piece.s;
       while ((piece.e - at) / MIN >= minLen && budget >= minLen) {
-        const t = tasks.find((x) => left.get(x.task_id) > 0 && !used.has(x.task_id) && (piece.profile === null || x.profile === piece.profile));
+        const t = tasks.find((x) => left.get(x.task_id) > 0 && !used.has(x.task_id) && (piece.profile === null || x.profile === piece.profile)
+          && (x.only_at !== 'home' || piece.home));
         if (!t) break;
         const minutes = Math.min(Math.max(left.get(t.task_id), minLen), maxLen, (piece.e - at) / MIN, budget);
         if (minutes < minLen) break;
@@ -101,11 +105,14 @@ export function planTimetable({ days, bands = [], tasks, limits }) {
   blocks.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   return {
     blocks,
-    left: tasks.filter((t) => !placed.has(t.task_id)).map((t) => ({ task_id: t.task_id, title: t.title, left_min: t.remaining_min, reason: '空きに入らなかった' })),
+    left: tasks.filter((t) => !placed.has(t.task_id)).map((t) => ({
+      task_id: t.task_id, title: t.title, left_min: t.remaining_min, reason: t.only_at === 'home' ? '家にいる空きに入らなかった' : '空きに入らなかった',
+    })),
   };
 }
 
 const dueMs = (due) => (due ? ms(due) : Infinity);
+const rank = (priority) => priority ?? Infinity;
 
 // The draft on the ledger for [from, to): from defaults to tomorrow (local midnight), to to one
 // day after from, read as schedule() reads them; at most TIMETABLE_MAX_DAYS days. Returns
@@ -159,9 +166,10 @@ export function timetableFor(ledger, { from, to } = {}) {
     drafted.push({
       task_id: t.id, title: t.title, goal: g ? { id: g.id, title: g.title } : null, profile: t.profile ?? null,
       due, human_led: Boolean(g?.human_led), remaining_min: remaining, order: i,
+      only_at: t.only_at ?? null, priority: t.priority ?? null,
     });
   });
-  drafted.sort((a, b) => dueMs(a.due) - dueMs(b.due) || a.order - b.order);
+  drafted.sort((a, b) => rank(a.priority) - rank(b.priority) || dueMs(a.due) - dueMs(b.due) || a.order - b.order);
   const tasks = drafted.map(({ order, ...t }) => t);
 
   // Free time before the cap, and the cap's minutes from free_time itself. The bookings of the
@@ -173,7 +181,8 @@ export function timetableFor(ledger, { from, to } = {}) {
   const bookings = ledger.schedule({ from: iso(wholeFrom), to: iso(wholeTo) }).bookings;
   const habits = ledger.listHabits().filter((h) => typeof h.rule === 'object');
   const capped = freeTime({ from: fromMs, to: toMs, limits, bookings, habits });
-  const open = freeTime({ from: fromMs, to: toMs, limits: { ...limits, day_max_hours: 24 }, bookings, habits });
+  const where = whereaboutsFor(ledger, wholeFrom, wholeTo, { settings, bookings });
+  const open = freeTime({ from: fromMs, to: toMs, limits: { ...limits, day_max_hours: 24 }, bookings, habits, where });
   const perDay = capped.days.map((d, i) => {
     const [y, m, dd] = d.date.split('-').map(Number);
     const dayStart = new Date(y, m - 1, dd).getTime();
@@ -188,5 +197,12 @@ export function timetableFor(ledger, { from, to } = {}) {
   });
   const plan = planTimetable({ days: perDay, bands: weekBands(settings.week.slots, fromMs, toMs), tasks, limits });
   const habitsLeft = capped.days.flatMap((d) => d.habits_to_place.filter((h) => !h.starts_at).map((h) => ({ habit_id: h.habit_id, title: h.title, date: d.date })));
-  return { from: period.from, to: period.to, limits: { ...limits }, blocks: plan.blocks, left: [...plan.left, ...noEstimate], habits_left: habitsLeft };
+  // A task left with a due date before the end of the period cannot make it in this plan:
+  // the one case to ask the person about (what to move, or whether the date can change).
+  const byId = new Map(tasks.map((t) => [t.task_id, t]));
+  const left = plan.left.map((l) => {
+    const due = byId.get(l.task_id)?.due ?? null;
+    return due && dueMs(due) <= toMs ? { ...l, due, misses_due: true } : l;
+  });
+  return { from: period.from, to: period.to, limits: { ...limits }, blocks: plan.blocks, left: [...left, ...noEstimate], habits_left: habitsLeft };
 }
