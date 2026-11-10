@@ -147,7 +147,7 @@ test('the text is one line per item, lists at most 15 people and stays within it
 });
 
 // The hook, against a stub server.
-const KEY = 'wf_brief-test-key-0123456789';
+const KEY = 'wf_brief-test-key';
 const work = path.join(tmp, 'work');
 for (const d of ['place', 'outside', 'boom', 'slow', 'odd']) fs.mkdirSync(path.join(work, d), { recursive: true });
 const asked = [];

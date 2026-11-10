@@ -2,3 +2,5 @@
 # docs/integrations.md の Discord の設定の例(作った値の id)
 3fe823b81fae3f5258c19b4eb32529f7fa49567d:docs/integrations.md:discord-client-id:64
 3fe823b81fae3f5258c19b4eb32529f7fa49567d:docs/integrations.md:discord-client-id:65
+# test/brief.test.mjs のテスト用の偽の鍵(作った値)
+3de85f4ab10fe262714e61ee6fe8bac57439a629:test/brief.test.mjs:generic-api-key:150
