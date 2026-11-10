@@ -186,6 +186,10 @@ function placesCard(ctx) {
       p.home === true ? h('span', { class: 'wf-rl-badge', text: '家' }) : null,
       p.note ? h('small', { class: 'wf-rl-note', text: p.note }) : null,
     ], [
+      btn(p.home === true ? '家をやめる' : '家にする', () => {
+        const { home: _home, ...rest } = p;
+        put(places.map((x, k) => (k === i ? (p.home === true ? rest : { ...rest, home: true }) : x)), travel, null, 'place-edit-');
+      }),
       btn('直す', () => { state.editing.add(key); ctx.rerender(); }),
       btn('消す', () => put(places.filter((_, n) => n !== i), travel.filter((t) => t.from !== p.name && t.to !== p.name), null, 'place-edit-'), 'wf-rl-danger'),
     ]);
@@ -197,7 +201,7 @@ function placesCard(ctx) {
     const text = note.value.trim();
     if (n) put([...places, { name: n, ...(text ? { note: text } : {}) }], travel, null, 'place-new');
   }
-  return card('場所', 'よく行く場所。下の「週の居場所」で、この名前から選びます。',
+  return card('場所', 'よく行く場所。「家」にした場所にいる時間にだけ、家でしかできない作業を入れます。下の「週の居場所」で、この名前から選びます。',
     h('ul', { class: 'wf-rl-list' }, items.length ? items : empty('まだありません')),
     h('div', { class: 'wf-rl-add' }, name, note, btn('足す', addPlace, 'wf-rl-main')));
 }
