@@ -119,7 +119,7 @@ export function micButton(input, { redraw, note, disabled = false }) {
         note('マイクが許可されていません');
       } else if (e.error === 'network') {
         state.stopping = true;
-        note('音声認識につながりませんでした');
+        note('このブラウザでは音声認識を使えません。Chrome か Safari で開くか、fn キーを2回押して Mac の音声入力を使ってください');
       } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
         note('聞き取れませんでした');
       }
