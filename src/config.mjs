@@ -103,6 +103,12 @@ export const SETTINGS = [
     commands: ['serve'],
   },
   {
+    name: 'WARIFURI_GITHUB_WEBHOOK_SECRET',
+    about: 'GitHub の Webhook の Secret。設定すると、/api/github/webhook で PR と Issue の変化を受け取る。GitHub のログインとは別に使える',
+    secret: true,
+    commands: ['serve'],
+  },
+  {
     name: 'WARIFURI_TRUST_PROXY',
     flag: 'trust-proxy',
     about: '同じ機械のトンネルや逆プロキシを信じる範囲(loopback や段数)。回数の制限を呼び出し元ごとに数えるために使う',

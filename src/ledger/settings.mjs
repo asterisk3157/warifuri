@@ -3,7 +3,8 @@
 // block, the hours when blocks may be placed), calendar (カレンダー: the events not to take
 // in from the person's calendars) and week (週の型: where the person is at set times of the
 // week, and which profile's work goes there), plus onboarding (最初の会話: whether the secretary
-// is making these settings with the person, has done it, or was told not to). Each is a section of the settings table, one
+// is making these settings with the person, has done it, or was told not to) and github (GitHub:
+// whose pull requests and issues are taken in from the webhook). Each is a section of the settings table, one
 // key per field (life.rules, places.places, places.travel, limits.day_max_hours, ...), the
 // value as JSON text, and each change is recorded as entity 'settings' with the section as
 // its id. Unset fields read as their defaults.
@@ -13,7 +14,7 @@
 
 import { LedgerError } from './ledger.mjs';
 
-export const SECTIONS = ['life', 'places', 'limits', 'calendar', 'week', 'onboarding'];
+export const SECTIONS = ['life', 'places', 'limits', 'calendar', 'week', 'onboarding', 'github'];
 
 export const RULES_MAX = 50;
 export const RULE_MAX = 200;
@@ -24,6 +25,11 @@ export const SKIP_MAX = 50;
 export const SKIP_TITLE_MAX = 100;
 export const SKIP_CALENDAR_MAX = 200;
 export const WEEK_SLOTS_MAX = 50;
+export const GITHUB_OWNERS_MAX = 50;
+// A GitHub user or organization name: letters, digits and single hyphens, up to 39.
+export const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+// What is done with an owner that owners does not list.
+export const GITHUB_OTHERS = ['read', 'skip'];
 export const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 // The states of the first conversation: asking (the secretary is making the settings with
 // the person), done (made), skipped (the person said not now; asked again only on their word).
@@ -46,6 +52,7 @@ const DEFAULTS = {
   calendar: { skip: [] },
   week: { slots: [] },
   onboarding: { state: null },
+  github: { owners: [], others: 'skip' },
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
@@ -217,6 +224,48 @@ function checkOnboarding(value, problems) {
   return { state: value.state };
 }
 
+// github: { owners: [{ name, read }], others }: the owners (a user or an organization) whose
+// pull requests and issues the webhook takes in (read: true) or drops (read: false), and what
+// is done with an owner not listed ('read' or 'skip'; unset, 'skip'). Names are compared
+// without case, so one owner is listed once.
+function checkGithub(value, problems) {
+  if (!isObject(value)) return refuse(problems, 'github は { owners: [...], others } の形です');
+  unknownKeys(value, ['owners', 'others'], 'github ', problems);
+  const out = {};
+  if (value.owners !== undefined) {
+    if (!Array.isArray(value.owners)) return refuse(problems, 'github.owners は配列です');
+    if (value.owners.length > GITHUB_OWNERS_MAX) problems.push(`github.owners は ${GITHUB_OWNERS_MAX} 件までです`);
+    const seen = new Set();
+    out.owners = value.owners.map((x, i) => {
+      const label = `github.owners の ${i + 1} 件目`;
+      if (!isObject(x)) {
+        problems.push(`${label}は { name, read } の形です`);
+        return null;
+      }
+      unknownKeys(x, ['name', 'read'], label, problems);
+      const name = typeof x.name === 'string' ? x.name.trim() : '';
+      if (!GITHUB_OWNER.test(name)) problems.push(`${label}の name は、GitHub のユーザーか組織の名前です(英数字とハイフン、39文字まで)`);
+      else if (seen.has(name.toLowerCase())) problems.push(`オーナー ${name} が2回あります`);
+      seen.add(name.toLowerCase());
+      if (typeof x.read !== 'boolean') problems.push(`${label}の read は true か false です`);
+      return { name, read: x.read };
+    });
+  }
+  if (value.others !== undefined) {
+    if (value.others !== null && !GITHUB_OTHERS.includes(value.others)) problems.push(`github.others は ${GITHUB_OTHERS.join(' か ')} です`);
+    out.others = value.others;
+  }
+  return out;
+}
+
+// Whether an owner's pull requests and issues are taken in: as owners says, or as others says
+// for an owner not listed. github: the section as readSettings gives it.
+export function githubReads(github, owner) {
+  if (typeof owner !== 'string') return false;
+  const listed = (github?.owners ?? []).find((o) => o.name.toLowerCase() === owner.toLowerCase());
+  return listed ? listed.read === true : github?.others === 'read';
+}
+
 // Whether the secretary should make the settings with the person now (最初の会話): it said it
 // is (asking), or nobody has said anything yet and the settings the schedule reads are all
 // unset (a new install). Settings made by hand, done and skipped all say no.
@@ -301,7 +350,7 @@ export function readSettings(ledger) {
   return out;
 }
 
-// Writes the sections given ({ life, places, limits, calendar, week, onboarding }; a section given as null is put back to
+// Writes the sections given ({ life, places, limits, calendar, week, onboarding, github }; a section given as null is put back to
 // its defaults). Every problem of every section is listed before anything is written. Limits
 // need byPerson. Returns readSettings afterwards.
 export function writeSettings(ledger, input, { byPerson = false } = {}, writer) {
@@ -327,6 +376,7 @@ export function writeSettings(ledger, input, { byPerson = false } = {}, writer) 
           : section === 'calendar' ? checkCalendar(input.calendar, problems)
             : section === 'week' ? checkWeek(input.week, problems)
               : section === 'onboarding' ? checkOnboarding(input.onboarding, problems)
+                : section === 'github' ? checkGithub(input.github, problems)
                 : checkLimits(input.limits, now.limits, problems);
     if (problems.length > before) continue;
     plan[section] = Object.fromEntries(Object.entries(checked).map(([k, v]) => [k, v === null ? null : JSON.stringify(v)]));

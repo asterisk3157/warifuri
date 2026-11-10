@@ -28,6 +28,8 @@ import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
+import { githubWebhook } from './github.mjs';
+import { githubItems, githubMergedOpen, githubPolicy, GITHUB_KINDS, GITHUB_STATES, GITHUB_LIST_DEFAULT, GITHUB_LIST_MAX } from '../ledger/github.mjs';
 import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
 import { freeTimeFor, bookingPlaceProblems, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
 import { timetableFor, TIMETABLE_MAX_DAYS } from '../ledger/timetable.mjs';
@@ -79,6 +81,9 @@ const SECRETARY_TOOLS = new Set([
   'sort_inbox', 'split_knowledge', 'mark_stale',
   // people.md, once imported into the people.
   'finish_people_import',
+  // The copies of GitHub's pull requests and issues, of every owner that is read: they cross
+  // the profiles, so only the secretary reads them.
+  'github',
 ]);
 // The tools that put, move or remove bookings. While the secretary runs, only it decides the
 // time (原則23): other devices ask it with ask_secretary. With the secretary off, anyone may.
@@ -198,8 +203,9 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       description:
         'Candidates for tidying, with reasons: tasks held with no change for held_days (default 3), ready and ' +
         'untouched for ready_days (30), waiting with no change for waiting_days (14), review: deferred tasks whose ' +
-        'defer_until has come (to resume, put off again or drop), and overdue: open tasks past a due date the person ' +
-        'set (to follow up). It changes nothing.',
+        'defer_until has come (to resume, put off again or drop), overdue: open tasks past a due date the person ' +
+        'set (to follow up), and merged: open tasks whose text names a GitHub pull request (owner/repo#number or its ' +
+        'URL) that has been merged, likely done and not closed. It changes nothing.',
       inputSchema: {
         held_days: z.number().min(0).optional(),
         ready_days: z.number().min(0).optional(),
@@ -208,7 +214,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       annotations: readOnly,
     },
     async ({ held_days: heldDays, ready_days: readyDays, waiting_days: waitingDays }) =>
-      result(ledger.stale({ heldDays, readyDays, waitingDays })),
+      result({ ...ledger.stale({ heldDays, readyDays, waitingDays }), merged: githubMergedOpen(ledger) }),
   );
 
   server.registerTool(
@@ -1208,12 +1214,37 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       result(ledger.setAutonomyByPerson(kind, level, { by_person: byPerson, said }, writer)),
   );
 
+  tool(
+    'github',
+    "Read the copies of GitHub's pull requests and issues that the webhook took in, newest change first: " +
+      '{ items: [{ owner, repo, number, kind, title, state, draft, url, branch, author, assignees, reviewers, updated_at, ' +
+      'closed_at, tasks }], more, owners, others }. Only the owners the settings say to read (settings: github) are kept and shown; ' +
+      'owners and others are that setting. tasks: the tasks whose title, body, result or next names the item (owner/repo#number ' +
+      'or its URL). A merged pull request with an open task there is a reason to think the task is done. ' +
+      `owner, repo, kind (${GITHUB_KINDS.join(', ')}) and state (${GITHUB_STATES.join(', ')}) filter; involves: a GitHub login, for ` +
+      'only the items it wrote, is assigned to or is asked to review. ' +
+      `limit: how many (default ${GITHUB_LIST_DEFAULT}, at most ${GITHUB_LIST_MAX}). GitHub is the original: this only reads, and warifuri never writes to GitHub.`,
+    {
+      owner: z.string().optional(),
+      repo: z.string().optional(),
+      kind: z.string().optional(),
+      state: z.string().optional(),
+      involves: z.string().optional(),
+      limit: z.number().optional(),
+    },
+    async (args) => {
+      const { settings } = githubPolicy(ledger);
+      return result({ ...githubItems(ledger, given(args)), owners: settings.owners, others: settings.others });
+    },
+    { readOnlyHint: true, openWorldHint: false },
+  );
+
   // One tool reads and writes, so it is not marked read-only; without a section it only reads.
   const d = LIMIT_DEFAULTS;
   tool(
     'settings',
     "Read or write the person's own settings that scheduling uses. With no section given it only reads, returning " +
-      'life, places, limits, calendar, week and onboarding with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
+      'life, places, limits, calendar, week, onboarding and github with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
       'text] } for sleep, meals and fixed commitments, as plain rules. places: { places: [{ name, note, home }], travel: ' +
       '[{ from, to, minutes }] } for the physical places the person goes to and the travel time between two of them ' +
       '(both ways; not the working folders of the places tool); home: true marks home, where work that needs the home ' +
@@ -1230,6 +1261,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'given, and written when the person says an event should not be taken in. ' +
       'onboarding: { state } for the first conversation, where the secretary makes these settings with the person: ' +
       'asking (started), done (made), skipped (the person said not now), null (unset). ' +
+      'github: { owners: [{ name, read }], others } for whose pull requests and issues are taken in from GitHub: name is a ' +
+      "user or an organization, read true to take its events in and false to drop them; others ('read' or 'skip', " +
+      "default 'skip') is what is done with an owner not listed; owners is replaced as given, and a change holds from the next event. " +
       'A section given as null goes back to its defaults.',
     {
       life: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -1238,6 +1272,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       calendar: z.record(z.string(), z.unknown()).nullable().optional(),
       week: z.record(z.string(), z.unknown()).nullable().optional(),
       onboarding: z.record(z.string(), z.unknown()).nullable().optional(),
+      github: z.record(z.string(), z.unknown()).nullable().optional(),
       by_person: z.boolean().optional(),
     },
     async ({ by_person: byPerson, ...sections }) => {
@@ -1412,7 +1447,8 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
 // left out of the Web screens' devices as the secretary's is.
 // null when the secretary is off (nobody may), or left out to let any device. While it is set
 // (and chat, when given, can answer), only that device may book and unbook; the others ask it
-// with ask_secretary.
+// with ask_secretary. githubWebhookSecret: the secret of GitHub's webhook (github.mjs); without
+// it /api/github/webhook answers 404. githubLimit: its rate limit per address.
 export function createApp({
   ledger,
   home = null,
@@ -1428,6 +1464,8 @@ export function createApp({
   secretaryDevice,
   serverDevices = [],
   monitor = null,
+  githubWebhookSecret = null,
+  githubLimit,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1455,6 +1493,8 @@ export function createApp({
   app.post('/mcp', auth, mcp);
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
+  // Before /api, which takes device keys: GitHub signs its requests instead.
+  app.use('/api/github/webhook', githubWebhook({ ledger, secret: githubWebhookSecret, ...(githubLimit ? { limit: githubLimit } : {}) }));
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
     ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,

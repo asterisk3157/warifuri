@@ -19,6 +19,7 @@ import { comparablePath, deepestContaining } from './paths.mjs';
 import { renderFlow } from './flow.mjs';
 import { oauthStore } from './oauth.mjs';
 import { peopleStore } from './people.mjs';
+import { githubStore } from './github.mjs';
 import {
   STATES,
   CLOSED_STATES,
@@ -2103,6 +2104,8 @@ export function openLedger(path, options = {}) {
   // wrote them, like every other write.
   const store = oauthStore({ db, one, all, transaction, record, now });
   const people = peopleStore({ db, one, all, transaction, record, now, LedgerError, requireWriter });
+  // The copies of GitHub's pull requests and issues (github.mjs).
+  const github = githubStore({ db, one, all, transaction, now, LedgerError });
   // revokeDevice runs only inside revokeKey.
   const { revokeDevice: _revokeDevice, ...storeApi } = store;
   const oauth = {
@@ -2267,6 +2270,7 @@ export function openLedger(path, options = {}) {
     activity,
     oauth,
     people,
+    github,
     // A flag of its own: DatabaseSync#isOpen is newer than the Node versions warifuri runs on.
     close: () => {
       if (!open) return;

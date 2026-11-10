@@ -58,6 +58,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_GITHUB_ID` | ログインしてよい人の GitHub の数値の ID。空なら最初のログインで覚える | なし |  |  | serve |
 | `WARIFURI_GITHUB_CLIENT_ID` | GitHub の OAuth App の Client ID。GitHub のログインに要る | なし |  |  | serve |
 | `WARIFURI_GITHUB_CLIENT_SECRET` | GitHub の OAuth App の Client Secret。GitHub のログインに要る | なし |  | 秘密 | serve |
+| `WARIFURI_GITHUB_WEBHOOK_SECRET` | GitHub の Webhook の Secret。設定すると、/api/github/webhook で PR と Issue の変化を受け取る。GitHub のログインとは別に使える | なし |  | 秘密 | serve |
 | `WARIFURI_TRUST_PROXY` | 同じ機械のトンネルや逆プロキシを信じる範囲(loopback や段数)。回数の制限を呼び出し元ごとに数えるために使う | なし | `--trust-proxy` |  | serve |
 | `WARIFURI_REDIRECT_HOSTS` | ログインのあとに戻してよい https の先。claude.ai と claude.com に足す。カンマ区切り | なし |  |  | serve |
 | `WARIFURI_SERVER_URL` | 使う機械から見たサーバーの URL。/mcp は付けない。connect が書き、タスク確認のフックが読む | なし | `--url` |  | connect、hook |
