@@ -223,7 +223,7 @@ test('秘書: the conversation only, oldest first, with questions; reports, prop
   assert.deepEqual(out.secretary, { on: false, replying: false });
   assert.deepEqual(out.items.map((x) => [x.type, x.role ?? x.state]), [['message', 'secretary'], ['ask', 'open']]);
   const [msg, ask] = out.items;
-  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'calendar', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
+  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'calendar', 'created_at', 'files', 'files_only', 'id', 'kind', 'notice', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
   assert.equal(msg.body, '<b>おはようございます</b>', 'returned as the text it is; the page builds the DOM');
   assert.equal(msg.calendar, null);
   assert.deepEqual([msg.steps, msg.options, msg.scheduled], [[{ kind: 'read', label: '予定を読みました' }], ['置いて'], 'morning']);
@@ -260,6 +260,25 @@ function stubChat(ledger, on = true) {
     status: () => ({ on, replying: on && sent.length > 0, waiting: 0 }),
   };
 }
+
+test('秘書: エージェントの欄 holds the requests and their replies, apart from the conversation', async (t) => {
+  const { base, ledger } = await start(t);
+  const S = { actor: 'device-key', device: 'secretary' };
+  assert.deepEqual(await (await get(base, '/web/api/secretary/agent')).json().then((o) => [o.thread, o.items]), [null, []], 'nothing yet');
+  const main = ledger.ensureThread('secretary', { actor: 'web' });
+  const agent = ledger.ensureThread('agent', S);
+  ledger.addMessage(agent.id, { role: 'system', body: 'x のエージェントからの依頼: 2時間', data: { request: { from: 'x', text: '2時間', minutes: 120 } } }, { actor: 'device-key', device: 'laptop' });
+  ledger.addMessage(agent.id, { role: 'secretary', body: '水曜の午前に入れました' }, S);
+  ledger.addMessage(main.id, { role: 'system', body: '予定を入れました: 11/11 10:00〜12:00 資料', data: { agent_notice: { booking: 'b_x', change: 'created', thread: agent.id } } }, S);
+  const out = await (await get(base, '/web/api/secretary/agent')).json();
+  assert.equal(out.thread, agent.id);
+  assert.deepEqual(out.items.map((x) => [x.role, x.request?.from ?? null, x.body]), [['system', 'x', 'x のエージェントからの依頼: 2時間'], ['secretary', null, '水曜の午前に入れました']]);
+  assert.equal(out.items[0].request.minutes, 120);
+  // The conversation shows only the one line, which points at the agents' pane; no request, no reply.
+  const talk = await (await get(base, '/web/api/secretary')).json();
+  assert.deepEqual(talk.items.map((x) => [x.role, x.notice, x.request]), [['system', { thread: agent.id }, null]]);
+  assert.equal(talk.items[0].body, '予定を入れました: 11/11 10:00〜12:00 資料');
+});
 
 test('秘書: a message goes to the chat, JSON from this origin only, and not while the secretary is off', async (t) => {
   let chat;
