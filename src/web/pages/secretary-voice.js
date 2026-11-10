@@ -1,7 +1,7 @@
 // 秘書の入力欄の音声入力: 話した言葉を入力欄に入れる。聞き取りの途中の言葉も、その場で入力欄に
 // 出す。送るのは本人が送るボタンを押したときで、自動では送らない。押すと聞き始め、もう一度押すか、
 // 送るボタンを押すと止まる。黙っても止まらない。送るときは、止めてから最後の言葉を待って
-// (長くても 1.5 秒)、途中の言葉も入れて送る(endVoice)。聞いているあいだは、マイクの横に声の
+// (長くても 3 秒)、途中の言葉も入れて送る(endVoice)。聞いているあいだは、マイクの横に声の
 // 大きさに合わせて動くバーを出す。
 //
 // 方式は2つ。Chrome と Safari では、ブラウザの音声認識(Web Speech API)を使い、ブラウザが黙った
@@ -435,7 +435,7 @@ export function stopVoice(input) {
 // Before the box is sent: listening stops, and the last words are waited for, ms at most. When
 // they do not come in time, the box keeps what it shows now (the half-heard words too), and words
 // that come later do not change it.
-export async function endVoice(input, ms = 1500) {
+export async function endVoice(input, ms = 3000) {
   const session = sessions.get(input);
   if (!session) return;
   stopVoice(input);
