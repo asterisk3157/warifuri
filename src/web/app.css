@@ -909,7 +909,7 @@ button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight:
 .wf-kn-small:disabled { opacity: .5; cursor: default; }
 .wf-kn-split { overflow: hidden; padding: 0; gap: 0; }
 .wf-kn-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
-.wf-kn-chat { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 24px 16px; border-top: 1px solid var(--hair); }
+.wf-kn-chat { display: flex; flex-direction: column; gap: 8px; padding: 12px 12px 14px; border-top: 1px solid var(--hair); }
 .wf-kn-tell-row { display: flex; gap: 8px; align-items: center; }
 .wf-kn-tell-text { flex: 1; min-width: 0; height: 44px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--well); color: var(--ink); font: inherit; font-size: 14px; }
 .wf-kn-tell-btn { flex: none; height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: var(--accent-fill); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }

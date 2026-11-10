@@ -157,13 +157,13 @@ function tellBar(ctx, rules) {
     });
   }
   const open = rules.people.people.find((p) => p.id === view.person);
-  tellInput.placeholder = open ? `${callName(open.name)}のことや、ほかの人のことを書く` : '例: 春野さんは装置の予約も担当、冬木さんは金曜に来る';
+  tellInput.placeholder = open ? `${callName(open.name)}のことを書く` : '';
   tellInput.disabled = telling.busy;
   return h('div', { class: 'wf-kn-chat' },
     telling.busy ? h('div', { class: 'wf-kn-said', role: 'status', text: '登録しています' }) : null,
     telling.said ? h('div', { class: 'wf-kn-said', role: 'status' }, h('span', { class: 'wf-kn-said-head', text: '秘書がこう登録しました' }), h('span', { class: 'wf-kn-said-text', text: telling.said })) : null,
     telling.problem ? h('div', { class: 'wf-kn-said', role: 'alert' }, h('span', { class: 'wf-kn-problem', text: telling.problem })) : null,
-    h('label', { for: 'kn-tell', class: 'wf-kn-hidden', text: '人について教える' }),
+    h('label', { for: 'kn-tell', class: 'wf-kn-hidden', text: open ? `${callName(open.name)}について教える` : '人について教える' }),
     h('div', { class: 'wf-kn-tell-row' }, tellInput,
       h('button', { type: 'button', class: 'wf-kn-tell-btn', disabled: telling.busy, data: { key: 'people-tell-send' }, onclick: () => tell(ctx), text: '登録' })));
 }
@@ -264,7 +264,7 @@ function peoplePane(rules, ctx) {
   const body = rows.map((p) => {
     const open = view.person === p.id;
     if (!open) return personRow(p, ctx, false);
-    return h('div', { class: 'wf-kn-open' }, personRow(p, ctx, true), ...personDetail(p, ctx));
+    return h('div', { class: 'wf-kn-open' }, personRow(p, ctx, true), ...personDetail(p, ctx), tellBar(ctx, rules));
   });
   const waiting = rules.people.unassigned ?? [];
   return [
@@ -332,7 +332,7 @@ function render(data, ctx) {
   if (view.sel === 'people') {
     // The people scroll; the box to tell the secretary stays at the foot.
     main = h('section', { class: 'wf-tasklist wf-kn-main wf-kn-split', 'aria-label': 'ナレッジ' },
-      h('div', { class: 'wf-kn-scroll', data: { scroll: `know-${key}` } }, ...peoplePane(rules, ctx)), tellBar(ctx, rules));
+      h('div', { class: 'wf-kn-scroll', data: { scroll: `know-${key}` } }, ...peoplePane(rules, ctx)));
   } else {
     const right = SETTINGS.includes(view.sel) ? [settingsCard(ctx, rules, view.sel)] : profilePane(one, file, list, ctx);
     main = h('section', { class: 'wf-tasklist wf-kn-main', 'aria-label': 'ナレッジ', data: { scroll: `know-${key}` } }, ...right);
