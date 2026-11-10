@@ -27,7 +27,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
-import { LedgerError, SECRETARY_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger.mjs';
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
@@ -659,6 +659,8 @@ export function createWeb({
         from: d.request.from ?? null, text: d.request.text ?? '', minutes: d.request.minutes ?? null, by: d.request.by ?? null,
         prefer: d.request.prefer ?? null, starts_at: d.request.starts_at ?? null, ends_at: d.request.ends_at ?? null,
       } : null,
+      // The line that says an agent's request changed the calendar; it opens the agents' pane.
+      notice: m.role === 'system' && d.agent_notice ? { thread: d.agent_notice.thread ?? null } : null,
       answer: m.kind === 'answer' ? { ask: d.ask ?? null, index: d.index ?? null, header: d.header ?? null, later: d.later === true, changed: d.changed === true } : null,
     };
   };
@@ -692,6 +694,15 @@ export function createWeb({
   const exact = (body, keys) => body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).every((k) => keys.includes(k));
 
   api.get('/secretary', (req, res) => res.json(secretaryOut()));
+
+  // エージェントの欄: the agents' requests and the secretary's replies to them.
+  api.get('/secretary/agent', (req, res) => {
+    const thread = ledger.getThread(AGENT_THREAD.kind);
+    res.json({
+      now: nowIso(), secretary: { on: Boolean(chat?.on), replying: Boolean(thread && chat?.replying(thread.id)) }, thread: thread?.id ?? null,
+      items: thread ? ledger.listMessages(thread.id, { limit: SECRETARY_MESSAGES }).filter(shown).map(messageOut) : [],
+    });
+  });
 
   // A message to the secretary: { text, attachments?, thread? }. The reply comes later: the
   // event stream shows it being written, and the screen reads it again.

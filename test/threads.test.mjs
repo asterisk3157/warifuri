@@ -49,7 +49,7 @@ test('schema: a version 7 file gains threads and messages and keeps its records'
   assert.throws(() => ins.run('2026-10-02T00:00:00.000Z', 'web', null, 'message', 'm1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 13);
+  assert.equal(SCHEMA_VERSION, 14);
   const L = openLedger(file, { now: ticking() });
   assert.deepEqual(L.records('r1').map((r) => [r.id, r.entity]), [[1, 'report']]);
   const thread = L.ensureThread('secretary', WEB);
@@ -196,4 +196,43 @@ test('the propose, proposals and proposal_done tools write as the calling device
   assert.equal((await call('proposal_done', { id: made.id, note: '明日の 10:00 に動かした' })).done_note, '明日の 10:00 に動かした');
   assert.deepEqual((await call('proposals')).proposals, []);
   assert.match((await call('proposal_done', { id: made.id })).error, /もう行った印/);
+});
+
+test('schema 13: エージェントの欄 is a thread of kind agent, one; a version 12 file keeps its threads, messages and files', () => {
+  const file = path.join(tmp, 'v12.sqlite');
+  const raw = new DatabaseSync(file);
+  raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  for (const m of MIGRATIONS.slice(0, 12)) raw.exec(m);
+  raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '12')").run();
+  raw.prepare("INSERT INTO threads (id, kind, title, session_id, pending_calendar, created_at, updated_at) VALUES ('c_20261001000000_aaaaaa', 'secretary', '秘書', 's-1', '{}', 'x', 'x')").run();
+  raw.prepare("INSERT INTO messages (id, thread_id, role, body, actor, created_at) VALUES ('m_20261001000000_aaaaaa', 'c_20261001000000_aaaaaa', 'secretary', 'おはよう', 'web', '2026-10-01T00:00:00.000Z')").run();
+  raw.prepare("INSERT INTO threads (id, kind, title, parent_id, read_until, created_at, updated_at) VALUES ('c_20261001000001_bbbbbb', 'sub', 'おはよう', 'm_20261001000000_aaaaaa', NULL, 'x', 'x')").run();
+  raw.prepare("INSERT INTO attachments (id, name, type, size, sha256, message_id, created_at) VALUES ('a_20261001000000_cccccc', 'メモ.txt', 'text/plain', 3, 'h', 'm_20261001000000_aaaaaa', 'x')").run();
+  assert.throws(() => raw.prepare("INSERT INTO threads (id, kind, title, created_at, updated_at) VALUES ('c_z', 'agent', 't', 'x', 'x')").run(), /CHECK/);
+  raw.close();
+
+  const L = openLedger(file, { now: ticking() });
+  const main = L.getThread();
+  assert.deepEqual([main.session_id, main.pending_calendar], ['s-1', '{}']);
+  assert.equal(L.listMessages(main.id)[0].body, 'おはよう');
+  assert.equal(Object.values(L.threadCounts())[0].id, 'c_20261001000001_bbbbbb');
+  const agent = L.ensureThread('agent', SECRETARY);
+  assert.deepEqual([agent.kind, agent.title, agent.parent_id], ['agent', 'エージェント', null]);
+  assert.equal(L.ensureThread('agent', SECRETARY).id, agent.id, 'one');
+  assert.equal(L.getThread('agent').id, agent.id);
+  assert.equal(L.getThread().id, main.id, 'the conversation with the person is still the secretary one');
+  assert.throws(() => L.ensureThread('sub', SECRETARY), /エージェントの欄だけ/);
+  // Its messages are not the person's conversation: no unread there, no thread counted.
+  L.addMessage(agent.id, { role: 'secretary', body: '入れました' }, SECRETARY);
+  assert.equal(L.secretaryUnread(), 1, 'only the secretary row of the conversation itself');
+  L.close();
+
+  const check = new DatabaseSync(file);
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '14');
+  for (const t of ['threads_v12', 'messages_v12', 'attachments_v12']) assert.equal(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(t), undefined);
+  assert.equal(check.prepare("SELECT message_id FROM attachments WHERE id = 'a_20261001000000_cccccc'").get().message_id, 'm_20261001000000_aaaaaa');
+  assert.equal(check.prepare("SELECT sql FROM sqlite_master WHERE name = 'attachments'").get().sql.includes('messages_v12'), false);
+  assert.throws(() => check.prepare("INSERT INTO threads (id, kind, title, created_at, updated_at) VALUES ('c_y', 'agent', 't', 'x', 'x')").run(), /UNIQUE/);
+  assert.throws(() => check.prepare("INSERT INTO threads (id, kind, title, parent_id, created_at, updated_at) VALUES ('c_w', 'agent', 't', 'm_20261001000000_aaaaaa', 'x', 'x')").run(), /CHECK/);
+  check.close();
 });

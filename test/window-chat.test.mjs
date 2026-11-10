@@ -530,9 +530,49 @@ test('an agent\'s request: it starts a turn with the request and its conditions,
   const input = w.claude.calls[0].input;
   assert.match(input, /# エージェントからの依頼/);
   assert.match(input, /laptop のエージェントからの依頼: 資料作りに時間を取ってください\nタスク: t_1\n長さ: 120分\n期限: 2026-10-30\n希望: 午前/);
-  // The person sees the request and the reply in the conversation.
-  const rows = w.ledger.listMessages(w.main().id);
-  assert.deepEqual(rows.map((m) => m.role), ['system', 'secretary']);
+  // The request and the reply are in the agents' thread; the conversation with the person stays empty.
+  const agent = w.ledger.getThread('agent');
+  assert.equal(agent.title, 'エージェント');
+  assert.deepEqual(w.ledger.listMessages(agent.id).map((m) => m.role), ['system', 'secretary']);
+  assert.equal(w.main(), null, 'no line in the conversation when the calendar did not change');
+  // A second request goes to the same thread, with the same session.
+  await w.chat.request({ from: 'laptop', text: 'もう1件' }, LAPTOP);
+  assert.equal(w.ledger.listMessages(agent.id).length, 4);
+  assert.equal(w.claude.calls[1].session, w.claude.calls[0].session);
+});
+
+test('an agent\'s request: a booking it made, moved or deleted is one line in the conversation; the rest is not', async (t) => {
+  const w = world(t);
+  const LAPTOP = { actor: 'device-key', device: 'laptop' };
+  const SEC = { actor: 'device-key', device: 'secretary' };
+  const ids = {};
+  const start = new Date(2026, 10, 12, 14, 0).toISOString();
+  const end = new Date(2026, 10, 12, 16, 0).toISOString();
+  // The turn's claude does what the secretary does through the tools.
+  const acts = [
+    () => { ids.a = w.ledger.book({ title: '資料づくり', kind: 'fixed', starts_at: start, ends_at: end }, SEC).booking.id; },
+    () => { w.ledger.book({ id: ids.a, starts_at: new Date(2026, 10, 13, 9, 0).toISOString(), ends_at: new Date(2026, 10, 13, 11, 0).toISOString() }, SEC); },
+    () => { w.ledger.unbook(ids.a, SEC); },
+    () => { const b = w.ledger.book({ title: 'すぐ消す', kind: 'fixed', starts_at: start, ends_at: end }, SEC).booking.id; w.ledger.unbook(b, SEC); },
+    // Another device's booking in the same time is not the request's.
+    () => { w.ledger.book({ title: '本人が入れた', kind: 'fixed', starts_at: start, ends_at: end }, { actor: 'web', device: null }); },
+  ];
+  let n = 0;
+  w.claude.answerWith((call) => {
+    acts[n]();
+    n += 1;
+    return { stdout: streamed(`返事${n}`, call.session) };
+  });
+  for (let i = 0; i < acts.length; i += 1) await w.chat.request({ from: 'laptop', text: `依頼${i}` }, LAPTOP, { waitMs: 5000 });
+  const lines = w.ledger.listMessages(w.main().id);
+  assert.deepEqual(lines.map((m) => m.body), [
+    '予定を入れました: 11/12 14:00〜16:00 資料づくり',
+    '予定を動かしました: 11/13 09:00〜11:00 資料づくり',
+    '予定を消しました: 11/13 09:00〜11:00 資料づくり',
+  ]);
+  assert.ok(lines.every((m) => m.role === 'system' && m.data.agent_notice.thread === w.ledger.getThread('agent').id));
+  // They need no turn of the secretary.
+  assert.equal(w.claude.calls.length, acts.length);
 });
 
 test('an agent\'s request: past the wait the agent is told it waits; the request stays and gets its reply', async (t) => {
@@ -543,10 +583,12 @@ test('an agent\'s request: past the wait the agent is told it waits; the request
   }));
   const out = await w.chat.request({ from: 'laptop', text: '2時間ください' }, WEB, { waitMs: 5 });
   assert.equal(out.timedOut, true);
-  assert.equal(w.chat.status().replying, true);
+  const agent = w.ledger.getThread('agent');
+  assert.equal(w.chat.replying(agent.id), true);
+  assert.equal(w.chat.status().replying, false, 'the conversation with the person is not replying');
   release();
   await w.chat.idle();
-  assert.equal(w.ledger.listMessages(w.main().id).at(-1).body, '金曜の10時に入れました');
+  assert.equal(w.ledger.listMessages(agent.id).at(-1).body, '金曜の10時に入れました');
 });
 
 test('an agent\'s request: refused with the secretary off, and without words', async (t) => {

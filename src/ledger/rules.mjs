@@ -45,7 +45,7 @@ export const REPORT_TITLE_MAX = 200;
 export const REPORT_BODY_MAX = 20000;
 // 会話: a thread's runner, who wrote a message, and the states of a proposal. The person's
 // message is kept short enough to read back; the secretary's reply may be as long as a report.
-export const THREAD_KINDS = ['secretary', 'sub'];
+export const THREAD_KINDS = ['secretary', 'sub', 'agent'];
 export const THREAD_RUNNERS = ['resume', 'resident'];
 export const MESSAGE_ROLES = ['user', 'secretary', 'system'];
 export const MESSAGE_MAX = 4000;

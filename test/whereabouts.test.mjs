@@ -115,7 +115,7 @@ test('schema: a version 12 file gains only_at and priority on its tasks, empty f
     .run();
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 13);
+  assert.equal(SCHEMA_VERSION, 14);
   const L = openLedger(file);
   const old = L.get('t_20261001000000_aaaaaa');
   assert.equal(old.only_at, null);
@@ -123,7 +123,7 @@ test('schema: a version 12 file gains only_at and priority on its tasks, empty f
   assert.equal(L.update(old.id, { only_at: 'home' }, ACTOR).only_at, 'home');
   L.close();
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '13');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '14');
   assert.throws(() => check.exec("UPDATE tasks SET only_at = 'lab'"), /CHECK/);
   check.close();
 });

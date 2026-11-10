@@ -14,7 +14,9 @@
 
 import { h, s, skel } from '../ui.js';
 import { renderMarkdown } from '../md.js';
-import { withTabs } from './secretary-rules.js';
+import { rulesOn, setRulesTab, rulesPanel } from './secretary-rules.js';
+import { micButton } from './secretary-voice.js';
+import { agentTabs, agentNotice, agentPane } from './secretary-agents.js';
 
 const POLL_MS = 2500;
 const FILES_MAX = 4;
@@ -29,6 +31,9 @@ const view = {
   stream: null,
   streamOk: false,
   thread: null, // the id of the open thread
+  tab: 'main', // 'main', or 'agent' (the agents' pane: secretary-agents.js)
+  agentOpen: new Set(), // requests shown in full there
+  agentLast: null,
   askAt: new Map(), // ask id → the question moved to with 戻る
   picks: new Map(), // `${ask}:${index}` → Set of labels
   others: new Map(), // `${ask}:${index}` → <input>
@@ -340,6 +345,7 @@ function replyCalendar(m) {
 
 function message(m, { where, last, threads }) {
   if (m.role === 'system' && m.request) return requestCard(m);
+  if (m.role === 'system' && m.notice) return agentNotice(m, () => showAgents('agent'));
   if (m.role === 'system') return h('p', { class: 'wf-note', text: m.body });
   const t = threads?.[m.id] ?? null;
   const startThread = where === 'main' && !(t && (t.count || t.unread))
@@ -553,6 +559,7 @@ function composerEl(c, on) {
   },
   tray,
   h('button', { type: 'button', class: ['wf-clip', 'wf-press'], 'aria-label': 'ファイルや画像を添える', disabled: !on, onclick: () => c.picker.click() }, ICON.clip()),
+  micButton(c.input, { disabled: !on, redraw: () => ctxRef?.rerender(), note: (text) => { c.note = text; if (text) ctxRef?.rerender(); } }),
   h('label', { class: 'wf-sec-field' }, h('span', { class: 'wf-sr', text: c.where === 'main' ? '秘書に送る' : 'スレッドに返信する' }), c.input),
   h('button', { type: 'button', class: ['wf-send', 'wf-press'], 'aria-label': '送る', disabled: !on || view.busy, onclick: () => send(c) }, ICON.send()),
   c.picker);
@@ -582,9 +589,10 @@ function scroller(where, key, children, newest) {
 // The conversation, and the open thread with it. Opening a thread with unread messages marks
 // it read.
 const load = async (api) => {
-  const [main, thread] = await Promise.all([
+  const [main, thread, agent] = await Promise.all([
     api('/secretary'),
     view.thread ? api(`/secretary/threads/${encodeURIComponent(view.thread)}`).catch(() => null) : null,
+    view.tab === 'agent' ? api('/secretary/agent').catch(() => null) : null,
   ]);
   if (view.thread && !thread) view.thread = null;
   if (thread) {
@@ -594,8 +602,33 @@ const load = async (api) => {
       main.threads[thread.thread.parent_id] = { ...t, unread: 0 };
     }
   }
-  return { main, thread };
+  return { main, thread, agent };
 };
+
+function showAgents(tab) {
+  setRulesTab(tab === 'rules');
+  if (tab !== 'rules') view.tab = tab;
+  ctxRef?.refresh();
+}
+
+// The agents' pane, in place of the conversation.
+function renderAgents(data, ctx) {
+  const pane = agentPane(data.agent, {
+    expanded: view.agentOpen,
+    toggle: (id) => {
+      if (view.agentOpen.has(id)) view.agentOpen.delete(id);
+      else view.agentOpen.add(id);
+      ctx.rerender();
+    },
+  });
+  if (pane.newest !== view.agentLast || ctx.first) {
+    view.agentLast = pane.newest;
+    requestAnimationFrame(() => { pane.el.scrollTop = pane.el.scrollHeight; });
+  }
+  clearTimeout(pollTimer);
+  if (!view.streamOk && data.agent?.secretary?.replying) pollTimer = setTimeout(() => ctxRef?.refresh(), POLL_MS);
+  return h('div', { class: 'wf-sec' }, h('div', { class: 'wf-sec-main' }, ctx.banner(), agentTabs('agent', showAgents), pane.el));
+}
 
 function render(data, ctx) {
   ctxRef = ctx;
@@ -605,6 +638,7 @@ function render(data, ctx) {
     ctx.api('/secretary/read', { method: 'POST', body: {} }).catch(() => {});
   }
   connect();
+  if (view.tab === 'agent') return renderAgents(data, ctx);
   const { main } = data;
   const thread = view.thread ? data.thread : null;
   const on = main.secretary?.on === true;
@@ -639,7 +673,7 @@ function render(data, ctx) {
   if (!view.streamOk && (replying || thread?.secretary?.replying)) pollTimer = setTimeout(() => ctxRef?.refresh(), POLL_MS);
 
   return h('div', { class: ['wf-sec', aside && 'wf-with-thread'] },
-    h('div', { class: 'wf-sec-main' }, ctx.banner(), scroll, bar),
+    h('div', { class: 'wf-sec-main' }, ctx.banner(), agentTabs('main', showAgents), scroll, bar),
     aside);
 }
 
@@ -653,4 +687,6 @@ function skeleton(ctx) {
 }
 
 // 会話と「決めたこと」の2つのタブで包む(secretary-rules.js)。
-export default { load, render: (data, ctx) => withTabs(ctx, () => render(data, ctx)), skeleton };
+const renderRules = (ctx) => h('div', { class: 'wf-sec' }, h('div', { class: 'wf-sec-main' }, ctx.banner(), agentTabs('rules', showAgents), rulesPanel(ctx)));
+
+export default { load, render: (data, ctx) => (rulesOn() ? renderRules(ctx) : render(data, ctx)), skeleton };

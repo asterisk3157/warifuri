@@ -1,6 +1,6 @@
 // 秘書の「決めたこと」の欄: 秘書と話して決めたこと(生活の決まり、場所、週の居場所、人のこと)を
 // 一覧にして、その場で足す・直す・消す。会話のタブと並ぶ2つめのタブで、secretary.js は
-// withTabs で包むだけ。設定は POST /web/api/rules/settings、人は /web/api/people で書く。
+// タブは secretary.js が描く。設定は POST /web/api/rules/settings、人は /web/api/people で書く。
 //
 // 書いている途中の欄は、画面を読み直しても同じ要素を使い回す(fields)ので、打った文字が消えない。
 // 「1日の流れを決める」は、決まった一文を本人の発言として秘書に送る。聞き方の手順は
@@ -340,23 +340,12 @@ function panel(ctx) {
   return h('div', { class: 'wf-rules', data: { scroll: 'rules' } }, h('div', { class: 'wf-rules-in' }, ctx.banner(), flow, problems, ...body));
 }
 
-function tabs(ctx) {
-  const tab = (key, label) => h('button', {
-    type: 'button', role: 'tab', class: 'wf-sec-tab', aria: { selected: String(state.tab === key) },
-    onclick: () => {
-      if (state.tab === key) return;
-      state.tab = key;
-      state.problems = [];
-      if (key === 'rules') state.at = 0;
-      ctx.rerender();
-    },
-    text: label,
-  });
-  return h('div', { class: 'wf-sec-tabs', role: 'tablist', 'aria-label': '秘書の画面' }, tab('chat', '会話'), tab('rules', '決めたこと'));
-}
-
 // 会話の画面(chat を呼んで作る)を、タブで包む。決めたこと のタブでは chat を呼ばない。
-export function withTabs(ctx, chat) {
-  const body = state.tab === 'rules' ? panel(ctx) : chat();
-  return h('div', { class: 'wf-sec-wrap' }, tabs(ctx), body);
+// The tab over the secretary's screen is kept here; secretary.js draws the tabs.
+export const rulesOn = () => state.tab === 'rules';
+export function setRulesTab(on) {
+  state.tab = on ? 'rules' : 'chat';
+  state.problems = [];
+  if (on) state.at = 0;
 }
+export const rulesPanel = (ctx) => panel(ctx);
