@@ -22,6 +22,7 @@ export const SECRETS_FILE = 'secrets.env';
 const LEDGER = ['import', 'key', 'backup', 'oauth', 'serve', 'connect', 'secretary'];
 const SECRETARY = ['serve', 'secretary'];
 const CLIENT = ['connect', 'hook'];
+const GOOGLE = ['serve', 'secretary', 'google'];
 
 const httpUrl = (v) => {
   try {
@@ -308,6 +309,44 @@ export const SETTINGS = [
     about: 'Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。画面で書いたことも Discord に写す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る',
     def: 'off',
     commands: SECRETARY,
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
+    name: 'WARIFURI_GOOGLE_CLIENT_ID',
+    about: 'Google カレンダーを warifuri が自分で読むための、ユーザーの Google Cloud の OAuth クライアントの ID。下の2つと一緒に設定すると、カレンダーの変更を AI なしで取り込む',
+    commands: GOOGLE,
+  },
+  {
+    name: 'WARIFURI_GOOGLE_CLIENT_SECRET',
+    about: 'その OAuth クライアントのシークレット',
+    secret: true,
+    commands: GOOGLE,
+  },
+  {
+    name: 'WARIFURI_GOOGLE_REFRESH_TOKEN',
+    about: 'Google カレンダーを読む許可のトークン。warifuri google login が書く',
+    secret: true,
+    commands: GOOGLE,
+  },
+  {
+    name: 'WARIFURI_GOOGLE_CALENDAR_POLL',
+    about: 'Google カレンダーに変更がないかを聞く間隔(分)。1 から 60',
+    def: '1',
+    commands: ['serve'],
+    check: (v) => (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 60 ? null : 'must be a number of minutes from 1 to 60'),
+  },
+  {
+    name: 'WARIFURI_GOOGLE_CALENDAR_PUSH',
+    about: 'Google カレンダーの変更を、Google からの知らせでも受け取る。on にすると、WARIFURI_PUBLIC_URL の /api/google/calendar/notify に知らせが届き、数秒で取り込む。WARIFURI_PUBLIC_URL が https で、Google から届く必要がある',
+    def: 'off',
+    commands: ['serve'],
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
+    name: 'WARIFURI_GOOGLE_CALENDAR_WAKE',
+    about: 'Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く',
+    def: 'off',
+    commands: ['serve'],
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
 ];

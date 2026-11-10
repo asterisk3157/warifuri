@@ -297,3 +297,61 @@ test('chat: off without enable, a run past the limit, and a thread of another ru
   await other.chat.kick();
   assert.equal(other.claude.calls.length, 0);
 });
+
+test('chat: a change of the calendar is a line the next turn reads; it wakes the secretary only when asked to', async (t) => {
+  const w = world(t);
+  const change = (title, change = 'created') => ({ id: `b_${title}`, change, title, starts_at: '2026-10-26T01:00:00.000Z', ends_at: '2026-10-26T02:00:00.000Z' });
+  const events = [];
+  w.chat.subscribe((e) => events.push(e.type));
+  // Without wake: lines only, and no run of claude.
+  const lines = w.chat.calendarChanged([change('打ち合わせ'), change('歯医者', 'deleted')]);
+  await w.chat.idle();
+  assert.deepEqual(lines.map((m) => [m.role, m.data.calendar_change.change]), [['system', 'created'], ['system', 'deleted']]);
+  assert.match(lines[0].body, /^カレンダーに予定が増えました: .*打ち合わせ$/);
+  assert.equal(w.claude.calls.length, 0);
+  assert.deepEqual(events, ['done', 'done']);
+  // The person's next message brings them along as material.
+  w.chat.send('今日の予定は?', WEB);
+  await w.chat.idle();
+  assert.match(w.claude.calls[0].input, /# 前の返事のあとに起きたこと[\s\S]*カレンダーに予定が増えました[\s\S]*カレンダーから予定が消えました/);
+
+  // With wake: one call into the conversation, with the instructions of the calendar.
+  w.chat.calendarChanged([change('面談', 'moved')], { wake: true });
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 2);
+  assert.match(w.claude.calls[1].input, /warifuri が「カレンダーの予定が変わりました」と知らせました/);
+  assert.match(w.claude.calls[1].input, /# カレンダーの変更\(calendar\)/);
+  assert.match(w.claude.calls[1].input, /カレンダーで予定が動きました: .*面談/);
+
+  // Many changes are counted in one line, and nothing is said with the secretary off.
+  const many = w.chat.calendarChanged(Array.from({ length: 8 }, (_, i) => change(`予定${i}`)));
+  assert.equal(many.length, 6);
+  assert.equal(many.at(-1).body, 'ほかに3件の予定が変わりました');
+  assert.deepEqual(world(t, { on: false }).chat.calendarChanged([change('x')], { wake: true }), []);
+});
+
+test('chat: in the night a change of the calendar wakes nobody; the line waits', async (t) => {
+  const root = fs.mkdtempSync(path.join(tmp, 'night-'));
+  const home = path.join(root, 'data');
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(home);
+  fs.mkdirSync(bin);
+  const file = path.join(bin, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+  fs.writeFileSync(file, '');
+  fs.chmodSync(file, 0o755);
+  writeMcpConfig(home, { url: 'http://127.0.0.1:8787/mcp', key: KEY });
+  const cfg = loadConfig({ env: { WARIFURI_HOME: home, WARIFURI_SECRETARY: 'on' }, command: 'serve' });
+  const ledger = openLedger(':memory:', { now: ticking() });
+  const claude = fakeClaude();
+  const sys = process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, PATHEXT: '.COM;.EXE;.BAT;.CMD' } : {};
+  const chat = createChat(ledger, cfg, { env: { ...sys, PATH: bin }, spawn: claude.spawn, now: () => new Date(2026, 9, 25, 23, 30) });
+  t.after(() => {
+    chat.stop();
+    ledger.close();
+  });
+  const out = chat.calendarChanged([{ id: 'b_1', change: 'created', title: '夜の予定', starts_at: '2026-10-26T01:00:00.000Z', ends_at: '2026-10-26T02:00:00.000Z' }], { wake: true });
+  await chat.idle();
+  assert.equal(out.length, 1);
+  assert.equal(claude.calls.length, 0);
+  assert.equal(ledger.listMessages(ledger.getThread().id, { limit: 10 }).some((m) => m.kind === 'trigger'), false);
+});

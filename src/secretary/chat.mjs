@@ -67,7 +67,11 @@ export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 const TEXT_TYPES = /^(text\/|application\/(json|xml|x-yaml|yaml|csv|javascript|x-sh|toml)$)/;
 const TEXT_NAMES = /\.(txt|md|markdown|csv|tsv|json|ya?ml|toml|xml|html?|css|js|mjs|ts|py|rb|go|rs|sh|ini|log|ics)$/i;
 // What a scheduled trigger says in the conversation; its instructions are harness/secretary/<job>.md.
-export const TRIGGERS = { morning: '朝の時間です', weekly: '週の完了確認の時間です' };
+// calendar is not of the clock: the calendar watch (src/calendar/watch.mjs) sends it when the
+// person's calendar changed and WARIFURI_GOOGLE_CALENDAR_WAKE is on.
+export const TRIGGERS = { morning: '朝の時間です', weekly: '週の完了確認の時間です', calendar: 'カレンダーの予定が変わりました' };
+// How many changes of the calendar are said one by one; the rest are counted in one line.
+export const CALENDAR_NOTES = 5;
 
 // The longest an agent's request may be, and the longest it may wait for the reply.
 export const REQUEST_MAX = 2000;
@@ -89,14 +93,17 @@ export function requestBody(r) {
 
 // The line in the secretary's conversation for a booking an agent's request changed.
 const NOTICE_WORDS = { created: '予定を入れました', moved: '予定を動かしました', deleted: '予定を消しました' };
-export function noticeLine(c) {
+// What the calendar watch says for a booking that changed in the person's calendar.
+const CALENDAR_WORDS = { created: 'カレンダーに予定が増えました', moved: 'カレンダーで予定が動きました', deleted: 'カレンダーから予定が消えました' };
+export const calendarLine = (c) => noticeLine(c, CALENDAR_WORDS);
+export function noticeLine(c, words = NOTICE_WORDS) {
   const a = new Date(c.starts_at);
   const b = new Date(c.ends_at);
   const p = (n) => String(n).padStart(2, '0');
   const hm = (d) => `${p(d.getHours())}:${p(d.getMinutes())}`;
   const day = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
   const span = Number.isNaN(a.getTime()) ? '' : `${day(a)} ${hm(a)}〜${Number.isNaN(b.getTime()) ? '' : day(b) === day(a) ? hm(b) : `${day(b)} ${hm(b)}`}`;
-  return `${NOTICE_WORDS[c.change]}: ${[span, c.title].filter(Boolean).join(' ')}`;
+  return `${words[c.change]}: ${[span, c.title].filter(Boolean).join(' ')}`;
 }
 
 // Who writes the replies and the runner's own notes in the thread.
@@ -642,6 +649,19 @@ export function createChat(ledger, cfg, ctx = {}) {
       const message = writeTrigger(ledger, job, WRITER);
       kick(message.thread_id);
       return { sent: message };
+    },
+    // The person's calendar changed (the calendar watch): changes as bookingChangesSince gives
+    // them. Each is one line in the secretary's conversation, which the secretary reads at its
+    // next turn; nothing wakes it unless wake is set. Then one call goes into the conversation
+    // (not in the night, and not while an earlier one still waits). Returns the lines written.
+    calendarChanged(changes, { wake = false } = {}) {
+      if (!on || !changes?.length) return [];
+      const thread = mainThread() ?? ledger.ensureThread(SECRETARY_THREAD.kind, WRITER);
+      const out = changes.slice(0, CALENDAR_NOTES).map((c) => note(thread.id, calendarLine(c), { calendar_change: { booking: c.id, change: c.change } }));
+      if (changes.length > CALENDAR_NOTES) out.push(note(thread.id, `ほかに${changes.length - CALENDAR_NOTES}件の予定が変わりました`, { calendar_change: {} }));
+      for (const m of out) emit({ type: 'done', thread: thread.id, message: m.id, fed: [] });
+      if (wake && !unseen(ledger.getThread(thread.id)).some((m) => m.kind === 'trigger' && m.data?.job === 'calendar')) this.trigger('calendar');
+      return out;
     },
     // { on, replying, waiting }: whether a reply is being made in the secretary's
     // conversation, and how many messages wait there.
