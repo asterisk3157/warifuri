@@ -195,7 +195,7 @@ function placesCard(ctx) {
       p.note ? h('small', { class: 'wf-rl-note', text: p.note }) : null,
     ], openEdit(ctx, key));
   });
-  const name = field('place-new-name', '', { maxlength: 40, placeholder: '名前 例: 研究室', 'aria-label': '名前', onkeydown: enter(addPlace) });
+  const name = field('place-new-name', '', { maxlength: 40, placeholder: '例: 研究室', 'aria-label': '名前', onkeydown: enter(addPlace) });
   const note = field('place-new-note', '', { maxlength: 200, placeholder: 'メモ', 'aria-label': 'メモ', onkeydown: enter(addPlace) });
   const home = homeCheck('place-new-home', false);
   function addPlace() {
