@@ -703,5 +703,11 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return Object.fromEntries(all('SELECT profile, count(*) AS n FROM person_profiles GROUP BY profile').map((r) => [r.profile, r.n]));
   }
 
-  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, counts };
+  // The ids of the people linked to a goal, task or booking (any profile; the caller keeps to
+  // the people of its scope).
+  function linked({ kind, id }) {
+    return all('SELECT person_id FROM person_links WHERE kind = ? AND target_id = ? ORDER BY created_at, person_id', kind, id).map((r) => r.person_id);
+  }
+
+  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, counts, linked };
 }

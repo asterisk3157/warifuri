@@ -34,6 +34,7 @@ import { timetableFor, TIMETABLE_MAX_DAYS } from '../ledger/timetable.mjs';
 import {
   readContext, writeNote, noteRecordChanges, secretaryConfigured, finishPeopleImport, readProfileDefaults, writeProfileDefaults, profileFolders, PROFILE_FIELDS, RECORD_TEXT_CHARS,
 } from '../knowledge/profiles.mjs';
+import { briefFor } from '../knowledge/brief.mjs';
 import { listEntries, sortInbox, splitKnowledge, markStale, SPLIT_LINES } from '../knowledge/tidy.mjs';
 import { profileColors } from './web.mjs';
 
@@ -1346,7 +1347,7 @@ async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat) {
 
 // The HTTP API for scripts such as hooks. Machine keys only: OAuth tokens are issued for /mcp
 // alone (their resource), and a script on a machine has its key, not a login.
-function apiRouter(ledger, limit, secretaryRuns = () => false) {
+function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
   const router = express.Router();
   router.use(rateLimit(limit));
   router.use((req, res, next) => {
@@ -1371,6 +1372,19 @@ function apiRouter(ledger, limit, secretaryRuns = () => false) {
     const place = ledger.placeFor(req.device, dir);
     const task = ledger.held({ device: req.device, placeId: place?.id ?? null });
     res.json({ task, place: place ? { id: place.id, name: place.name, profile: place.profile } : null });
+  });
+  // What an agent is handed when a conversation starts in dir (the session-start hook): the
+  // place, the task this device holds there (or a few open ones), the contents of the
+  // profile's knowledge by name only, and its people one line each; `text` is the same as
+  // Japanese text. Only the profile of the place the directory falls in on this device is
+  // read, as context and people do. Outside any place: { place: null, text: null }.
+  router.get('/brief', (req, res) => {
+    const dir = typeof req.query.dir === 'string' ? req.query.dir : '';
+    if (comparablePath(dir) === null) {
+      res.status(400).json({ error: 'dir must be an absolute directory path' });
+      return;
+    }
+    res.json(briefFor(ledger, { home, device: req.device, dir }));
   });
   // Whether the secretary runs (the same on as board's): the calendar hook stops an agent's
   // own calendar writes while it does (原則23).
@@ -1441,7 +1455,7 @@ export function createApp({
   app.post('/mcp', auth, mcp);
   app.get('/mcp', auth, mcp);
   app.delete('/mcp', auth, mcp);
-  app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true)));
+  app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
     ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,
     secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor,
