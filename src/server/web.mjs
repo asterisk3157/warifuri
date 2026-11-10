@@ -32,7 +32,7 @@ import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../le
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
 import { calendarSvg } from '../calendar/image.mjs';
-import { readSettings, weekBands } from '../ledger/settings.mjs';
+import { readSettings, writeSettings, weekBands } from '../ledger/settings.mjs';
 import { fetchDetail } from '../monitor/detail.mjs';
 import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, readProfileDefaults, profileFolders, PROFILES_DIR } from '../knowledge/profiles.mjs';
@@ -375,6 +375,8 @@ export function createWeb({
   const smallJson = express.json({ limit: '8kb', strict: true });
   // A message may be MESSAGE_MAX characters of three bytes each.
   const messageJson = express.json({ limit: '32kb', strict: true });
+  // The settings of 決めたこと: up to 50 rules of 200 characters, and the places and the week.
+  const rulesJson = express.json({ limit: '96kb', strict: true });
 
   // The one-time login. The page reads the token after the #, posts it here and goes on to the
   // calendar, so that the next request is same-site and the Strict cookie goes.
@@ -901,6 +903,76 @@ export function createWeb({
       throw err;
     }
     return undefined;
+  });
+
+  // 決めたこと (the secretary screen): the life rules, the places, the week's slots and the
+  // people, to read in one go and to change on the spot. The settings go through writeSettings
+  // (limits are not here: they are the person's to decide with the secretary); a place keeps
+  // any field it has beyond name and note as it was read.
+  const rulesOut = () => {
+    const { life, places, week } = readSettings(ledger);
+    const list = ledger.people.list({ all: true });
+    return {
+      now: nowIso(),
+      life: { rules: life.rules },
+      places: { places: places.places, travel: places.travel },
+      week: { slots: week.slots },
+      profiles: profileNames(),
+      people: { count: list.count, more: list.more, people: list.people },
+    };
+  };
+  const WEB = { actor: 'web', device: null };
+  api.get('/rules', (req, res) => res.json(rulesOut()));
+
+  // { life?, places?, week? }, each as writeSettings takes it.
+  api.post('/rules/settings', sameOrigin, rulesJson, (req, res) => {
+    if (!exact(req.body, ['life', 'places', 'week']) || Object.keys(req.body).length === 0) {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "life": {…}, "places": {…}, "week": {…} } のうち1つ以上です'] });
+      return;
+    }
+    try {
+      writeSettings(ledger, req.body, {}, WEB);
+      res.json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+
+  // A person: { name, profile, affiliation?, role?, aliases? } to add; the same fields (but the
+  // profile) to change; and forgetting for good. Memos and items are the agents' to write.
+  const PERSON_KEYS = ['name', 'affiliation', 'role', 'aliases'];
+  api.post('/people', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, [...PERSON_KEYS, 'profile']) || typeof req.body.profile !== 'string') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "name": "…", "profile": "…", "affiliation": "…", "role": "…" } です'] });
+      return;
+    }
+    const { profile, ...fields } = req.body;
+    try {
+      ledger.people.create({ ...fields, profiles: [profile] }, { all: true }, WEB);
+      res.status(201).json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  api.post('/people/:id', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, PERSON_KEYS)) {
+      res.status(400).json({ error: 'refused', problems: ['直せるのは name、affiliation、role、aliases です'] });
+      return;
+    }
+    try {
+      ledger.people.update(req.params.id, req.body, { all: true }, WEB);
+      res.json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  api.delete('/people/:id', sameOrigin, smallJson, (req, res) => {
+    try {
+      ledger.people.forget({ person: req.params.id }, { all: true }, WEB);
+      res.json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
   });
 
   api.get('/settings', (req, res) => {

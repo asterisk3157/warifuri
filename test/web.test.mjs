@@ -606,3 +606,71 @@ test('ナレッジ: the profiles with their counts, one profile\'s files, and a 
   assert.equal((await get(base, '/web/api/knowledge/nobody')).status, 404);
   assert.equal((await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('../profile.yaml')}`)).status, 404);
 });
+
+test('決めたこと: the rules, places, week and people are read together and changed on the spot', async (t) => {
+  const { base, ledger } = await start(t);
+  const post = (p, body, headers = {}, method = 'POST') =>
+    fetch(`${base}/web/api${p}`, { method, headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  const read = async () => (await get(base, '/web/api/rules')).json();
+
+  const first = await read();
+  assert.deepEqual(first.life, { rules: [] });
+  assert.deepEqual(first.week, { slots: [] });
+  assert.deepEqual(first.people.people, []);
+  assert.ok(first.profiles.includes('research'));
+
+  // From this origin only, JSON only, and only the three sections.
+  assert.equal((await post('/rules/settings', { life: { rules: ['a'] } }, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await post('/rules/settings', 'x', { 'Content-Type': 'text/plain' })).status, 415);
+  assert.equal((await post('/rules/settings', {})).status, 400);
+  assert.equal((await post('/rules/settings', { limits: { day_max_hours: 3 } })).status, 400);
+  assert.equal((await post('/rules/settings', { onboarding: { state: 'done' } })).status, 400);
+
+  // Rules, places and a week slot, in one write; the written values come back.
+  const ok = await post('/rules/settings', {
+    life: { rules: ['平日は 0:00 から 7:00 まで寝る'] },
+    places: { places: [{ name: 'Lab', note: 'near the station' }, { name: 'Home' }], travel: [{ from: 'Lab', to: 'Home', minutes: 30 }] },
+    week: { slots: [{ days: ['月', '木'], start: '09:00', end: '17:00', place: 'Lab', profile: 'research' }] },
+  });
+  assert.equal(ok.status, 200);
+  const after = await ok.json();
+  assert.deepEqual(after.life.rules, ['平日は 0:00 から 7:00 まで寝る']);
+  assert.deepEqual(after.places.places.map((p) => p.name), ['Lab', 'Home']);
+  assert.deepEqual(after.week.slots[0].days, ['月', '木']);
+  assert.equal(ledger.records('week').at(-1)?.actor, 'web');
+
+  // A problem is listed and nothing of it is written.
+  const bad = await post('/rules/settings', { life: { rules: [''] }, week: { slots: [{ days: 'daily', start: '10:00', end: '09:00', place: 'Lab' }] } });
+  assert.equal(bad.status, 400);
+  assert.ok((await bad.json()).problems.length >= 2);
+  assert.deepEqual((await read()).life.rules, ['平日は 0:00 から 7:00 まで寝る']);
+
+  // People: add, a twin is refused, change, forget.
+  assert.equal((await post('/people', { name: '', profile: 'research' })).status, 400);
+  assert.equal((await post('/people', { name: 'Sam', profile: 'research', color: 'red' })).status, 400);
+  const added = await post('/people', { name: 'Sam', profile: 'research', affiliation: 'Lab A' });
+  assert.equal(added.status, 201);
+  const people = (await added.json()).people.people;
+  assert.equal(people.length, 1);
+  assert.equal(people[0].affiliation, 'Lab A');
+  assert.deepEqual(people[0].profiles, ['research']);
+  assert.equal((await post('/people', { name: 'Sam', profile: 'research' })).status, 400);
+  const id = people[0].id;
+  assert.equal((await post(`/people/${id}`, { profiles: ['x'] })).status, 400);
+  const changed = await (await post(`/people/${id}`, { name: 'Sam B', role: 'advisor', affiliation: null, aliases: ['S'] })).json();
+  assert.equal(changed.people.people[0].name, 'Sam B');
+  assert.equal(changed.people.people[0].affiliation, null);
+  assert.deepEqual(changed.people.people[0].aliases, ['S']);
+  assert.equal((await post('/people/n_nobody', { name: 'x' })).status, 400);
+  assert.equal((await post(`/people/${id}`, {}, { Origin: 'https://evil.example' }, 'DELETE')).status, 403);
+  const gone = await post(`/people/${id}`, {}, {}, 'DELETE');
+  assert.equal(gone.status, 200);
+  assert.deepEqual((await gone.json()).people.people, []);
+  assert.equal((await post(`/people/${id}`, {}, {}, 'DELETE')).status, 400);
+});
+
+test('決めたこと: the button sends the sentence the secretary\'s chat.md answers', async () => {
+  const { DAY_FLOW_TEXT } = await import('../src/web/pages/secretary-rules.js');
+  const md = fs.readFileSync(new URL('../harness/secretary/chat.md', import.meta.url), 'utf8');
+  assert.ok(md.includes(`「${DAY_FLOW_TEXT}」`));
+});

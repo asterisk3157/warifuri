@@ -14,6 +14,7 @@
 
 import { h, s, skel } from '../ui.js';
 import { renderMarkdown } from '../md.js';
+import { withTabs } from './secretary-rules.js';
 
 const POLL_MS = 2500;
 const FILES_MAX = 4;
@@ -651,4 +652,5 @@ function skeleton(ctx) {
       h('div', { class: 'wf-sec-bar' }, composerEl(boxes.main, false))));
 }
 
-export default { load, render, skeleton };
+// 会話と「決めたこと」の2つのタブで包む(secretary-rules.js)。
+export default { load, render: (data, ctx) => withTabs(ctx, () => render(data, ctx)), skeleton };
