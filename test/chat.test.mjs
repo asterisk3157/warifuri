@@ -55,7 +55,7 @@ function world(t, { on = true, timeoutMs } = {}) {
   const ledger = openLedger(':memory:', { now: ticking() });
   const claude = fakeClaude();
   const lines = [];
-  const chat = createChat(ledger, cfg, { env, spawn: claude.spawn, log: (l) => lines.push(l), timeoutMs, now: () => new Date('2026-10-25T12:00:00+09:00') });
+  const chat = createChat(ledger, cfg, { env, spawn: claude.spawn, log: (l) => lines.push(l), timeoutMs, now: () => new Date(2026, 9, 25, 12, 0, 0) });
   t.after(() => {
     chat.stop();
     ledger.close();
