@@ -47,15 +47,20 @@ function outline(file) {
 }
 
 // The open tasks to offer when the device holds none here: ready or running ones of the
-// profile (of this place only, when it has no profile), those of this place first, then the
-// ones that can be started now.
+// profile (of this place only, when it has no profile). Those of this place come first: the
+// ones put in it, and the ones in no place whose title names it ("[warifuri] …"). Then the
+// ones in no place, then those of the profile's other places; in each, the ones that can be
+// started now first. When this place has tasks of its own, only they are offered.
 function openTasks(ledger, place) {
   const board = ledger.board(place.profile ? { profile: place.profile } : {});
   const rows = [...board.goals.flatMap((g) => g.tasks), ...board.unassigned.map((t) => ({ ...t, actionable: t.state === 'ready' }))]
     .filter((t) => t.state === 'ready' || t.state === 'running')
     .filter((t) => place.profile || t.place_id === place.id);
-  const rank = (t) => (t.place_id === place.id ? 0 : 2) + (t.actionable ? 0 : 1);
-  const sorted = rows.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map(({ t }) => t);
+  const name = String(place.name ?? '').trim().toLowerCase();
+  const here = (t) => t.place_id === place.id || (!t.place_id && name.length > 1 && String(t.title).toLowerCase().includes(name));
+  const rank = (t) => (here(t) ? 0 : t.place_id ? 4 : 2) + (t.actionable ? 0 : 1);
+  const own = rows.filter(here);
+  const sorted = (own.length ? own : rows).map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map(({ t }) => t);
   return {
     tasks: sorted.slice(0, BRIEF_TASKS).map((t) => ({ id: t.id, title: t.title, state: t.state })),
     more_tasks: Math.max(0, sorted.length - BRIEF_TASKS),
