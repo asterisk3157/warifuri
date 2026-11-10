@@ -16,9 +16,9 @@ const mdhm = (iso) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${hhmm(iso)}`;
 };
 
-const TABS = [['main', '会話'], ['agent', 'エージェント'], ['rules', '決めたこと']];
+const TABS = [['main', '会話'], ['agent', 'エージェント']];
 
-// The tabs over the secretary's screen. tab: 'main', 'agent' or 'rules'; select(tab).
+// The tabs over the secretary's screen. tab: 'main' or 'agent'; select(tab).
 export function agentTabs(tab, select) {
   return h('div', { class: 'wf-sec-tabs', role: 'tablist', 'aria-label': '秘書の画面' },
     ...TABS.map(([key, label]) => h('button', {

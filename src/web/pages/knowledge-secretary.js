@@ -1,21 +1,16 @@
-// 秘書の「決めたこと」の欄: 秘書と話して決めたこと(生活の決まり、場所、週の居場所、人のこと)を
-// 一覧にして、その場で足す・直す・消す。会話のタブと並ぶ2つめのタブで、secretary.js は
-// タブは secretary.js が描く。設定は POST /web/api/rules/settings、人は /web/api/people で書く。
+// ナレッジの「秘書」: 秘書と話して決めた生活の決まり、場所、週の居場所を、その場で足す・直す・消す。
+// 設定は POST /web/api/rules/settings で書く。人は knowledge.js の表で見る。
 //
 // 書いている途中の欄は、画面を読み直しても同じ要素を使い回す(fields)ので、打った文字が消えない。
 
 import { h } from '../ui.js';
 
-const REREAD_MS = 20_000;
 const DAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 const state = {
-  tab: 'chat',
   data: null,
-  at: 0,
-  fetching: false,
+  seen: null, // 最後に受け取った読み込みの結果。新しいものが来たら data を置き換える
   editing: new Set(), // 直している行の鍵
-  confirm: null, // 消す前の確かめ中の人の id
   problems: [],
   busy: false,
 };
@@ -68,19 +63,6 @@ const enter = (fn) => (e) => {
   }
 };
 
-async function load(ctx) {
-  if (state.fetching) return;
-  state.fetching = true;
-  try {
-    state.data = await ctx.api('/rules');
-  } catch {
-    // 前の表示を残す。
-  }
-  state.at = Date.now();
-  state.fetching = false;
-  ctx.rerender();
-}
-
 // 書く。成功したら返ってきた一覧に置き換え、終わった行の鍵を片づける。
 async function write(ctx, path, body, { method = 'POST', done } = {}) {
   if (state.busy) return false;
@@ -90,7 +72,6 @@ async function write(ctx, path, body, { method = 'POST', done } = {}) {
   let ok = false;
   try {
     state.data = await ctx.api(path, { method, body });
-    state.at = Date.now();
     done?.();
     ok = true;
   } catch (err) {
@@ -254,83 +235,15 @@ function weekCard(ctx) {
   return card('週の居場所', list(items), addArea(ctx, 'slot-new', form.inputs, form.save));
 }
 
-// ---- 人のこと ----
-
-const itemsText = (items) => Object.entries(items ?? {}).map(([k, v]) => `${k.split('/').pop()}: ${v}`);
-const aliasesOf = (text) => text.split(/[、,，]/u).map((a) => a.trim()).filter(Boolean);
-
-function peopleCard(ctx) {
-  const { people, count } = state.data.people;
-  const items = people.map((p) => {
-    const key = `person-edit-${p.id}`;
-    if (state.confirm === p.id) {
-      return editRow([h('span', { text: `「${p.name}」とメモをすべて削除します。元に戻せません` })], [
-        btn('削除', () => write(ctx, `/people/${encodeURIComponent(p.id)}`, {}, { method: 'DELETE', done: () => { state.confirm = null; drop(key); } }), 'wf-rl-danger'),
-        btn('キャンセル', () => { state.confirm = null; ctx.rerender(); }),
-      ]);
-    }
-    if (state.editing.has(key)) {
-      const name = field(`${key}-name`, p.name, { maxlength: 100, 'aria-label': '名前', onkeydown: enter(save) });
-      const aff = field(`${key}-aff`, p.affiliation ?? '', { maxlength: 200, 'aria-label': '所属', onkeydown: enter(save) });
-      const role = field(`${key}-role`, p.role ?? '', { maxlength: 200, 'aria-label': '役割', onkeydown: enter(save) });
-      const ali = field(`${key}-ali`, (p.aliases ?? []).join('、'), { maxlength: 300, 'aria-label': '呼び名', placeholder: '複数は「、」で区切る', onkeydown: enter(save) });
-      function save() {
-        write(ctx, `/people/${encodeURIComponent(p.id)}`, { name: name.value.trim(), affiliation: aff.value.trim() || null, role: role.value.trim() || null, aliases: aliasesOf(ali.value) }, { done: () => drop('person-edit-') });
-      }
-      return editRow([labeled('名前', name), labeled('所属', aff), labeled('役割', role), labeled('呼び名', ali)], [
-        btn('保存', save, 'wf-rl-main'),
-        btn('キャンセル', closeEdit(ctx, key)),
-        btn('削除', () => { state.confirm = p.id; ctx.rerender(); }, 'wf-rl-danger'),
-      ]);
-    }
-    const sub = [p.affiliation, p.role].filter(Boolean).join(' / ');
-    const lines = itemsText(p.items);
-    const profiles = p.profiles ?? [];
-    return row([
-      h('b', { text: p.name }),
-      sub ? h('span', { text: sub }) : null,
-      profiles.length ? h('span', { class: 'wf-rl-chips' }, ...profiles.map((n) => h('span', { class: 'wf-rl-chip', text: n }))) : null,
-      (p.aliases ?? []).length ? h('small', { class: 'wf-rl-note', text: `呼び名: ${p.aliases.join('、')}` }) : null,
-      lines.length ? h('small', { class: 'wf-rl-note', text: lines.join(' ・ ') }) : null,
-      p.memos ? h('small', { class: 'wf-rl-note', text: `メモ ${p.memos}件` }) : null,
-    ], openEdit(ctx, key));
-  });
-  const profiles = state.data.profiles;
-  const name = field('person-new-name', '', { maxlength: 100, placeholder: '名前', 'aria-label': '名前', onkeydown: enter(addPerson) });
-  const aff = field('person-new-aff', '', { maxlength: 200, placeholder: '所属', 'aria-label': '所属', onkeydown: enter(addPerson) });
-  const role = field('person-new-role', '', { maxlength: 200, placeholder: '役割', 'aria-label': '役割', onkeydown: enter(addPerson) });
-  const profile = profiles.length
-    ? select('person-new-profile', profiles.map((n) => [n, n]), profiles[0], { 'aria-label': 'プロフィール' })
-    : field('person-new-profile', '', { maxlength: 40, placeholder: 'プロフィール', 'aria-label': 'プロフィール', onkeydown: enter(addPerson) });
-  function addPerson() {
-    const n = name.value.trim();
-    if (!n) return;
-    write(ctx, '/people', { name: n, profile: profile.value.trim(), ...(aff.value.trim() ? { affiliation: aff.value.trim() } : {}), ...(role.value.trim() ? { role: role.value.trim() } : {}) }, { done: () => drop('person-new') });
-  }
-  return card('人のこと', list(items),
-    count > people.length ? h('p', { class: 'wf-rl-hint', text: `${count}人のうち、${people.length}人を表示しています` }) : null,
-    addArea(ctx, 'person-new', [name, aff, role, profile], addPerson));
-}
-
 // ---- 全体 ----
 
-function panel(ctx) {
-  if (!state.data || (Date.now() - state.at > REREAD_MS && !state.fetching && state.editing.size === 0 && !state.busy)) load(ctx);
+// 読み込んだ結果(GET /rules)から、3つのカードを作る。書いている最中は、読み直しで置き換えない。
+export function secretaryCards(ctx, data) {
+  if (data !== state.seen) {
+    state.seen = data;
+    if (!state.busy && state.editing.size === 0) state.data = data;
+  }
+  state.data ??= data;
   const problems = state.problems.length ? h('ul', { class: 'wf-errors', role: 'alert' }, ...state.problems.map((x) => h('li', { text: x }))) : null;
-  const d = state.data;
-  const nothing = d && !d.life.rules.length && !d.places.places.length && !d.week.slots.length && !d.people.people.length;
-  const body = d
-    ? [problems, nothing ? h('p', { class: 'wf-rl-hint', text: 'まだありません' }) : null, lifeCard(ctx), placesCard(ctx), weekCard(ctx), peopleCard(ctx)]
-    : [h('p', { class: 'wf-rl-hint', role: 'status', text: '読み込み中' })];
-  return h('div', { class: 'wf-rules', data: { scroll: 'rules' } }, h('div', { class: 'wf-rules-in' }, ctx.banner(), ...body));
+  return h('div', { class: 'wf-rl-wrap' }, problems, lifeCard(ctx), placesCard(ctx), weekCard(ctx));
 }
-
-// 会話の画面(chat を呼んで作る)を、タブで包む。決めたこと のタブでは chat を呼ばない。
-// The tab over the secretary's screen is kept here; secretary.js draws the tabs.
-export const rulesOn = () => state.tab === 'rules';
-export function setRulesTab(on) {
-  state.tab = on ? 'rules' : 'chat';
-  state.problems = [];
-  if (on) state.at = 0;
-}
-export const rulesPanel = (ctx) => panel(ctx);

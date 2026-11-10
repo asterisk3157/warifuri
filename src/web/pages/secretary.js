@@ -14,7 +14,6 @@
 
 import { h, s, skel } from '../ui.js';
 import { renderMarkdown } from '../md.js';
-import { rulesOn, setRulesTab, rulesPanel } from './secretary-rules.js';
 import { micButton, endVoice } from './secretary-voice.js';
 import { agentTabs, agentNotice, agentPane } from './secretary-agents.js';
 
@@ -607,8 +606,7 @@ const load = async (api) => {
 };
 
 function showAgents(tab) {
-  setRulesTab(tab === 'rules');
-  if (tab !== 'rules') view.tab = tab;
+  view.tab = tab;
   ctxRef?.refresh();
 }
 
@@ -687,7 +685,4 @@ function skeleton(ctx) {
       h('div', { class: 'wf-sec-bar' }, composerEl(boxes.main, false))));
 }
 
-// 会話と「決めたこと」の2つのタブで包む(secretary-rules.js)。
-const renderRules = (ctx) => h('div', { class: 'wf-sec' }, h('div', { class: 'wf-sec-main' }, ctx.banner(), agentTabs('rules', showAgents), rulesPanel(ctx)));
-
-export default { load, render: (data, ctx) => (rulesOn() ? renderRules(ctx) : render(data, ctx)), skeleton };
+export default { load, render, skeleton };

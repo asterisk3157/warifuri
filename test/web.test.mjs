@@ -626,7 +626,7 @@ test('ナレッジ: the profiles with their counts, one profile\'s files, and a 
   assert.equal((await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('../profile.yaml')}`)).status, 404);
 });
 
-test('決めたこと: the rules, places, week and people are read together and changed on the spot', async (t) => {
+test('秘書のナレッジ: the rules, places, week and people are read together and changed on the spot', async (t) => {
   const { base, ledger } = await start(t);
   const post = (p, body, headers = {}, method = 'POST') =>
     fetch(`${base}/web/api${p}`, { method, headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });

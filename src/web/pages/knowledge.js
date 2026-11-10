@@ -1,18 +1,25 @@
 // ナレッジ: each profile's people (one entry per person, from the ledger), knowledge and inbox,
 // and the files split out of them. It only shows: changes go through the agents (note,
-// person), as everything else on these screens.
+// person), as everything else on these screens. The 秘書 entry at the top of the list is the
+// secretary's own: the rules, places and week she keeps (they can be changed on the spot, in
+// knowledge-secretary.js) and the people of every profile in one table.
 
 import { h, skel, profileChip } from '../ui.js';
 import { renderMarkdown } from '../md.js';
+import { secretaryCards } from './knowledge-secretary.js';
 
+const SECRETARY = '\u0000secretary';
 const view = { profile: null, open: null, file: null, person: null };
 
 async function load(api) {
   const list = await api('/knowledge');
-  if (view.profile === null || !list.profiles.some((p) => p.name === view.profile)) {
-    view.profile = (list.profiles.find((p) => p.people + p.knowledge + p.inbox + p.files > 0) ?? list.profiles[0])?.name ?? null;
+  if (view.profile !== SECRETARY && !list.profiles.some((p) => p.name === view.profile)) {
+    view.profile = (list.profiles.find((p) => p.people + p.knowledge + p.inbox + p.files > 0) ?? list.profiles[0])?.name ?? SECRETARY;
   }
-  const one = view.profile === null ? null : await api(`/knowledge/${encodeURIComponent(view.profile)}`);
+  if (view.profile === SECRETARY) {
+    return { list, one: null, file: null, rules: await api('/rules') };
+  }
+  const one = await api(`/knowledge/${encodeURIComponent(view.profile)}`);
   const file = one && view.open ? await api(`/knowledge/${encodeURIComponent(view.profile)}?name=${encodeURIComponent(view.open)}`).catch(() => null) : null;
   return { list, one, file };
 }
@@ -31,6 +38,13 @@ function notes(text) {
   return h('ul', { class: 'wf-know-notes' }, ...parsed.reverse().map((m) => h('li', {},
     h('span', { class: 'wf-know-text', text: m[5] }),
     h('span', { class: 'wf-know-meta', text: [`${Number(m[2])}/${Number(m[3])}`, m[4] ? WHO[m[4]] : null].filter(Boolean).join(' · ') }))));
+}
+
+function secretaryButton(ctx) {
+  return h('button', {
+    type: 'button', class: 'wf-goal-btn wf-know-secretary', 'aria-pressed': String(view.profile === SECRETARY), data: { key: 'profile-secretary' },
+    onclick: () => { view.profile = SECRETARY; view.open = null; view.person = null; people.query = ''; people.affiliation = ''; ctx.refresh(); },
+  }, h('span', { class: 'wf-goal-top' }, h('b', { text: '秘書' })));
 }
 
 function profileButton(p, colors, ctx) {
@@ -96,19 +110,20 @@ function birthdayCell(b, now) {
 }
 
 function cell(p, key, now = new Date()) {
+  if (key === 'profiles') return (p.profiles ?? []).join('、');
   if (key === 'birthday') return birthdayCell(p.birthday, now);
   if (key.startsWith('item:')) return p.items.find((i) => i.label === key.slice(5))?.value ?? '';
   return p[key] ?? '';
 }
 
-function peopleTable(list, ctx) {
+function peopleTable(list, ctx, colors = null) {
   const filled = new Map();
   for (const p of list) for (const i of p.items) filled.set(i.label, (filled.get(i.label) ?? 0) + 1);
   const labels = [...filled].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0], 'ja')).map(([l]) => l);
-  const cols = [...FIXED, ...labels.map((l) => [`item:${l}`, l]), ['memos', 'メモ']];
+  const cols = [FIXED[0], ...(colors ? [['profiles', 'プロフィール']] : []), ...FIXED.slice(1), ...labels.map((l) => [`item:${l}`, l]), ['memos', 'メモ']];
   const q = people.query.trim().toLowerCase();
   let rows = list.filter((p) => (!people.affiliation || p.affiliation === people.affiliation) &&
-    (!q || [p.name, ...p.aliases, p.email, p.phone, p.affiliation, p.role, ...p.items.map((i) => i.value), ...p.memos.map((m) => m.text)]
+    (!q || [p.name, ...p.aliases, ...(p.profiles ?? []), p.email, p.phone, p.affiliation, p.role, ...p.items.map((i) => i.value), ...p.memos.map((m) => m.text)]
       .some((v) => v && v.toLowerCase().includes(q))));
   const key = (p) => (people.sort === 'memos' ? p.memos.length : people.sort === 'birthday' ? daysToBirthday(p.birthday, ctx.now) : cell(p, people.sort));
   rows = rows.slice().sort((a, b) => {
@@ -132,6 +147,11 @@ function peopleTable(list, ctx) {
         return h('th', { scope: 'row', class: 'wf-pcol-name' }, h('button', { type: 'button', class: 'wf-ptable-name', 'aria-expanded': String(open), data: { key: `person-${p.id}` }, onclick: toggle, text: p.name }));
       }
       if (k === 'memos') return h('td', { class: 'wf-pcol-memos', text: p.memos.length ? String(p.memos.length) : '—' });
+      if (k === 'profiles') {
+        return p.profiles?.length
+          ? h('td', { class: 'wf-pcol-profiles' }, ...p.profiles.map((n) => profileChip(n, colors, 13)))
+          : h('td', { class: 'wf-ptable-blank', text: '—' });
+      }
       const v = cell(p, k, ctx.now);
       return h('td', { class: v ? '' : 'wf-ptable-blank', title: v && v.length > 12 ? v : null, text: v || '—' });
     }));
@@ -150,7 +170,7 @@ function peopleTable(list, ctx) {
       }, h('option', { value: '', text: '所属: すべて', selected: people.affiliation === '' }),
       ...affiliations.map((a) => h('option', { value: a, text: a, selected: people.affiliation === a }))),
       h('span', { class: 'wf-ptable-count', text: `${rows.length} / ${list.length}人` })),
-    h('div', { class: 'wf-ptable-scroll', data: { scroll: `people-${view.profile}` } },
+    h('div', { class: 'wf-ptable-scroll', data: { scroll: `people-${view.profile === SECRETARY ? 'secretary' : view.profile}` } },
       h('table', { class: 'wf-ptable' }, h('thead', {}, head), h('tbody', {}, ...body))),
     rows.length ? null : h('div', { class: 'wf-know-empty', text: '当てはまる人はいません' }));
 }
@@ -170,13 +190,13 @@ function personDetail(p) {
     !byKind.length && !p.links?.length ? h('div', { class: 'wf-know-empty', text: 'メモはまだありません' }) : null);
 }
 
-function peopleSection(one, ctx) {
+function peopleSection(one, ctx, colors = null) {
   const list = one.people?.people ?? [];
   const waiting = one.people?.unassigned ?? [];
   const old = one.people_md?.text?.trim() ? one.people_md : null;
   return h('section', { class: 'wf-know-sec' },
     h('div', { class: 'wf-group-head' }, h('h2', { text: '人' })),
-    list.length ? peopleTable(list, ctx) : h('div', { class: 'wf-know-empty', text: 'まだいません' }),
+    list.length ? peopleTable(list, ctx, colors) : h('div', { class: 'wf-know-empty', text: 'まだいません' }),
     waiting.length ? h('div', { class: 'wf-know-sub' },
       h('h3', { text: 'だれのことか、まだ決まっていないメモ' }), memoList(waiting)) : null,
     old ? h('div', { class: 'wf-know-sub' },
@@ -196,17 +216,13 @@ function filesSection(one, file, ctx) {
 }
 
 function render(data, ctx) {
-  const { list, one, file } = data;
+  const { list, one, file, rules } = data;
   const header = ctx.head('ナレッジ');
-  if (!list.profiles.length) {
-    return h('div', { class: 'wf-page-tasks' }, header, ctx.banner(),
-      h('div', { class: 'wf-surface wf-big-empty', text: 'まだナレッジがありません。エージェントに覚えておいてほしいことを伝えると、ここに表示されます' }));
-  }
   const left = h('section', { class: 'wf-goals', 'aria-label': 'プロフィール', data: { scroll: 'profiles' } },
-    h('h2', { text: 'プロフィール' }), ...list.profiles.map((p) => profileButton(p, list.colors, ctx)));
-  const right = one ? [peopleSection(one, ctx), section('ナレッジ', one.knowledge), section('受信箱', one.inbox), filesSection(one, file, ctx)] : [];
+    secretaryButton(ctx), h('h2', { text: 'プロフィール' }), ...list.profiles.map((p) => profileButton(p, list.colors, ctx)));
+  const right = rules ? [secretaryCards(ctx, rules), peopleSection({ people: { people: rules.people.people } }, ctx, list.colors)] : one ? [peopleSection(one, ctx), section('ナレッジ', one.knowledge), section('受信箱', one.inbox), filesSection(one, file, ctx)] : [];
   return h('div', { class: 'wf-page-tasks' }, header, ctx.banner(),
-    h('div', { class: 'wf-tasks-body' }, left, h('section', { class: 'wf-tasklist', 'aria-label': 'ナレッジ', data: { scroll: `know-${view.profile}` } }, ...right)));
+    h('div', { class: 'wf-tasks-body' }, left, h('section', { class: 'wf-tasklist', 'aria-label': 'ナレッジ', data: { scroll: `know-${view.profile === SECRETARY ? 'secretary' : view.profile}` } }, ...right)));
 }
 
 function skeleton(ctx) {

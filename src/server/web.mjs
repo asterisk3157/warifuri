@@ -375,7 +375,7 @@ export function createWeb({
   const smallJson = express.json({ limit: '8kb', strict: true });
   // A message may be MESSAGE_MAX characters of three bytes each.
   const messageJson = express.json({ limit: '32kb', strict: true });
-  // The settings of 決めたこと: up to 50 rules of 200 characters, and the places and the week.
+  // The settings of the 秘書 of the knowledge screen: up to 50 rules of 200 characters, and the places and the week.
   const rulesJson = express.json({ limit: '96kb', strict: true });
 
   // The one-time login. The page reads the token after the #, posts it here and goes on to the
@@ -916,8 +916,8 @@ export function createWeb({
     return undefined;
   });
 
-  // 決めたこと (the secretary screen): the life rules, the places, the week's slots and the
-  // people, to read in one go and to change on the spot. The settings go through writeSettings
+  // The 秘書 of the knowledge screen: the life rules, the places, the week's slots and the
+  // people of every profile (each as get reads it), to read in one go and to change on the spot. The settings go through writeSettings
   // (limits are not here: they are the person's to decide with the secretary); a place keeps
   // any field it has beyond name and note as it was read.
   const rulesOut = () => {
@@ -929,7 +929,7 @@ export function createWeb({
       places: { places: places.places, travel: places.travel },
       week: { slots: week.slots },
       profiles: profileNames(),
-      people: { count: list.count, more: list.more, people: list.people },
+      people: { count: list.count, more: list.more, people: list.people.map((p) => ledger.people.get(p.id, { all: true })) },
     };
   };
   const WEB = { actor: 'web', device: null };
