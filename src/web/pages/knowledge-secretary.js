@@ -124,7 +124,7 @@ function lifeCard(ctx) {
     const key = `life-edit-${i}`;
     if (state.editing.has(key)) {
       const save = () => put(rules.map((r, n) => (n === i ? input.value.trim() : r)), 'life-edit-');
-      const input = field(key, text, { maxlength: 200, 'aria-label': '生活の決まり', onkeydown: enter(save) });
+      const input = field(key, text, { maxlength: 200, 'aria-label': '生活リズム', onkeydown: enter(save) });
       return editRow([input], [
         btn('保存', save, 'wf-rl-main'),
         btn('キャンセル', closeEdit(ctx, key)),
@@ -133,7 +133,7 @@ function lifeCard(ctx) {
     }
     return row([h('span', { text })], openEdit(ctx, key));
   });
-  const add = field('life-new', '', { maxlength: 200, placeholder: '例: 平日は 0:00 から 7:00 まで寝る', 'aria-label': '生活の決まり', onkeydown: enter(addRule) });
+  const add = field('life-new', '', { maxlength: 200, placeholder: '例: 平日は 0:00 から 7:00 まで寝る', 'aria-label': '生活リズム', onkeydown: enter(addRule) });
   function addRule() {
     const v = add.value.trim();
     if (v) put([...rules, v], 'life-new');

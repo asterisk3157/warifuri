@@ -17,7 +17,7 @@
 // can be marked 未確認, a guess not yet checked with the person (people.unverified,
 // person_items.unverified, a memo's mark). A column is written as a checked value unless the
 // writer says unverified: true; writing it again clears or sets the mark, so what the person
-// said replaces a guess. confirm turns a guess into a checked value (ok) or removes it.
+// said replaces a guess. edit writes a value changed on the screen as the person's words.
 //
 // People can be forgotten for good: forget deletes the rows (the database runs with
 // secure_delete, and the write-ahead log is emptied afterwards). So the ledger's records of
@@ -740,60 +740,82 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return out;
   }
 
-  // The person's answer to a guess: target { field } (a fixed one), { item: { label, profile? } }
-  // (profile: for { all }) or { memo: id }, and ok. ok true: the value is right and becomes a
-  // checked value (the mark goes). ok false: it is wrong and is removed (a field is cleared,
-  // an item or memo deleted, the log emptied as forget does). Only a value marked 未確認 can be
-  // answered. Returns the person.
-  function confirm(id, { field, item, memo, ok }, scope, opts) {
+  // A value changed on the screen, in the person's own words: target { field } (a fixed one, or
+  // profiles: the names joined by 、), { item: { label, profile? } } (profile: for { all }) or
+  // { memo: id }, and value, the new text. It becomes a checked value: a guess loses its mark,
+  // a memo is marked 本人の言葉. An empty value removes it (a field is cleared, an item or memo
+  // deleted, the log emptied as forget does); the name and the last profile cannot go. The
+  // records say what was changed, never the value. Returns the person.
+  function edit(id, { field, item, memo, value }, scope, opts) {
     const w = requireWriter(opts);
     const row = personRow(id, scope);
     const named = [field, item, memo].filter((v) => v !== undefined && v !== null).length;
-    if (named !== 1) fail(['確かめるものを1つ(field、item、memo のどれか)渡します']);
-    if (typeof ok !== 'boolean') fail(['ok は true(合っている)か false(違う)です']);
+    if (named !== 1) fail(['直すものを1つ(field、item、memo のどれか)渡します']);
+    if (typeof value !== 'string') fail(['value は文字列です(空にすると消す)']);
+    const v = value.trim();
     let changes;
-    let removed = false;
-    transaction(() => {
-      if (field !== undefined && field !== null) {
-        if (!UNVERIFIABLE.includes(field)) fail([`${field} は確かめる列ではありません`]);
-        const guesses = unverifiedOf(row);
-        if (!guesses.includes(field)) fail([`${field} は未確認ではありません`]);
-        const rest = JSON.stringify(guesses.filter((f) => f !== field));
-        if (ok) db.prepare('UPDATE people SET unverified = ?, updated_at = ? WHERE id = ?').run(rest, nowIso(), row.id);
-        else {
-          db.prepare(`UPDATE people SET ${field} = ?, unverified = ?, updated_at = ? WHERE id = ?`).run(field === 'aliases' ? '[]' : null, rest, nowIso(), row.id);
-          removed = true;
-        }
-        changes = { field, ok };
-      } else if (item !== undefined && item !== null) {
-        if (typeof item?.label !== 'string') fail(['item は { label, profile? } です']);
-        const p = scope.all === true ? item.profile : scope.profile;
-        if (typeof p !== 'string' || p === '') fail(['item の profile を渡します']);
-        const it = one('SELECT * FROM person_items WHERE person_id = ? AND profile = ? AND label = ?', row.id, p, item.label);
-        if (!it) fail([`「${item.label}」という列は、この人にありません`]);
-        if (!it.unverified) fail([`「${item.label}」は未確認ではありません`]);
-        if (ok) db.prepare('UPDATE person_items SET unverified = 0, updated_at = ? WHERE person_id = ? AND profile = ? AND label = ?').run(nowIso(), row.id, p, item.label);
-        else {
-          db.prepare('DELETE FROM person_items WHERE person_id = ? AND profile = ? AND label = ?').run(row.id, p, item.label);
-          removed = true;
-        }
-        db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
-        changes = { item: item.label, profile: p, ok };
-      } else {
-        const found = memosNamed([memo], scope, 'memo', { personId: row.id });
-        if (found.problems.length) fail(found.problems);
-        const [f] = found.rows;
-        if (f.mark !== '未確認') fail([`メモ ${f.id} は未確認ではありません`]);
-        if (ok) db.prepare('UPDATE person_memos SET mark = NULL WHERE id = ?').run(f.id);
-        else {
-          db.prepare('DELETE FROM person_memos WHERE id = ?').run(f.id);
-          removed = true;
-        }
-        db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
-        changes = { memo: f.id, ok };
+    const removed = v === '';
+    if (field !== undefined && field !== null) {
+      if (field === 'profiles') {
+        const list = [...new Set(v.split(/[、,，]/u).map((x) => x.trim()).filter(Boolean))];
+        if (list.length === 0) fail(['どのプロフィールにも入らない人は持てません。消すなら forget を使います']);
+        const before = profilesOf(row.id);
+        const add = list.filter((x) => !before.includes(x));
+        const drop = before.filter((x) => !list.includes(x));
+        if (!add.length && !drop.length) return view(row, scope);
+        update(row.id, { ...(add.length ? { add_profiles: add } : {}), ...(drop.length ? { remove_profiles: drop } : {}) }, scope, opts);
+        return view(one('SELECT * FROM people WHERE id = ?', row.id), scope);
       }
-      recordPerson(w, row.id, 'confirm', changes);
-    });
+      if (!FIELDS.includes(field)) fail([`${field} は直せる列ではありません`]);
+      if (field === 'name' && removed) fail(['名前は空にできません']);
+      let given = v || null;
+      if (field === 'aliases') given = v ? v.split(/[、,，]/u) : null;
+      if (field === 'birthday' && v) {
+        const m = /^(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日?$/u.exec(v);
+        if (m) given = `${m[1] ? `${m[1]}-` : ''}${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+      }
+      const { values, problems } = cleanFields({ [field]: given }, { creating: false });
+      if (problems.length) fail(problems);
+      transaction(() => {
+        const rest = JSON.stringify(unverifiedOf(row).filter((f) => f !== field));
+        const out = field === 'aliases' ? JSON.stringify(values.aliases) : values[field];
+        db.prepare(`UPDATE people SET ${field} = ?, unverified = ?, updated_at = ? WHERE id = ?`).run(out, rest, nowIso(), row.id);
+        changes = { field };
+        recordPerson(w, row.id, 'edit', { ...changes, ...(removed ? { removed: true } : {}) });
+      });
+    } else if (item !== undefined && item !== null) {
+      if (typeof item?.label !== 'string') fail(['item は { label, profile? } です']);
+      const p = scope.all === true ? item.profile : scope.profile;
+      if (typeof p !== 'string' || p === '') fail(['item の profile を渡します']);
+      const it = one('SELECT * FROM person_items WHERE person_id = ? AND profile = ? AND label = ?', row.id, p, item.label);
+      if (!it) fail([`「${item.label}」という列は、この人にありません`]);
+      if (!removed) {
+        const checked = cleanItems({ [item.label]: v });
+        if (checked.problems.length) fail(checked.problems);
+      }
+      transaction(() => {
+        if (removed) db.prepare('DELETE FROM person_items WHERE person_id = ? AND profile = ? AND label = ?').run(row.id, p, item.label);
+        else db.prepare('UPDATE person_items SET value = ?, unverified = 0, updated_at = ? WHERE person_id = ? AND profile = ? AND label = ?').run(v, nowIso(), row.id, p, item.label);
+        db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
+        changes = { item: item.label, profile: p };
+        recordPerson(w, row.id, 'edit', { ...changes, ...(removed ? { removed: true } : {}) });
+      });
+    } else {
+      const found = memosNamed([memo], scope, 'memo', { personId: row.id });
+      if (found.problems.length) fail(found.problems);
+      const [f] = found.rows;
+      if (!removed) {
+        const problems = checkMemoText(v);
+        if (problems.length) fail(problems);
+      }
+      transaction(() => {
+        if (removed) db.prepare('DELETE FROM person_memos WHERE id = ?').run(f.id);
+        else db.prepare("UPDATE person_memos SET text = ?, mark = '本人の言葉' WHERE id = ?").run(v.replace(/\r\n?/g, '\n'), f.id);
+        db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
+        changes = { memo: f.id };
+        recordPerson(w, row.id, 'edit', { ...changes, ...(removed ? { removed: true } : {}) });
+      });
+    }
     if (removed) {
       try {
         db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -815,5 +837,5 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return all('SELECT person_id FROM person_links WHERE kind = ? AND target_id = ? ORDER BY created_at, person_id', kind, id).map((r) => r.person_id);
   }
 
-  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, confirm, counts, linked };
+  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, edit, counts, linked };
 }

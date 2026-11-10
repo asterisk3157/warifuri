@@ -673,7 +673,7 @@ export function createChat(ledger, cfg, ctx = {}) {
     // its words) or throws a LedgerError (the secretary off, a refused text, a run that failed
     // or took longer than waitMs).
     async tell(rawText, { person: personId = null, waitMs = TELL_WAIT_MS } = {}) {
-      if (!on) throw new LedgerError(['秘書が止まっているので登録できません']);
+      if (!on) throw new LedgerError(['秘書が停止しているため、登録できません']);
       const text = typeof rawText === 'string' ? rawText.trim() : '';
       if (!text) throw new LedgerError(['教えることを書きます']);
       if (charLength(text) > TELL_MAX) throw new LedgerError([`教えることは${TELL_MAX}字までです`]);

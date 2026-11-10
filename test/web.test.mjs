@@ -696,7 +696,7 @@ test('秘書のナレッジ: the rules, places, week and people are read togethe
 });
 
 
-test('人の確かめと教える: 合っている and 違う answer a guess; tell wakes the secretary once and says what it wrote', async (t) => {
+test('人を直すと教える: a value changed on the screen replaces a guess; tell wakes the secretary once and says what it wrote', async (t) => {
   const told = [];
   let answer = () => ({ text: '担当に「装置の予約」を足しました。' });
   const chat = { on: true, status: () => ({ on: true, replying: false, waiting: 0 }), tell: async (text, opts) => { told.push([text, opts.person]); return answer(); } };
@@ -708,17 +708,20 @@ test('人の確かめと教える: 合っている and 違う answer a guess; te
   const first = await read();
   assert.deepEqual([first.unverified, first.items[0].unverified, first.memos[0].mark], [['role'], true, '未確認']);
 
-  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true }, { Origin: 'https://evil.example' })).status, 403);
-  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true, extra: 1 })).status, 400);
-  const ok = await post(`/people/${p.id}/confirm`, { field: 'role', ok: true });
+  assert.equal((await post(`/people/${p.id}/edit`, { field: 'role', value: '部長' }, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await post(`/people/${p.id}/edit`, { field: 'role', value: '部長', extra: 1 })).status, 400);
+  assert.equal((await post(`/people/${p.id}/edit`, { field: 'role' })).status, 400);
+  const ok = await post(`/people/${p.id}/edit`, { field: 'role', value: '部長' });
   assert.equal(ok.status, 200);
-  assert.deepEqual((await ok.json()).people.people.find((x) => x.id === p.id).unverified, []);
-  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true })).status, 400);
-  assert.equal((await post(`/people/${p.id}/confirm`, { item: { label: '好きなもの', profile: 'research' }, ok: false })).status, 200);
-  assert.equal((await post(`/people/${p.id}/confirm`, { memo: first.memos[0].id, ok: true })).status, 200);
+  const changed = (await ok.json()).people.people.find((x) => x.id === p.id);
+  assert.deepEqual([changed.role, changed.unverified], ['部長', []]);
+  assert.equal((await post(`/people/${p.id}/edit`, { item: { label: '好きなもの', profile: 'research' }, value: '' })).status, 200);
+  assert.equal((await post(`/people/${p.id}/edit`, { memo: first.memos[0].id, value: '火曜は授業' })).status, 200);
+  assert.equal((await post(`/people/${p.id}/edit`, { field: 'name', value: '' })).status, 400);
   const after = await read();
-  assert.deepEqual([after.role, after.items, after.memos[0].mark], ['先輩', [], null]);
-  assert.equal(ledger.records(p.id).filter((r) => r.action === 'confirm').every((r) => r.actor === 'web'), true);
+  assert.deepEqual([after.items, after.memos[0].text, after.memos[0].mark], [[], '火曜は授業', '本人の言葉']);
+  assert.equal(ledger.records(p.id).filter((r) => r.action === 'edit').every((r) => r.actor === 'web'), true);
+  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true })).status, 404);
 
   // tell: the words go to the secretary; what it said comes back with the people.
   assert.equal((await post('/people/tell', { text: 1 })).status, 400);
@@ -744,6 +747,6 @@ test('教える with the secretary off: refused with words to show', async (t) =
   const p = ledger.people.create({ name: '冬木さん', profiles: ['research'] }, { all: true }, ACTOR);
   const res = await fetch(`${base}/web/api/people/tell`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ text: '冬木さんは会計をしている', person: p.id }) });
   assert.equal(res.status, 409);
-  assert.deepEqual((await res.json()).problems, ['秘書が止まっているので登録できません']);
+  assert.deepEqual((await res.json()).problems, ['秘書が停止しているため、登録できません']);
   assert.equal((await (await get(base, '/web/api/rules')).json()).secretary, false);
 });

@@ -362,7 +362,7 @@ test('schema 16: a version 15 file keeps its people as checked values and can ma
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('未確認: a guess is marked, the person\'s words replace it, and confirm keeps or removes it', () => {
+test('未確認: a guess is marked, the person\'s words replace it, and edit writes or removes it', () => {
   const ledger = openLedger(':memory:');
   const guess = ledger.people.create({ name: '冬木さん', role: '会計', email: 'f@example.com', items: { 好きなもの: '紅茶' }, unverified: true }, CLUB, W);
   assert.deepEqual(guess.unverified, ['email', 'role']);
@@ -377,37 +377,44 @@ test('未確認: a guess is marked, the person\'s words replace it, and confirm 
   p = ledger.people.update(guess.id, { phone: null, unverified: true }, CLUB, W);
   assert.deepEqual(p.unverified, ['email']);
 
-  // 合っている: the mark goes. 違う: the value goes.
-  p = ledger.people.confirm(guess.id, { field: 'email', ok: true }, CLUB, W);
-  assert.deepEqual([p.email, p.unverified], ['f@example.com', []]);
-  assert.throws(() => ledger.people.confirm(guess.id, { field: 'email', ok: true }, CLUB, W), /未確認ではありません/);
+  // Changed on the screen: the person's words replace the guess. Empty removes it.
+  p = ledger.people.edit(guess.id, { field: 'email', value: 'fuyu@example.com' }, CLUB, W);
+  assert.deepEqual([p.email, p.unverified], ['fuyu@example.com', []]);
   ledger.people.update(guess.id, { affiliation: '経済学部', items: { 得意なこと: '計算' }, add_memos: [{ text: '火曜はいないらしい', mark: '未確認' }, { text: '本人から聞いた', mark: '本人の言葉' }], unverified: true }, CLUB, W);
-  p = ledger.people.confirm(guess.id, { field: 'affiliation', ok: false }, CLUB, W);
+  p = ledger.people.edit(guess.id, { field: 'affiliation', value: '  ' }, CLUB, W);
   assert.deepEqual([p.affiliation, p.unverified], [null, []]);
-  p = ledger.people.confirm(guess.id, { item: { label: '得意なこと' }, ok: true }, CLUB, W);
-  assert.equal(p.items.find((i) => i.label === '得意なこと').unverified, undefined);
-  ledger.people.update(guess.id, { items: { 苦手なもの: '朝' }, unverified: true }, CLUB, W);
-  p = ledger.people.confirm(guess.id, { item: { label: '苦手なもの' }, ok: false }, CLUB, W);
-  assert.equal(p.items.some((i) => i.label === '苦手なもの'), false);
+  p = ledger.people.edit(guess.id, { field: 'aliases', value: 'ふゆ、ふゆきち' }, CLUB, W);
+  assert.deepEqual(p.aliases, ['ふゆ', 'ふゆきち']);
+  p = ledger.people.edit(guess.id, { field: 'birthday', value: '3月5日' }, CLUB, W);
+  assert.equal(p.birthday, '03-05');
+  p = ledger.people.edit(guess.id, { item: { label: '得意なこと' }, value: '暗算' }, CLUB, W);
+  assert.deepEqual(p.items.find((i) => i.label === '得意なこと'), { label: '得意なこと', value: '暗算' });
+  p = ledger.people.edit(guess.id, { item: { label: '得意なこと' }, value: '' }, CLUB, W);
+  assert.equal(p.items.some((i) => i.label === '得意なこと'), false);
   const [maybe, said] = p.memos;
-  assert.throws(() => ledger.people.confirm(guess.id, { memo: said.id, ok: true }, CLUB, W), /未確認ではありません/);
-  p = ledger.people.confirm(guess.id, { memo: maybe.id, ok: false }, CLUB, W);
-  assert.deepEqual(p.memos.map((m) => m.text), ['本人から聞いた']);
-  const kept = ledger.people.update(guess.id, { add_memos: [{ text: 'PDF が好き', mark: '未確認' }] }, CLUB, W).memos.at(-1);
-  p = ledger.people.confirm(guess.id, { memo: kept.id, ok: true }, CLUB, W);
-  assert.equal(p.memos.at(-1).mark, null);
+  p = ledger.people.edit(guess.id, { memo: maybe.id, value: '火曜は授業で来ない' }, CLUB, W);
+  assert.deepEqual([p.memos[0].text, p.memos[0].mark], ['火曜は授業で来ない', '本人の言葉']);
+  p = ledger.people.edit(guess.id, { memo: said.id, value: '' }, CLUB, W);
+  assert.deepEqual(p.memos.map((m) => m.text), ['火曜は授業で来ない']);
+  ledger.people.update(guess.id, { add_profiles: ['研究'] }, ALL, W);
+  p = ledger.people.edit(guess.id, { field: 'profiles', value: 'サークル' }, ALL, W);
+  assert.deepEqual(p.profiles, ['サークル']);
 
-  // One thing at a time, a real answer, and only in the scope.
-  assert.throws(() => ledger.people.confirm(guess.id, { ok: true }, CLUB, W), /1つ/);
-  assert.throws(() => ledger.people.confirm(guess.id, { field: 'role', memo: 1, ok: true }, CLUB, W), /1つ/);
-  assert.throws(() => ledger.people.confirm(guess.id, { field: 'name', ok: true }, CLUB, W), /確かめる列ではありません/);
-  assert.throws(() => ledger.people.confirm(guess.id, { field: 'role' }, CLUB, W), /ok は true/);
-  assert.throws(() => ledger.people.confirm(guess.id, { field: 'role', ok: true }, LAB, W), /いません/);
-  assert.throws(() => ledger.people.confirm(guess.id, { item: { label: '好きなもの' }, ok: true }, ALL, W), /profile/);
-  // The records say what was answered, never the value.
-  const recs = ledger.records(guess.id).filter((r) => r.action === 'confirm');
-  assert.equal(recs.length, 6);
-  assert.equal(JSON.stringify(recs).includes('経済学部'), false);
+  // One thing at a time, a text value, and only in the scope; the name and the last profile stay.
+  assert.throws(() => ledger.people.edit(guess.id, { value: 'x' }, CLUB, W), /1つ/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'role', memo: 1, value: 'x' }, CLUB, W), /1つ/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'role' }, CLUB, W), /value は文字列/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'name', value: '' }, CLUB, W), /名前は空/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'profiles', value: '' }, ALL, W), /プロフィール/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'secret', value: 'x' }, CLUB, W), /直せる列ではありません/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'email', value: 'x' }, CLUB, W), /メールアドレス/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'role', value: 'x' }, LAB, W), /いません/);
+  assert.throws(() => ledger.people.edit(guess.id, { item: { label: '好きなもの' }, value: 'x' }, ALL, W), /profile/);
+  // The records say what was changed, never the value.
+  const recs = ledger.records(guess.id).filter((r) => r.action === 'edit');
+  assert.equal(recs.length, 8);
+  assert.equal(JSON.stringify(recs).includes('暗算'), false);
+  assert.equal(recs.filter((r) => JSON.stringify(r).includes('removed')).length, 3);
   ledger.close();
 });
 

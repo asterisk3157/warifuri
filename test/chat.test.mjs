@@ -416,7 +416,7 @@ test('tell: one at a time, a limit on the wait, and refused with the secretary o
 
   const off = world(t, { on: false });
   const q = off.ledger.people.create({ name: '春野さん', profiles: ['研究'] }, { all: true }, WEB);
-  await assert.rejects(off.chat.tell('x', { person: q.id }), /秘書が止まっているので登録できません/);
+  await assert.rejects(off.chat.tell('x', { person: q.id }), /秘書が停止しているため、登録できません/);
   assert.equal(off.claude.calls.length, 0);
 });
 

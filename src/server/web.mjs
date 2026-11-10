@@ -968,15 +968,16 @@ export function createWeb({
       refused(res, err);
     }
   });
-  // The person's answer to a guess (未確認) about someone: { field } (a fixed column), { item:
-  // { label, profile } } or { memo: id }, and ok (true: 合っている, false: 違う).
-  api.post('/people/:id/confirm', sameOrigin, smallJson, (req, res) => {
-    if (!exact(req.body, ['field', 'item', 'memo', 'ok'])) {
-      res.status(400).json({ error: 'refused', problems: ['送る形は { "field" か "item" か "memo", "ok": true か false } です'] });
+  // A value changed on the screen: { field } (a fixed column, or profiles), { item: { label,
+  // profile } } or { memo: id }, and value. It is written as the person's words (a guess loses
+  // its mark); an empty value removes it.
+  api.post('/people/:id/edit', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, ['field', 'item', 'memo', 'value']) || typeof req.body?.value !== 'string') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "field" か "item" か "memo", "value": "…" } です'] });
       return;
     }
     try {
-      ledger.people.confirm(req.params.id, req.body, { all: true }, WEB);
+      ledger.people.edit(req.params.id, req.body, { all: true }, WEB);
       res.json(rulesOut());
     } catch (err) {
       refused(res, err);
@@ -993,7 +994,7 @@ export function createWeb({
       return;
     }
     if (!chat?.on || typeof chat.tell !== 'function') {
-      res.status(409).json({ error: 'secretary off', problems: ['秘書が止まっているので登録できません'] });
+      res.status(409).json({ error: 'secretary off', problems: ['秘書が停止しているため、登録できません'] });
       return;
     }
     try {
