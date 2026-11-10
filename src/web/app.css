@@ -806,7 +806,6 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-voice { display: flex; align-items: center; gap: 6px; flex: none; }
 .wf-voice-meter { display: flex; align-items: center; gap: 3px; height: 22px; padding: 0 2px; }
 .wf-voice-bar { width: 3px; height: 100%; border-radius: 2px; background: var(--red); transform: scaleY(.15); transform-origin: center; transition: transform .08s linear; }
-.wf-voice-load { font-size: 12px; color: var(--sub); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wf-composer2.wf-busy .wf-mic { pointer-events: none; opacity: .5; }
 .wf-sec-tabs { display: flex; gap: 4px; margin: 10px 28px 0; border-bottom: 1px solid var(--hair); }
 .wf-sec-tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 12px; font: inherit; font-size: 14px; color: var(--sub); cursor: pointer; }

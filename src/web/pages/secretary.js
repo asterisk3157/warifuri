@@ -15,7 +15,7 @@
 import { h, s, skel } from '../ui.js';
 import { renderMarkdown } from '../md.js';
 import { rulesOn, setRulesTab, rulesPanel } from './secretary-rules.js';
-import { endVoice, micButton } from './secretary-voice.js';
+import { micButton, endVoice } from './secretary-voice.js';
 import { agentTabs, agentNotice, agentPane } from './secretary-agents.js';
 
 const POLL_MS = 2500;
@@ -166,8 +166,7 @@ async function upload(item) {
 
 // Sends what is in a box (with its files), or the words of a reply button.
 async function send(c, words) {
-  // Sending ends the voice input: the words heard until now go too, the half-heard ones as well.
-  if (words === undefined && !view.busy) await endVoice(c.input);
+  if (words === undefined) endVoice(c.input);
   const text = (words ?? c.input.value).trim();
   const files = words === undefined ? c.files : [];
   if ((!text && !files.length) || view.busy || !ctxRef) return;
