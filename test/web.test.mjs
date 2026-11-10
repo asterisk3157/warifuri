@@ -688,8 +688,3 @@ test('決めたこと: the rules, places, week and people are read together and 
   assert.equal((await post(`/people/${id}`, {}, {}, 'DELETE')).status, 400);
 });
 
-test('決めたこと: the button sends the sentence the secretary\'s chat.md answers', async () => {
-  const { DAY_FLOW_TEXT } = await import('../src/web/pages/secretary-rules.js');
-  const md = fs.readFileSync(new URL('../harness/secretary/chat.md', import.meta.url), 'utf8');
-  assert.ok(md.includes(`「${DAY_FLOW_TEXT}」`));
-});

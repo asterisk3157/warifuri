@@ -3,12 +3,9 @@
 // タブは secretary.js が描く。設定は POST /web/api/rules/settings、人は /web/api/people で書く。
 //
 // 書いている途中の欄は、画面を読み直しても同じ要素を使い回す(fields)ので、打った文字が消えない。
-// 「1日の流れを決める」は、決まった一文を本人の発言として秘書に送る。聞き方の手順は
-// harness/secretary/chat.md にある。
 
 import { h } from '../ui.js';
 
-export const DAY_FLOW_TEXT = '1日の流れを決めたいです。順に聞いてください';
 const REREAD_MS = 20_000;
 const DAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -317,34 +314,13 @@ function peopleCard(ctx) {
 
 // ---- 全体 ----
 
-async function startDayFlow(ctx) {
-  if (state.busy) return;
-  state.busy = true;
-  state.problems = [];
-  ctx.rerender();
-  try {
-    await ctx.api('/secretary/messages', { method: 'POST', body: { text: DAY_FLOW_TEXT } });
-    state.tab = 'chat';
-    state.busy = false;
-    await ctx.refresh();
-    return;
-  } catch (err) {
-    state.problems = err.body?.problems ?? ['送信できませんでした'];
-  }
-  state.busy = false;
-  ctx.rerender();
-}
-
 function panel(ctx) {
   if (!state.data || (Date.now() - state.at > REREAD_MS && !state.fetching && state.editing.size === 0 && !state.busy)) load(ctx);
   const problems = state.problems.length ? h('ul', { class: 'wf-errors', role: 'alert' }, ...state.problems.map((x) => h('li', { text: x }))) : null;
-  const flow = h('section', { class: 'wf-rl-flow', 'aria-label': '1日の流れ' },
-    h('div', {}, h('b', { text: '1日の流れ' }), h('p', { class: 'wf-rl-hint', text: '起きる時間や家にいる時間を、秘書が順に聞きます' })),
-    h('button', { type: 'button', class: 'wf-rl-start', disabled: state.busy, onclick: () => startDayFlow(ctx), text: '秘書と決める' }));
   const d = state.data;
   const nothing = d && !d.life.rules.length && !d.places.places.length && !d.week.slots.length && !d.people.people.length;
   const body = d
-    ? [h('p', { class: 'wf-rl-intro', text: '秘書に話すと、ここも書き換わります。項目を押すと直せます' }), flow, problems, nothing ? h('p', { class: 'wf-rl-hint', text: 'まだありません' }) : null, lifeCard(ctx), placesCard(ctx), weekCard(ctx), peopleCard(ctx)]
+    ? [problems, nothing ? h('p', { class: 'wf-rl-hint', text: 'まだありません' }) : null, lifeCard(ctx), placesCard(ctx), weekCard(ctx), peopleCard(ctx)]
     : [h('p', { class: 'wf-rl-hint', role: 'status', text: '読み込み中' })];
   return h('div', { class: 'wf-rules', data: { scroll: 'rules' } }, h('div', { class: 'wf-rules-in' }, ctx.banner(), ...body));
 }
