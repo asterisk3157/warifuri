@@ -3,10 +3,11 @@
 // profile, opened in place, with its 決まったこと (knowledge.md and knowledge/), 手順
 // (procedures/) and 未整理のメモ (inbox.md). On the right, the one chosen.
 //
-// 人 is one table of the people of every profile. A person opens in place: what is known (the
-// checked values), what is not checked yet (未確認, each answered with 合っている or 違う), and
-// a box to tell the secretary about them (POST /people/:id/tell: the secretary is woken once,
-// outside the conversation). The profile's files only show; changes go through the agents.
+// 人 is one table of the people of every profile. A person opens in place with everything
+// about them: what is known (the checked values) and what is not checked yet (未確認, each
+// answered with 合っている or 違う). Under the table, one box to tell the secretary about anyone,
+// one or many at once (POST /people/tell: the secretary is woken once, outside the
+// conversation). The profile's files only show; changes go through the agents.
 
 import { h, s, skel, profileColor } from '../ui.js';
 import { renderMarkdown } from '../md.js';
@@ -125,40 +126,49 @@ const sortKey = (p) => (people.sort === 'last' ? lastMemo(p) : people.sort === '
 
 const chips = (names) => h('span', { class: 'wf-kn-chips' }, ...(names ?? []).map((n) => h('span', { class: 'wf-kn-chip', text: n })));
 
-// Elements kept across redraws: what is being written in each 教える box.
-const tellBoxes = new Map();
-// The state of the 教える of each person: { busy, said, problem }.
-const telling = new Map();
+// The box under the people to tell the secretary about anyone, kept across redraws, and how
+// its last send went: { busy, said, problem }.
+let tellInput = null;
+const telling = { busy: false, said: null, problem: null };
 const confirming = { busy: false, problem: null };
 
-function tellBox(p) {
-  let el = tellBoxes.get(p.id);
-  if (!el) {
-    el = h('textarea', { id: `kn-tell-${p.id}`, class: 'wf-kn-tell-text', rows: '2', maxlength: '2000', data: { key: `tell-${p.id}` } });
-    tellBoxes.set(p.id, el);
-  }
-  return el;
-}
-
-const callName = (name) => (/(さん|先生|様|さま|くん|君|ちゃん|氏)$/.test(name) ? name : `${name}さん`);
-
-async function tell(ctx, p) {
-  const box = tellBoxes.get(p.id);
-  const text = box?.value.trim() ?? '';
-  if (!text || telling.get(p.id)?.busy) return;
-  telling.set(p.id, { busy: true });
+async function tell(ctx) {
+  const text = tellInput?.value.trim() ?? '';
+  if (!text || telling.busy) return;
+  Object.assign(telling, { busy: true, said: null, problem: null });
   ctx.rerender();
   try {
-    const out = await ctx.api(`/people/${encodeURIComponent(p.id)}/tell`, { method: 'POST', body: { text } });
-    telling.set(p.id, { said: out.said });
-    box.value = '';
+    const out = await ctx.api('/people/tell', { method: 'POST', body: { text, person: view.person } });
+    Object.assign(telling, { busy: false, said: out.said });
+    tellInput.value = '';
     ctx.refresh();
     return;
   } catch (err) {
-    telling.set(p.id, { problem: err.body?.problems?.join(' ') ?? '登録できませんでした' });
+    Object.assign(telling, { busy: false, problem: err.body?.problems?.join(' ') ?? '登録できませんでした' });
   }
   ctx.rerender();
 }
+
+function tellBar(ctx, rules) {
+  if (!tellInput) {
+    tellInput = h('input', {
+      type: 'text', id: 'kn-tell', class: 'wf-kn-tell-text', maxlength: '2000', data: { key: 'people-tell' },
+      onkeydown: (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); tell(ctx); } },
+    });
+  }
+  const open = rules.people.people.find((p) => p.id === view.person);
+  tellInput.placeholder = open ? `${callName(open.name)}のことや、ほかの人のことを書く` : '例: 春野さんは装置の予約も担当、冬木さんは金曜に来る';
+  tellInput.disabled = telling.busy;
+  return h('div', { class: 'wf-kn-chat' },
+    telling.busy ? h('div', { class: 'wf-kn-said', role: 'status', text: '登録しています' }) : null,
+    telling.said ? h('div', { class: 'wf-kn-said', role: 'status' }, h('span', { class: 'wf-kn-said-head', text: '秘書がこう登録しました' }), h('span', { class: 'wf-kn-said-text', text: telling.said })) : null,
+    telling.problem ? h('div', { class: 'wf-kn-said', role: 'alert' }, h('span', { class: 'wf-kn-problem', text: telling.problem })) : null,
+    h('label', { for: 'kn-tell', class: 'wf-kn-hidden', text: '人について教える' }),
+    h('div', { class: 'wf-kn-tell-row' }, tellInput,
+      h('button', { type: 'button', class: 'wf-kn-tell-btn', disabled: telling.busy, data: { key: 'people-tell-send' }, onclick: () => tell(ctx), text: '登録' })));
+}
+
+const callName = (name) => (/(さん|先生|様|さま|くん|君|ちゃん|氏)$/.test(name) ? name : `${name}さん`);
 
 async function confirm(ctx, p, target, ok) {
   if (confirming.busy) return;
@@ -174,47 +184,51 @@ async function confirm(ctx, p, target, ok) {
   ctx.refresh();
 }
 
-// What is known (checked values) and what is not checked yet, as [label, text, target] rows.
-function facts(p) {
-  const known = [];
-  const guesses = [];
+const KINDS = ['やりとり', '接し方', 'その他'];
+const LINK_WORDS = { goal: 'ゴール', task: 'タスク', booking: '予定' };
+const memoLine = (m, many) => [(() => {
+  const [, mo, d] = /^\d{4}-(\d{2})-(\d{2})$/.exec(m.learned_on) ?? [];
+  return mo ? `${Number(mo)}/${Number(d)}` : null;
+})(), many ? m.profile : null, m.source].filter(Boolean).join(' · ');
+
+// Everything about the person, split by how sure it is: the checked values (the columns, the
+// items of each profile, the memos by kind, the links, the profiles) and the guesses (未確認,
+// each answered with 合っている or 違う). Nothing empty is shown.
+function personDetail(p, ctx) {
   const guessed = new Set(p.unverified ?? []);
-  for (const f of ['aliases', 'affiliation', 'role', 'email', 'phone', 'birthday']) {
+  const many = (p.profiles ?? []).length > 1;
+  const known = [['名前', p.name]];
+  const guesses = [];
+  for (const f of ['aliases', 'email', 'phone', 'affiliation', 'role', 'birthday']) {
     const v = fieldText(p, f);
     if (!v) continue;
-    (guessed.has(f) ? guesses : known).push([LABELS[f], v, { field: f }]);
+    if (guessed.has(f)) guesses.push({ label: LABELS[f], text: v, target: { field: f } });
+    else known.push([LABELS[f], v]);
   }
-  for (const i of p.items) (i.unverified ? guesses : known).push([i.label, i.value, { item: { label: i.label, profile: i.profile } }]);
-  for (const m of p.memos) (m.mark === '未確認' ? guesses : known).push([m.kind, m.text, { memo: m.id }]);
-  return { known, guesses };
-}
-
-function personDetail(p, ctx) {
-  const { known, guesses } = facts(p);
-  const links = p.links?.length ? p.links.map((l) => `${{ goal: 'ゴール', task: 'タスク', booking: '予定' }[l.kind]}: ${l.title}`).join('、') : null;
+  if (p.profiles?.length) known.push(['プロフィール', chips(p.profiles)]);
+  for (const i of p.items) {
+    if (i.unverified) guesses.push({ label: i.label, text: i.value, meta: many ? i.profile : null, target: { item: { label: i.label, profile: i.profile } } });
+    else known.push([i.label, many ? [i.value, ' ', h('span', { class: 'wf-kn-chip', text: i.profile })] : i.value]);
+  }
+  for (const m of p.memos) if (m.mark === '未確認') guesses.push({ label: m.kind, text: m.text, meta: memoLine(m, many), target: { memo: m.id } });
+  const memoGroups = KINDS.map((k) => [k, p.memos.filter((m) => m.mark !== '未確認' && (m.kind ?? 'その他') === k)]).filter(([, l]) => l.length);
   const knownBox = h('section', { class: 'wf-kn-facts', 'aria-label': '分かっていること' }, h('h3', { text: '分かっていること' }),
-    known.length || links
-      ? h('dl', { class: 'wf-kn-dl' }, ...known.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })]), links ? [h('dt', { text: 'つながり' }), h('dd', { text: links })] : null)
-      : h('div', { class: 'wf-know-empty', text: 'まだありません' }));
+    h('dl', { class: 'wf-kn-dl' }, ...known.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', {}, v)])),
+    ...memoGroups.map(([k, list]) => h('div', { class: 'wf-kn-memos' }, h('h4', { text: k }),
+      h('ul', { class: 'wf-know-notes' }, ...list.map((m) => h('li', {},
+        h('span', { class: 'wf-know-text', text: m.text }),
+        h('span', { class: 'wf-know-meta', text: [memoLine(m, many), m.mark === '本人の言葉' ? 'ユーザーの言葉' : null].filter(Boolean).join(' · ') })))))),
+    p.links?.length ? h('div', { class: 'wf-kn-memos' }, h('h4', { text: 'つながり' }),
+      h('ul', { class: 'wf-know-links' }, ...p.links.map((l) => h('li', { text: `${LINK_WORDS[l.kind]}: ${l.title}` })))) : null);
   const guessBox = h('section', { class: 'wf-kn-facts', 'aria-label': 'まだ確かめていないこと' }, h('h3', { text: 'まだ確かめていないこと' }),
     guesses.length
-      ? h('div', { class: 'wf-kn-guesses' }, ...guesses.map(([k, v, target]) => h('div', { class: 'wf-kn-guess' },
-        h('span', { class: 'wf-kn-guess-text' }, target.memo === undefined ? `${k}: ` : null, v),
-        h('button', { type: 'button', class: 'wf-kn-small', disabled: confirming.busy, onclick: () => confirm(ctx, p, target, true), text: '合っている' }),
-        h('button', { type: 'button', class: 'wf-kn-small', disabled: confirming.busy, onclick: () => confirm(ctx, p, target, false), text: '違う' }))))
+      ? h('div', { class: 'wf-kn-guesses' }, ...guesses.map((g) => h('div', { class: 'wf-kn-guess' },
+        h('span', { class: 'wf-kn-guess-text' }, h('span', { class: 'wf-kn-guess-label', text: g.label }), h('span', { text: g.text }), g.meta ? h('span', { class: 'wf-know-meta', text: g.meta }) : null),
+        h('button', { type: 'button', class: 'wf-kn-small', disabled: confirming.busy, onclick: () => confirm(ctx, p, g.target, true), text: '合っている' }),
+        h('button', { type: 'button', class: 'wf-kn-small', disabled: confirming.busy, onclick: () => confirm(ctx, p, g.target, false), text: '違う' }))))
       : h('div', { class: 'wf-know-empty', text: 'ありません' }),
     confirming.problem ? h('p', { class: 'wf-kn-problem', role: 'alert', text: confirming.problem }) : null);
-  const state = telling.get(p.id) ?? {};
-  const box = tellBox(p);
-  box.disabled = Boolean(state.busy);
-  const tellArea = h('div', { class: 'wf-kn-tell' },
-    h('label', { for: box.id, class: 'wf-kn-tell-label', text: `${callName(p.name)}について教える` }),
-    h('div', { class: 'wf-kn-tell-row' }, box,
-      h('button', { type: 'button', class: 'wf-kn-tell-btn', disabled: Boolean(state.busy), data: { key: `tell-send-${p.id}` }, onclick: () => tell(ctx, p), text: '登録' })),
-    state.busy ? h('div', { class: 'wf-kn-said', role: 'status' }, h('span', { text: '登録しています' })) : null,
-    state.said ? h('div', { class: 'wf-kn-said', role: 'status' }, h('span', { class: 'wf-kn-said-head', text: '秘書がこう登録しました' }), h('span', { class: 'wf-kn-said-text', text: state.said })) : null,
-    state.problem ? h('div', { class: 'wf-kn-said', role: 'alert' }, h('span', { class: 'wf-kn-problem', text: state.problem })) : null);
-  return [h('div', { class: 'wf-kn-detail' }, knownBox, guessBox), tellArea];
+  return [h('div', { class: 'wf-kn-detail' }, knownBox, guessBox)];
 }
 
 function personRow(p, ctx, open) {
@@ -313,14 +327,18 @@ function profilePane(one, file, list, ctx) {
 
 function render(data, ctx) {
   const { list, rules, one, file } = data;
-  let right;
-  if (view.sel === 'people') right = peoplePane(rules, ctx);
-  else if (SETTINGS.includes(view.sel)) right = [settingsCard(ctx, rules, view.sel)];
-  else right = profilePane(one, file, list, ctx);
   const key = view.sel === 'profile' ? `${view.profile}-${view.part}` : view.sel;
+  let main;
+  if (view.sel === 'people') {
+    // The people scroll; the box to tell the secretary stays at the foot.
+    main = h('section', { class: 'wf-tasklist wf-kn-main wf-kn-split', 'aria-label': 'ナレッジ' },
+      h('div', { class: 'wf-kn-scroll', data: { scroll: `know-${key}` } }, ...peoplePane(rules, ctx)), tellBar(ctx, rules));
+  } else {
+    const right = SETTINGS.includes(view.sel) ? [settingsCard(ctx, rules, view.sel)] : profilePane(one, file, list, ctx);
+    main = h('section', { class: 'wf-tasklist wf-kn-main', 'aria-label': 'ナレッジ', data: { scroll: `know-${key}` } }, ...right);
+  }
   return h('div', { class: 'wf-page-tasks' }, ctx.head('ナレッジ'), ctx.banner(),
-    h('div', { class: 'wf-tasks-body' }, sideList(list, rules, ctx),
-      h('section', { class: 'wf-tasklist wf-kn-main', 'aria-label': 'ナレッジ', data: { scroll: `know-${key}` } }, ...right)));
+    h('div', { class: 'wf-tasks-body' }, sideList(list, rules, ctx), main));
 }
 
 function skeleton(ctx) {
@@ -332,6 +350,6 @@ function skeleton(ctx) {
 }
 
 // While a write is going, the screen is not read again under it.
-const busy = () => settingsBusy() || confirming.busy || [...telling.values()].some((t) => t.busy);
+const busy = () => settingsBusy() || confirming.busy || telling.busy;
 
 export default { load, render, skeleton, busy };

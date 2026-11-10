@@ -968,18 +968,6 @@ export function createWeb({
       refused(res, err);
     }
   });
-  api.post('/people/:id', sameOrigin, smallJson, (req, res) => {
-    if (!exact(req.body, PERSON_KEYS)) {
-      res.status(400).json({ error: 'refused', problems: ['直せるのは name、affiliation、role、aliases です'] });
-      return;
-    }
-    try {
-      ledger.people.update(req.params.id, req.body, { all: true }, WEB);
-      res.json(rulesOut());
-    } catch (err) {
-      refused(res, err);
-    }
-  });
   // The person's answer to a guess (未確認) about someone: { field } (a fixed column), { item:
   // { label, profile } } or { memo: id }, and ok (true: 合っている, false: 違う).
   api.post('/people/:id/confirm', sameOrigin, smallJson, (req, res) => {
@@ -994,11 +982,14 @@ export function createWeb({
       refused(res, err);
     }
   });
-  // 〇〇さんについて教える: { text }. The secretary is woken once, outside the conversation, and
-  // writes it about the person as checked values; said is what it changed, in its words.
-  api.post('/people/:id/tell', sameOrigin, smallJson, async (req, res) => {
-    if (!exact(req.body, ['text']) || typeof req.body.text !== 'string') {
-      res.status(400).json({ error: 'refused', problems: ['送る形は { "text": "…" } です'] });
+  // 人について教える: { text, person? }: what the person says about people, one or many
+  // (person: the id of the one opened on the screen). The secretary is woken once, outside the
+  // conversation, finds each by name and writes it as checked values; said is what it changed,
+  // in its words.
+  api.post('/people/tell', sameOrigin, smallJson, async (req, res) => {
+    const { text, person } = req.body ?? {};
+    if (!exact(req.body, ['text', 'person']) || typeof text !== 'string' || (person !== undefined && person !== null && typeof person !== 'string')) {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "text": "…", "person": "開いている人の id" } です'] });
       return;
     }
     if (!chat?.on || typeof chat.tell !== 'function') {
@@ -1006,8 +997,20 @@ export function createWeb({
       return;
     }
     try {
-      const out = await chat.tell(req.params.id, req.body.text);
+      const out = await chat.tell(text, { person: person ?? null });
       res.json({ said: out.text, ...rulesOut() });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  api.post('/people/:id', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, PERSON_KEYS)) {
+      res.status(400).json({ error: 'refused', problems: ['直せるのは name、affiliation、role、aliases です'] });
+      return;
+    }
+    try {
+      ledger.people.update(req.params.id, req.body, { all: true }, WEB);
+      res.json(rulesOut());
     } catch (err) {
       refused(res, err);
     }
