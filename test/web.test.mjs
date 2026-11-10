@@ -645,6 +645,13 @@ test('秘書のナレッジ: the rules, places, week and people are read togethe
   assert.equal((await post('/rules/settings', { limits: { day_max_hours: 3 } })).status, 400);
   assert.equal((await post('/rules/settings', { onboarding: { state: 'done' } })).status, 400);
 
+  // The GitHub owners to take in are read and changed here too.
+  assert.deepEqual(first.github, { owners: [], others: 'skip' });
+  const gh = await post('/rules/settings', { github: { owners: [{ name: 'example-org', read: true }], others: 'skip' } });
+  assert.equal(gh.status, 200);
+  assert.deepEqual((await gh.json()).github, { owners: [{ name: 'example-org', read: true }], others: 'skip' });
+  assert.equal((await post('/rules/settings', { github: { owners: [{ name: 'a b', read: true }] } })).status, 400);
+
   // Rules, places and a week slot, in one write; the written values come back.
   const ok = await post('/rules/settings', {
     life: { rules: ['平日は 0:00 から 7:00 まで寝る'] },

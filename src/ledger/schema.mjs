@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -681,6 +681,30 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, created_at);
   CREATE INDEX IF NOT EXISTS messages_state ON messages(state) WHERE state IS NOT NULL;
   CREATE INDEX IF NOT EXISTS attachments_message ON attachments(message_id);
+  `,
+  // 14 → 15: the copies of GitHub's pull requests and issues (github.mjs), one row each, as
+  // the webhook last told them. key is owner/repo#number in lower case. GitHub stays the
+  // original: the rows are replaced as events come and are not written to the records.
+  `
+  CREATE TABLE github_items (
+    key         TEXT PRIMARY KEY,
+    owner       TEXT NOT NULL,
+    repo        TEXT NOT NULL,
+    number      INTEGER NOT NULL CHECK (number > 0),
+    kind        TEXT NOT NULL CHECK (kind IN ('pr','issue')),
+    title       TEXT NOT NULL,
+    state       TEXT NOT NULL CHECK (state IN ('open','closed','merged')),
+    draft       INTEGER NOT NULL DEFAULT 0 CHECK (draft IN (0, 1)),
+    url         TEXT NOT NULL,
+    branch      TEXT,
+    author      TEXT,
+    assignees   TEXT NOT NULL DEFAULT '[]',
+    reviewers   TEXT NOT NULL DEFAULT '[]',
+    updated_at  TEXT NOT NULL,
+    closed_at   TEXT,
+    received_at TEXT NOT NULL
+  );
+  CREATE INDEX github_items_updated ON github_items(updated_at);
   `,
 ];
 

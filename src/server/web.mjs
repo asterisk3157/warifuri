@@ -916,18 +916,19 @@ export function createWeb({
     return undefined;
   });
 
-  // The 秘書 of the knowledge screen: the life rules, the places, the week's slots and the
+  // The 秘書 of the knowledge screen: the life rules, the places, the week's slots, the GitHub owners to take in and the
   // people of every profile (each as get reads it), to read in one go and to change on the spot. The settings go through writeSettings
   // (limits are not here: they are the person's to decide with the secretary); a place keeps
   // any field it has beyond name and note as it was read.
   const rulesOut = () => {
-    const { life, places, week } = readSettings(ledger);
+    const { life, places, week, github } = readSettings(ledger);
     const list = ledger.people.list({ all: true });
     return {
       now: nowIso(),
       life: { rules: life.rules },
       places: { places: places.places, travel: places.travel },
       week: { slots: week.slots },
+      github: { owners: github.owners, others: github.others },
       profiles: profileNames(),
       people: { count: list.count, more: list.more, people: list.people.map((p) => ledger.people.get(p.id, { all: true })) },
     };
@@ -935,10 +936,10 @@ export function createWeb({
   const WEB = { actor: 'web', device: null };
   api.get('/rules', (req, res) => res.json(rulesOut()));
 
-  // { life?, places?, week? }, each as writeSettings takes it.
+  // { life?, places?, week?, github? }, each as writeSettings takes it.
   api.post('/rules/settings', sameOrigin, rulesJson, (req, res) => {
-    if (!exact(req.body, ['life', 'places', 'week']) || Object.keys(req.body).length === 0) {
-      res.status(400).json({ error: 'refused', problems: ['送る形は { "life": {…}, "places": {…}, "week": {…} } のうち1つ以上です'] });
+    if (!exact(req.body, ['life', 'places', 'week', 'github']) || Object.keys(req.body).length === 0) {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "life": {…}, "places": {…}, "week": {…}, "github": {…} } のうち1つ以上です'] });
       return;
     }
     try {

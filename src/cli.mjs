@@ -412,6 +412,7 @@ function runServe(args) {
       secretaryDevice: secretary.readSecretaryKey(cfg.home) ? secretary.deviceOf(values) : null,
       serverDevices: (values.WARIFURI_SERVER_DEVICES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES) } : null,
+      githubWebhookSecret: values.WARIFURI_GITHUB_WEBHOOK_SECRET ?? null,
       calendarWatch: watch,
     });
   } catch (err) {
@@ -436,6 +437,7 @@ function runServe(args) {
       process.stdout.write(`warifuri: GitHub login off (missing ${oauth.missing.join(', ')}); only device keys work\n`);
     }
     const base = (values.WARIFURI_PUBLIC_URL ?? `http://${host}:${addr.port}`).replace(/\/$/, '');
+    if (values.WARIFURI_GITHUB_WEBHOOK_SECRET) process.stdout.write(`warifuri: GitHub webhook on at ${base}/api/github/webhook\n`);
     if (server.web.mode === 'open') {
       process.stdout.write(`warifuri: web screens at ${base}/calendar (open from this machine, no login)\n`);
     } else {

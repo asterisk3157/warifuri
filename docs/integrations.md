@@ -160,6 +160,52 @@ Developer Portal で、ボットの「Message Content Intent」を有効にし�
 
 Discord で話すときは、ログに `discord: connected` が出ていれば、受け取る準備ができています。チャンネルに何か書いて、秘書の返事が Discord に届けば完了です。スレッドは、返事に「スレッドで話す」が出たときに押して、開いたスレッドに書き、返事がそのスレッドに届くことで確かめます。
 
+## GitHub
+
+GitHub の PR と Issue の状態を、warifuri にコピーします。タスクに書いた PR がマージされると、秘書が「終わっていそうなタスク」として確かめに来ます。レビューを頼まれた PR や、担当になった Issue も、秘書が読めます。
+
+warifuri は GitHub の Webhook で変化を受け取るだけで、GitHub には書き込みません。サーバーが GitHub から届く URL(`WARIFURI_PUBLIC_URL`)で動いている必要があります。
+
+### 1. Secret の用意
+
+Webhook の Secret にする文字列を作ります。
+
+```bash
+openssl rand -hex 32
+```
+
+サーバーの PC の `secrets.env` に書き、サーバーを起動し直します。
+
+```
+WARIFURI_GITHUB_WEBHOOK_SECRET=<作った文字列>
+```
+
+起動のログに `GitHub webhook on` の1行が出ます。
+
+### 2. Webhook の作成
+
+組織のリポジトリをまとめて受け取るときは、組織の Settings の Webhooks で作ります。個人のアカウントには、アカウント全体の Webhook がないので、リポジトリごとに Settings の Webhooks で作ります。どちらも、次のように入力します。
+
+| 項目 | 値 |
+|---|---|
+| Payload URL | `<公開の URL>/api/github/webhook` |
+| Content type | `application/json` |
+| Secret | 手順1の文字列 |
+| SSL verification | Enable |
+| events | 「Let me select individual events」で Pull requests と Issues |
+
+作ると GitHub が `ping` を送ります。Webhook の Recent Deliveries で、応答が 200 になっていれば届いています。
+
+### 3. 読み込むオーナーの指定
+
+はじめは、どのオーナー(ユーザーか組織)も読み込みません。読み込むオーナーは、秘書に「example-org の PR を読み込んで」と頼むか、Web 画面のナレッジの「秘書」にある「GitHub」で追加します。オーナーごとに「読み込む」「読み込まない」を選べて、変えた設定は次に届く知らせから効きます。
+
+「一覧にないオーナー」を「読み込む」にすると、Webhook を付けたオーナーをすべて読み込みます。その場合も、「読み込まない」にしたオーナーは読み込みません。読み込まないオーナーの知らせは、届いても保存しません。
+
+### 4. タスクとの結びつけ
+
+タスクの本文、成果、次の一手のどれかに、PR を `example-org/widgets#12` か URL で書いておきます。その PR がマージされると、開いたままのタスクが `stale` の `merged` に出て、秘書が毎晩と週の完了確認で根拠にします。
+
 ## Gmail と Notion
 
 秘書に、メールや Notion のページを読ませます。メールから予定や締切に気づいたり、調べものの資料にしたりできます。カレンダーと同じく、サーバーの PC で秘書が使っている Claude のアカウントにコネクタを追加し、`warifuri.env` の `WARIFURI_SECRETARY_TOOLS` に足します。

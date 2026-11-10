@@ -27,6 +27,7 @@ const TOOL_STEPS = {
   search: ['search', '探しました'],
   autonomy: ['read', '自律度を読みました'],
   reports: ['read', '報告を読みました'],
+  github: ['read', 'GitHub の PR と Issue を読みました'],
   proposals: ['read', '案を読みました'],
   settings: ['read', '設定を読みました'],
   book: ['write', '予定を入れました'],

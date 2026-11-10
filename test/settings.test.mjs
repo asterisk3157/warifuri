@@ -37,7 +37,7 @@ test('unset settings read as their defaults, and say which fields are unset', (t
   assert.deepEqual(s.limits, { day_max_hours: 8, block_min_minutes: 30, block_max_minutes: 120, earliest: '09:00', latest: '21:00' });
   assert.deepEqual(s.limits, LIMIT_DEFAULTS);
   assert.deepEqual(s.calendar, { skip: [] });
-  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'], week: ['slots'], onboarding: ['state'] });
+  assert.deepEqual(s.defaults, { life: ['rules'], places: ['places', 'travel'], limits: Object.keys(LIMIT_DEFAULTS), calendar: ['skip'], week: ['slots'], onboarding: ['state'], github: ['owners', 'others'] });
   // The profile written by the Web screen is a different section and is not touched.
   L.setSettings('profile', { name: 'Aoi' }, AGENT);
   assert.deepEqual(readSettings(L).life, { rules: [] });

@@ -1,4 +1,4 @@
-// ナレッジの「秘書」: 秘書と話して決めた生活の決まり、場所、週の居場所を、その場で足す・直す・消す。
+// ナレッジの「秘書」: 秘書と話して決めた生活の決まり、場所、週の居場所と、GitHub から読み込むオーナーを、その場で足す・直す・消す。
 // 設定は POST /web/api/rules/settings で書く。人は knowledge.js の表で見る。
 //
 // 書いている途中の欄は、画面を読み直しても同じ要素を使い回す(fields)ので、打った文字が消えない。
@@ -235,9 +235,52 @@ function weekCard(ctx) {
   return card('週の居場所', list(items), addArea(ctx, 'slot-new', form.inputs, form.save));
 }
 
+// ---- GitHub ----
+
+const READ_OPTIONS = [['read', '読み込む'], ['skip', '読み込まない']];
+const readText = (on) => (on ? '読み込む' : '読み込まない');
+
+function githubCard(ctx) {
+  const { owners, others } = state.data.github;
+  const put = (next, prefix) => saveSettings(ctx, { github: next }, () => drop(prefix));
+  const items = owners.map((o, i) => {
+    const key = `gh-edit-${i}`;
+    if (state.editing.has(key)) {
+      const name = field(`${key}-name`, o.name, { maxlength: 39, 'aria-label': 'オーナー', onkeydown: enter(save) });
+      const read = select(`${key}-read`, READ_OPTIONS, o.read ? 'read' : 'skip', { 'aria-label': '読み込み' });
+      function save() {
+        put({ owners: owners.map((x, n) => (n === i ? { name: name.value.trim(), read: read.value === 'read' } : x)) }, 'gh-edit-');
+      }
+      return editRow([labeled('オーナー', name), labeled('読み込み', read)], [
+        btn('保存', save, 'wf-rl-main'),
+        btn('キャンセル', closeEdit(ctx, key)),
+        btn('削除', () => put({ owners: owners.filter((_, n) => n !== i) }, 'gh-edit-'), 'wf-rl-danger'),
+      ]);
+    }
+    return row([h('b', { text: o.name }), h('span', { text: readText(o.read) })], openEdit(ctx, key));
+  });
+  const rest = 'gh-others';
+  if (state.editing.has(rest)) {
+    const read = select(`${rest}-read`, READ_OPTIONS, others, { 'aria-label': '読み込み' });
+    items.push(editRow([labeled('一覧にないオーナー', read)], [
+      btn('保存', () => put({ others: read.value }, rest), 'wf-rl-main'),
+      btn('キャンセル', closeEdit(ctx, rest)),
+    ]));
+  } else {
+    items.push(row([h('b', { text: '一覧にないオーナー' }), h('span', { text: readText(others === 'read') })], openEdit(ctx, rest)));
+  }
+  const name = field('gh-new-name', '', { maxlength: 39, placeholder: '例: example-org', 'aria-label': 'オーナー', onkeydown: enter(addOwner) });
+  const read = select('gh-new-read', READ_OPTIONS, 'read', { 'aria-label': '読み込み' });
+  function addOwner() {
+    const n = name.value.trim();
+    if (n) put({ owners: [...owners, { name: n, read: read.value === 'read' }] }, 'gh-new');
+  }
+  return card('GitHub', list(items), addArea(ctx, 'gh-new', [labeled('オーナー', name), labeled('読み込み', read)], addOwner));
+}
+
 // ---- 全体 ----
 
-// 読み込んだ結果(GET /rules)から、3つのカードを作る。書いている最中は、読み直しで置き換えない。
+// 読み込んだ結果(GET /rules)から、4つのカードを作る。書いている最中は、読み直しで置き換えない。
 export function secretaryCards(ctx, data) {
   if (data !== state.seen) {
     state.seen = data;
@@ -245,5 +288,5 @@ export function secretaryCards(ctx, data) {
   }
   state.data ??= data;
   const problems = state.problems.length ? h('ul', { class: 'wf-errors', role: 'alert' }, ...state.problems.map((x) => h('li', { text: x }))) : null;
-  return h('div', { class: 'wf-rl-wrap' }, problems, lifeCard(ctx), placesCard(ctx), weekCard(ctx));
+  return h('div', { class: 'wf-rl-wrap' }, problems, lifeCard(ctx), placesCard(ctx), weekCard(ctx), githubCard(ctx));
 }
