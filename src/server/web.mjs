@@ -267,7 +267,7 @@ function readCookie(req, name) {
 // policy is sent with the worker's script, which a worker follows instead of the page's:
 // - 'wasm-unsafe-eval': the ONNX runtime is WebAssembly, and compiling it needs this (not eval).
 // - worker-src 'self': the worker and the audio worklet come from this server only.
-// - connect-src to Hugging Face: the model's files, fetched once and kept in the browser's cache.
+// - connect-src to Hugging Face: the model's files, fetched once and kept in the browser's storage.
 //   huggingface.co answers with a redirect to its file CDN (us.aws.cdn.hf.co and the like under
 //   hf.co; older files on cdn-lfs.huggingface.co). The voice itself goes nowhere.
 const PAGE_CSP =

@@ -1,13 +1,17 @@
 // 秘書の入力欄の音声入力: 話した言葉を入力欄に入れる。聞き取りの途中の言葉も、その場で入力欄に
-// 出す。送るのは本人が送るボタンを押したときで、自動では送らない。押すと聞き始め、もう一度押すと
-// 止まる。聞いているあいだは、マイクの横に声の大きさに合わせて動くバーを出す。
+// 出す。送るのは本人が送るボタンを押したときで、自動では送らない。押すと聞き始め、もう一度押すか、
+// 送るボタンを押すと止まる。黙っても止まらない。送るときは、止めてから最後の言葉を待って
+// (長くても 1.5 秒)、途中の言葉も入れて送る(endVoice)。聞いているあいだは、マイクの横に声の
+// 大きさに合わせて動くバーを出す。
 //
 // 方式は2つ。Chrome と Safari では、ブラウザの音声認識(Web Speech API)を使い、ブラウザが黙った
 // あとに認識を止めても、本人が止めるまでは聞き直す。Web Speech API がないブラウザと、あっても
 // 使えないブラウザ(Arc は Google の音声サービスに届かず、毎回 'network' になる)では、ブラウザの
 // 中で Whisper を動かす(voice-whisper-worker.js)。一度使えないと分かったブラウザは覚えておき、
 // 次からは Whisper にする。Whisper では、マイクの音を 16 kHz で溜め、1.2 秒ごとに今の区切りを
-// まるごと文字にして途中の言葉として出し、0.8 秒静かになるか 25 秒を超えたら区切りを確定する。
+// まるごと文字にして途中の言葉として出す。Whisper は一度に 30 秒までしか読めないので、20 秒を
+// 超えて息つぎがあったところか、25 秒で区切って、次の区切りを続けて聞く。入力欄の文はつながった
+// まま伸びる。
 // どちらも使えないブラウザでは、ボタンを出さない(micButton が null を返す)。
 
 import { h, s } from '../ui.js';
@@ -117,11 +121,13 @@ function stopMeter(session) {
 
 const RATE = 16000;
 const EVERY_MS = 1200;
-const QUIET = 0.8 * RATE;
+// A stretch ends past LONG at a pause of BREATH, or at LONGEST (Whisper reads 30 seconds at most).
+const LONG = 20 * RATE;
+const BREATH = 0.4 * RATE;
 const LONGEST = 25 * RATE;
 const LOUD = 0.01;
 
-// One worker for the page: the model loads once, and the browser keeps it in its cache.
+// One worker for the page: the model loads once, and the browser keeps its files (see the worker).
 let whisper = null;
 
 function getWhisper() {
@@ -201,13 +207,13 @@ function flatten(pieces, length) {
 }
 
 // The Whisper part of a session: pieces and length (the samples of the stretch being heard),
-// voiced (someone spoke in it), quiet (samples since the last loud one), sent (length at the last
-// interim), gen (the stretch's number), interim (its words so far), settling (gen → the words
+// voiced (someone spoke in it), quiet (samples since the last loud one), loudAt (length at the
+// last loud one), sent (length at the last interim), gen (the stretch's number), interim (its words so far), settling (gen → the words
 // shown for a stretch being settled), inflight (stretches being settled), busy (an interim runs).
 function listenWhisper(input, state, { redraw, note }) {
   const w = getWhisper();
   Object.assign(state, {
-    kind: 'whisper', pieces: [], length: 0, voiced: false, quiet: 0, sent: 0, gen: 0,
+    kind: 'whisper', pieces: [], length: 0, voiced: false, quiet: 0, loudAt: 0, sent: 0, gen: 0,
     interim: '', settling: new Map(), inflight: 0, busy: false, loading: !w.ready,
     load: h('span', { class: 'wf-voice-load', role: 'status', text: loadLabel(w.progress) }),
   });
@@ -221,6 +227,7 @@ function listenWhisper(input, state, { redraw, note }) {
     stopMeter(state);
     w.onprogress = null;
     sessions.delete(input);
+    state.ended();
     redraw();
   };
   state.finish = finish;
@@ -241,7 +248,7 @@ function listenWhisper(input, state, { redraw, note }) {
       const gen = state.gen;
       state.settling.set(gen, state.interim);
       state.inflight += 1;
-      transcribe(w, flatten(state.pieces, state.length)).then((text) => {
+      transcribe(w, heardSoFar()).then((text) => {
         state.heard += text;
       }, () => {}).finally(() => {
         state.settling.delete(gen);
@@ -250,9 +257,17 @@ function listenWhisper(input, state, { redraw, note }) {
         if (state.stopping && state.inflight === 0) finish();
       });
     }
-    Object.assign(state, { pieces: [], length: 0, voiced: false, quiet: 0, sent: 0, interim: '', gen: state.gen + 1 });
+    Object.assign(state, { pieces: [], length: 0, voiced: false, quiet: 0, loudAt: 0, sent: 0, interim: '', gen: state.gen + 1 });
   };
   state.cut = cut;
+
+  // The stretch up to half a second after its last loud sample: a long silence at its end gives
+  // Whisper nothing to read, and it sometimes makes words up for it.
+  const heardSoFar = () => {
+    const all = flatten(state.pieces, state.length);
+    const end = Math.min(all.length, state.loudAt + RATE / 2);
+    return end < all.length ? all.slice(0, end) : all;
+  };
 
   const take = (piece) => {
     if (state.stopping) return;
@@ -264,6 +279,7 @@ function listenWhisper(input, state, { redraw, note }) {
     if (loud) {
       state.voiced = true;
       state.quiet = 0;
+      state.loudAt = state.length;
     } else {
       state.quiet += piece.length;
     }
@@ -271,16 +287,17 @@ function listenWhisper(input, state, { redraw, note }) {
     while (!state.voiced && state.pieces.length > 1 && state.length - state.pieces[0].length >= RATE / 2) {
       state.length -= state.pieces.shift().length;
     }
-    if ((state.voiced && state.quiet >= QUIET) || state.length >= LONGEST) cut();
+    if (!state.voiced) state.loudAt = state.length;
+    if ((state.length >= LONG && state.quiet >= BREATH) || state.length >= LONGEST) cut();
   };
 
-  // The words of the stretch so far, when Whisper is free and something new was heard.
+  // The words of the stretch so far, when Whisper is free and someone spoke since the last time.
   const interim = () => {
-    if (state.loading || state.busy || state.stopping || !state.voiced || state.length === state.sent) return;
+    if (state.loading || state.busy || state.stopping || !state.voiced || state.loudAt <= state.sent) return;
     const gen = state.gen;
-    state.sent = state.length;
+    state.sent = state.loudAt;
     state.busy = true;
-    transcribe(w, flatten(state.pieces, state.length)).then((text) => {
+    transcribe(w, heardSoFar()).then((text) => {
       if (gen !== state.gen) return;
       state.interim = text;
       render();
@@ -390,6 +407,7 @@ function listenSpeech(input, state, { redraw, note }) {
     show(input, joined(state.base, state.heard));
     stopMeter(state);
     sessions.delete(input);
+    state.ended();
     redraw();
   };
   rec.start();
@@ -414,6 +432,24 @@ export function stopVoice(input) {
   session.rec.stop();
 }
 
+// Before the box is sent: listening stops, and the last words are waited for, ms at most. When
+// they do not come in time, the box keeps what it shows now (the half-heard words too), and words
+// that come later do not change it.
+export async function endVoice(input, ms = 1500) {
+  const session = sessions.get(input);
+  if (!session) return;
+  stopVoice(input);
+  let timer;
+  await Promise.race([session.done, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]);
+  clearTimeout(timer);
+  if (sessions.get(input) !== session) return;
+  sessions.delete(input);
+  stopMeter(session);
+  if (session.kind === 'speech') session.rec.abort?.();
+  session.ended();
+  session.redraw();
+}
+
 // The button for a box (input: its textarea). redraw(): the screen draws again; note(text):
 // a short sentence under the box (an error), or '' to clear it.
 export function micButton(input, { redraw, note, disabled = false }) {
@@ -428,9 +464,10 @@ export function micButton(input, { redraw, note, disabled = false }) {
     }
     const bars = Array.from({ length: BARS }, () => h('span', { class: 'wf-voice-bar' }));
     const state = {
-      base: input.value, heard: '', stopping: false,
+      base: input.value, heard: '', stopping: false, ended: () => {}, redraw,
       bars, meter: h('span', { class: 'wf-voice-meter', role: 'status', 'aria-label': '音声入力中' }, ...bars),
     };
+    state.done = new Promise((resolve) => { state.ended = resolve; });
     sessions.set(input, state);
     note('');
     const whisperNow = !Recognition || (canWhisper && speechBroken());
