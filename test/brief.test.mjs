@@ -239,3 +239,24 @@ test('hook brief gives up on a slow server within its two seconds', async () => 
   const out = await decideBrief(starting('slow'), { url, key: KEY }, { timeoutMs: 50 });
   assert.equal(out, null);
 });
+
+test('/api/brief offers the tasks of this place first: put in it, or named in the title', async (t) => {
+  const { brief, ledger, lab } = await serve(t);
+  const seminar = ledger.createPlace({ name: 'seminar', profile: '研究', paths: [{ device: 'laptop', path: '/home/alex/seminar' }] }, W);
+  const elsewhere = ledger.createTask({ title: '発表の練習', mode: 'ai_worker', place_id: seminar.id }, W);
+  // Tasks in no place reach the profile through their goal.
+  const goal = ledger.createGoal({ title: '卒業する', mode: 'ai_worker', profile: '研究' }, W);
+  const loose = ledger.createTask({ title: '本を返す', mode: 'ai_worker', goal_id: goal.id, after: [] }, W);
+  const named = ledger.createTask({ title: '[thesis] 図を描き直す', mode: 'ai_worker', goal_id: goal.id, after: [] }, W);
+  const put = ledger.createTask({ title: '3章を書く', mode: 'ai_worker', place_id: lab.id }, W);
+  const own = (await brief('/home/alex/thesis')).body;
+  const ids = own.tasks.map((x) => x.id);
+  assert.ok(ids.includes(named.id) && ids.includes(put.id));
+  assert.ok(!ids.includes(elsewhere.id) && !ids.includes(loose.id));
+  // A place with no task of its own falls back to the profile's, the ones in no place before
+  // those of other places.
+  ledger.createPlace({ name: 'notes', profile: '研究', paths: [{ device: 'laptop', path: '/home/alex/notes' }] }, W);
+  const rest = (await brief('/home/alex/notes')).body.tasks.map((x) => x.id);
+  assert.ok(rest.includes(loose.id) && rest.includes(elsewhere.id));
+  assert.ok(rest.indexOf(loose.id) < rest.indexOf(elsewhere.id));
+});
