@@ -49,8 +49,8 @@ export function micButton(input, { redraw, note, disabled = false }) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     };
     rec.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') note('マイクが使えません。ブラウザでマイクを許可してください');
-      else if (e.error !== 'no-speech' && e.error !== 'aborted') note('聞き取れませんでした。もう一度押してください');
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') note('マイクが許可されていません');
+      else if (e.error !== 'no-speech' && e.error !== 'aborted') note('聞き取れませんでした');
     };
     rec.onend = () => {
       // What was heard stays in the box (the final words, without a half-heard end).
@@ -66,12 +66,12 @@ export function micButton(input, { redraw, note, disabled = false }) {
       rec.start();
     } catch {
       sessions.delete(input);
-      note('音声入力を始められませんでした');
+      note('音声入力を開始できませんでした');
     }
     redraw();
   };
   return h('button', {
-    type: 'button', class: ['wf-mic', 'wf-press', on && 'wf-listening'], disabled, aria: { pressed: String(on), label: on ? '音声入力を止める' : '音声で入力する' },
-    title: on ? '聞いています。もう一度押すと止まります' : '音声で入力する', onclick: toggle,
+    type: 'button', class: ['wf-mic', 'wf-press', on && 'wf-listening'], disabled, aria: { pressed: String(on), label: on ? '音声入力を停止' : '音声入力' },
+    title: on ? '音声入力中' : '音声入力', onclick: toggle,
   }, micIcon());
 }

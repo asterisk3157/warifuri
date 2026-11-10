@@ -559,9 +559,9 @@ function composerEl(c, on) {
   },
   tray,
   h('button', { type: 'button', class: ['wf-clip', 'wf-press'], 'aria-label': 'ファイルや画像を添える', disabled: !on, onclick: () => c.picker.click() }, ICON.clip()),
-  micButton(c.input, { disabled: !on, redraw: () => ctxRef?.rerender(), note: (text) => { c.note = text; if (text) ctxRef?.rerender(); } }),
   h('label', { class: 'wf-sec-field' }, h('span', { class: 'wf-sr', text: c.where === 'main' ? '秘書に送る' : 'スレッドに返信する' }), c.input),
   h('button', { type: 'button', class: ['wf-send', 'wf-press'], 'aria-label': '送る', disabled: !on || view.busy, onclick: () => send(c) }, ICON.send()),
+  micButton(c.input, { disabled: !on, redraw: () => ctxRef?.rerender(), note: (text) => { c.note = text; if (text) ctxRef?.rerender(); } }),
   c.picker);
 }
 

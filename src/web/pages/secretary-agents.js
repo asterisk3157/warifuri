@@ -29,8 +29,8 @@ export function agentTabs(tab, select) {
 
 // The one line in the conversation that says an agent's request changed the calendar.
 export function agentNotice(m, open) {
-  return h('button', { type: 'button', class: 'wf-agent-notice', onclick: open, 'aria-label': `${m.body}。エージェントの欄を開く` },
-    h('span', { text: m.body }), h('small', { text: `${hhmm(m.created_at)} · エージェントの欄へ` }));
+  return h('button', { type: 'button', class: 'wf-agent-notice', onclick: open, 'aria-label': `${m.body}。エージェントのタブを開く` },
+    h('span', { text: m.body }), h('small', { text: `${hhmm(m.created_at)} · エージェントを開く` }));
 }
 
 // What the agent asked for: who, what and the conditions, folded to a few lines.
@@ -47,7 +47,7 @@ function requestCard(m, expanded, toggle) {
     h('div', { class: 'wf-req-head' }, h('b', { text: r.from ? `${r.from} のエージェントからの依頼` : 'エージェントからの依頼' }), h('small', { class: 'wf-time', text: mdhm(m.created_at) })),
     h('p', { class: ['wf-req-text', !open && 'wf-clamp'], text: r.text }),
     conds.length ? h('div', { class: 'wf-req-conds', text: conds.join(' · ') }) : null,
-    r.text.length > 120 ? h('button', { type: 'button', class: 'wf-req-more', onclick: () => toggle(m.id), text: open ? '閉じる' : 'すべて表示' }) : null);
+    r.text.length > 120 ? h('button', { type: 'button', class: 'wf-req-more', onclick: () => toggle(m.id), text: open ? '閉じる' : '全文を表示' }) : null);
 }
 
 // The secretary's reply to a request.
@@ -73,6 +73,6 @@ export function agentPane(data, { expanded, toggle }) {
   }
   const list = h('div', { class: 'wf-list' }, rows.some(Boolean) || data?.secretary?.replying
     ? rows
-    : h('p', { class: 'wf-empty-talk', text: data ? 'エージェントからの依頼は、まだありません' : '読んでいます' }));
+    : h('p', { class: 'wf-empty-talk', text: data ? 'まだありません' : '読み込み中' }));
   return { el: h('div', { class: 'wf-scroll', data: { scroll: 'agent' } }, list), newest: items.at(-1)?.id ?? '' };
 }
