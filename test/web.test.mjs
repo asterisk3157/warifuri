@@ -223,7 +223,7 @@ test('秘書: the conversation only, oldest first, with questions; reports, prop
   assert.deepEqual(out.secretary, { on: false, replying: false });
   assert.deepEqual(out.items.map((x) => [x.type, x.role ?? x.state]), [['message', 'secretary'], ['ask', 'open']]);
   const [msg, ask] = out.items;
-  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'calendar', 'created_at', 'files', 'files_only', 'id', 'kind', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
+  assert.deepEqual(Object.keys(msg).sort(), ['answer', 'body', 'calendar', 'created_at', 'files', 'files_only', 'id', 'kind', 'notice', 'options', 'request', 'role', 'scheduled', 'steps', 'type']);
   assert.equal(msg.body, '<b>おはようございます</b>', 'returned as the text it is; the page builds the DOM');
   assert.equal(msg.calendar, null);
   assert.deepEqual([msg.steps, msg.options, msg.scheduled], [[{ kind: 'read', label: '予定を読みました' }], ['置いて'], 'morning']);
@@ -260,6 +260,25 @@ function stubChat(ledger, on = true) {
     status: () => ({ on, replying: on && sent.length > 0, waiting: 0 }),
   };
 }
+
+test('秘書: エージェントの欄 holds the requests and their replies, apart from the conversation', async (t) => {
+  const { base, ledger } = await start(t);
+  const S = { actor: 'device-key', device: 'secretary' };
+  assert.deepEqual(await (await get(base, '/web/api/secretary/agent')).json().then((o) => [o.thread, o.items]), [null, []], 'nothing yet');
+  const main = ledger.ensureThread('secretary', { actor: 'web' });
+  const agent = ledger.ensureThread('agent', S);
+  ledger.addMessage(agent.id, { role: 'system', body: 'x のエージェントからの依頼: 2時間', data: { request: { from: 'x', text: '2時間', minutes: 120 } } }, { actor: 'device-key', device: 'laptop' });
+  ledger.addMessage(agent.id, { role: 'secretary', body: '水曜の午前に入れました' }, S);
+  ledger.addMessage(main.id, { role: 'system', body: '予定を入れました: 11/11 10:00〜12:00 資料', data: { agent_notice: { booking: 'b_x', change: 'created', thread: agent.id } } }, S);
+  const out = await (await get(base, '/web/api/secretary/agent')).json();
+  assert.equal(out.thread, agent.id);
+  assert.deepEqual(out.items.map((x) => [x.role, x.request?.from ?? null, x.body]), [['system', 'x', 'x のエージェントからの依頼: 2時間'], ['secretary', null, '水曜の午前に入れました']]);
+  assert.equal(out.items[0].request.minutes, 120);
+  // The conversation shows only the one line, which points at the agents' pane; no request, no reply.
+  const talk = await (await get(base, '/web/api/secretary')).json();
+  assert.deepEqual(talk.items.map((x) => [x.role, x.notice, x.request]), [['system', { thread: agent.id }, null]]);
+  assert.equal(talk.items[0].body, '予定を入れました: 11/11 10:00〜12:00 資料');
+});
 
 test('秘書: a message goes to the chat, JSON from this origin only, and not while the secretary is off', async (t) => {
   let chat;
@@ -606,3 +625,66 @@ test('ナレッジ: the profiles with their counts, one profile\'s files, and a 
   assert.equal((await get(base, '/web/api/knowledge/nobody')).status, 404);
   assert.equal((await get(base, `/web/api/knowledge/hobby?name=${encodeURIComponent('../profile.yaml')}`)).status, 404);
 });
+
+test('秘書のナレッジ: the rules, places, week and people are read together and changed on the spot', async (t) => {
+  const { base, ledger } = await start(t);
+  const post = (p, body, headers = {}, method = 'POST') =>
+    fetch(`${base}/web/api${p}`, { method, headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  const read = async () => (await get(base, '/web/api/rules')).json();
+
+  const first = await read();
+  assert.deepEqual(first.life, { rules: [] });
+  assert.deepEqual(first.week, { slots: [] });
+  assert.deepEqual(first.people.people, []);
+  assert.ok(first.profiles.includes('research'));
+
+  // From this origin only, JSON only, and only the three sections.
+  assert.equal((await post('/rules/settings', { life: { rules: ['a'] } }, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await post('/rules/settings', 'x', { 'Content-Type': 'text/plain' })).status, 415);
+  assert.equal((await post('/rules/settings', {})).status, 400);
+  assert.equal((await post('/rules/settings', { limits: { day_max_hours: 3 } })).status, 400);
+  assert.equal((await post('/rules/settings', { onboarding: { state: 'done' } })).status, 400);
+
+  // Rules, places and a week slot, in one write; the written values come back.
+  const ok = await post('/rules/settings', {
+    life: { rules: ['平日は 0:00 から 7:00 まで寝る'] },
+    places: { places: [{ name: 'Lab', note: 'near the station' }, { name: 'Home' }], travel: [{ from: 'Lab', to: 'Home', minutes: 30 }] },
+    week: { slots: [{ days: ['月', '木'], start: '09:00', end: '17:00', place: 'Lab', profile: 'research' }] },
+  });
+  assert.equal(ok.status, 200);
+  const after = await ok.json();
+  assert.deepEqual(after.life.rules, ['平日は 0:00 から 7:00 まで寝る']);
+  assert.deepEqual(after.places.places.map((p) => p.name), ['Lab', 'Home']);
+  assert.deepEqual(after.week.slots[0].days, ['月', '木']);
+  assert.equal(ledger.records('week').at(-1)?.actor, 'web');
+
+  // A problem is listed and nothing of it is written.
+  const bad = await post('/rules/settings', { life: { rules: [''] }, week: { slots: [{ days: 'daily', start: '10:00', end: '09:00', place: 'Lab' }] } });
+  assert.equal(bad.status, 400);
+  assert.ok((await bad.json()).problems.length >= 2);
+  assert.deepEqual((await read()).life.rules, ['平日は 0:00 から 7:00 まで寝る']);
+
+  // People: add, a twin is refused, change, forget.
+  assert.equal((await post('/people', { name: '', profile: 'research' })).status, 400);
+  assert.equal((await post('/people', { name: 'Sam', profile: 'research', color: 'red' })).status, 400);
+  const added = await post('/people', { name: 'Sam', profile: 'research', affiliation: 'Lab A' });
+  assert.equal(added.status, 201);
+  const people = (await added.json()).people.people;
+  assert.equal(people.length, 1);
+  assert.equal(people[0].affiliation, 'Lab A');
+  assert.deepEqual(people[0].profiles, ['research']);
+  assert.equal((await post('/people', { name: 'Sam', profile: 'research' })).status, 400);
+  const id = people[0].id;
+  assert.equal((await post(`/people/${id}`, { profiles: ['x'] })).status, 400);
+  const changed = await (await post(`/people/${id}`, { name: 'Sam B', role: 'advisor', affiliation: null, aliases: ['S'] })).json();
+  assert.equal(changed.people.people[0].name, 'Sam B');
+  assert.equal(changed.people.people[0].affiliation, null);
+  assert.deepEqual(changed.people.people[0].aliases, ['S']);
+  assert.equal((await post('/people/n_nobody', { name: 'x' })).status, 400);
+  assert.equal((await post(`/people/${id}`, {}, { Origin: 'https://evil.example' }, 'DELETE')).status, 403);
+  const gone = await post(`/people/${id}`, {}, {}, 'DELETE');
+  assert.equal(gone.status, 200);
+  assert.deepEqual((await gone.json()).people.people, []);
+  assert.equal((await post(`/people/${id}`, {}, {}, 'DELETE')).status, 400);
+});
+

@@ -252,13 +252,17 @@ test('notifier: with Discord chat on, what is written on the screen and its repl
     say('secretary', '明日は2件です。', S);
     say('user', '入れて', { actor: 'discord' });
     say('secretary', '入れました。', S);
-    say('system', '頼み', { actor: 'device-key', device: 'laptop' }, { request: { from: 'laptop', text: '資料作りに2時間ほしい' } });
-    say('secretary', '水曜の午前に取りました。', S);
+    // An agent's request and the reply are in the agents' thread, which Discord does not get;
+    // nor does the line in the conversation that says the calendar changed.
+    const agent = ledger.ensureThread('agent', S);
+    ledger.addMessage(agent.id, { role: 'system', body: '頼み', data: { request: { from: 'laptop', text: '資料作りに2時間ほしい' } } }, { actor: 'device-key', device: 'laptop' });
+    ledger.addMessage(agent.id, { role: 'secretary', body: '水曜の午前に取りました。' }, S);
+    say('system', '予定を入れました: 11/11 10:00〜12:00 資料', S, { agent_notice: { booking: 'b_x', change: 'created', thread: agent.id } });
     await notifier.tick();
     return posts.map((p) => p.text);
   };
-  assert.deepEqual(await run(true), ['(Web から)\n明日の予定は？', '明日は2件です。', '入れました。', '(エージェントから) laptop\n資料作りに2時間ほしい', '水曜の午前に取りました。']);
-  assert.deepEqual(await run(false), ['入れました。', '水曜の午前に取りました。'], 'without it, only the replies after Discord');
+  assert.deepEqual(await run(true), ['(Web から)\n明日の予定は？', '明日は2件です。', '入れました。']);
+  assert.deepEqual(await run(false), ['入れました。'], 'without it, only the replies after Discord');
 });
 
 test('discord chat: スレッドで話す opens a Discord thread tied to the thread; what is said there goes both ways', async (t) => {

@@ -76,7 +76,7 @@ const GOAL_COLUMNS = [
 const TASK_COLUMNS = [
   'id', 'title', 'body', 'done_when', 'goal_id', 'state', 'mode', 'load', 'estimate_min', 'due', 'due_provisional',
   'place_id', 'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'next', 'delegated', 'review',
-  'created_at', 'updated_at', 'closed_at',
+  'created_at', 'updated_at', 'closed_at', 'only_at', 'priority',
 ];
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'profile', 'created_at', 'updated_at'];
@@ -90,7 +90,7 @@ const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at
 const GOAL_EDITABLE = ['title', 'outcome', 'due', 'due_provisional', 'mode', 'human_led', 'profile'];
 const TASK_EDITABLE = [
   'title', 'body', 'done_when', 'due', 'due_provisional', 'mode', 'load', 'goal_id', 'estimate_min', 'place_id',
-  'next', 'delegated',
+  'next', 'delegated', 'only_at', 'priority',
 ];
 const HABIT_EDITABLE = ['title', 'rule', 'duration_min', 'goal_id', 'active'];
 const FLAG_FIELDS = ['due_provisional', 'human_led', 'active', 'delegated'];
@@ -112,6 +112,8 @@ const DATA_MAX = 64 * 1024;
 export const ATTACHMENTS_MAX = 4;
 // The secretary's thread and its title.
 export const SECRETARY_THREAD = { kind: 'secretary', title: '秘書' };
+// The thread of the agents' requests and the secretary's replies to them (one).
+export const AGENT_THREAD = { kind: 'agent', title: 'エージェント' };
 // How many messages one read returns: by default, and at most.
 export const MESSAGES_DEFAULT = 50;
 export const MESSAGES_MAX = 200;
@@ -402,6 +404,7 @@ export function openLedger(path, options = {}) {
       goal_id: input.goal_id ?? null, state: 'ready', mode: input.mode, load: input.load ?? null,
       estimate_min: input.estimate_min ?? null, due: input.due ?? null, due_provisional: input.due_provisional ?? 0,
       place_id: input.place_id ?? null, next: input.next ?? null, delegated: input.delegated ?? 0,
+      only_at: input.only_at ?? null, priority: input.priority ?? null,
       created_at: t, updated_at: t,
     };
     row = applyState(row, state, extra, t);
@@ -1284,12 +1287,13 @@ export function openLedger(path, options = {}) {
   // The thread of a kind, made (and recorded) the first time it is needed.
   function ensureThread(kind = SECRETARY_THREAD.kind, opts) {
     const w = requireWriter(opts);
-    if (kind !== SECRETARY_THREAD.kind) throw new LedgerError(['ensureThread で作れるのは秘書との会話だけです。スレッドは openThread で作ります']);
+    const spec = [SECRETARY_THREAD, AGENT_THREAD].find((x) => x.kind === kind);
+    if (!spec) throw new LedgerError(['ensureThread で作れるのは、秘書との会話とエージェントの欄だけです。スレッドは openThread で作ります']);
     return transaction(() => {
       const found = threadRow(kind);
       if (found) return found;
       const t = nowIso();
-      const row = { kind, title: SECRETARY_THREAD.title, runner: 'resume', created_at: t, updated_at: t };
+      const row = { kind, title: spec.title, runner: 'resume', created_at: t, updated_at: t };
       row.id = chooseId('thread', undefined, []);
       insert('threads', THREAD_COLUMNS, row);
       record(w, 'thread', row.id, 'create', diff(null, row, THREAD_COLUMNS));
@@ -1782,6 +1786,35 @@ export function openLedger(path, options = {}) {
     });
   }
 
+  // The id of the newest record (0 when there is none): a mark to ask bookingChangesSince about.
+  const recordMark = () => one('SELECT COALESCE(MAX(id), 0) AS n FROM records').n;
+
+  // What one device did to bookings after a mark (recordMark): [{ id, change: 'created' |
+  // 'moved' | 'deleted', title, starts_at, ends_at }], in the order the bookings were first
+  // touched. A booking made and deleted since the mark is left out; a change that is not of
+  // the time (the note, say) is not listed.
+  function bookingChangesSince(mark, device) {
+    const rows = all("SELECT * FROM records WHERE id > ? AND entity = 'booking' AND device = ? ORDER BY id", mark, device)
+      .map((r) => ({ ...r, changes: JSON.parse(r.changes) }));
+    const out = [];
+    for (const id of [...new Set(rows.map((r) => r.entity_id))]) {
+      const mine = rows.filter((r) => r.entity_id === id);
+      const first = mine[0];
+      const last = mine.at(-1);
+      const now_ = getBookingRow(id);
+      if (last.action === 'delete') {
+        if (first.action === 'create') continue;
+        const c = last.changes;
+        out.push({ id, change: 'deleted', title: c.title?.before ?? '', starts_at: c.starts_at?.before ?? null, ends_at: c.ends_at?.before ?? null });
+      } else if (first.action === 'create' && now_) {
+        out.push({ id, change: 'created', title: now_.title, starts_at: now_.starts_at, ends_at: now_.ends_at });
+      } else if (now_ && mine.some((r) => r.changes.starts_at || r.changes.ends_at)) {
+        out.push({ id, change: 'moved', title: now_.title, starts_at: now_.starts_at, ends_at: now_.ends_at });
+      }
+    }
+    return out;
+  }
+
   function records(entityId) {
     return all('SELECT * FROM records WHERE entity_id = ? ORDER BY id', entityId).map((r) => ({
       ...r,
@@ -2187,6 +2220,8 @@ export function openLedger(path, options = {}) {
     flow,
     stale,
     records,
+    recordMark,
+    bookingChangesSince,
     recordNote,
     recordKnowledge,
     writeReport,
@@ -2223,6 +2258,11 @@ export function openLedger(path, options = {}) {
     markSeen,
     book,
     unbook,
+    // One booking as stored, or null.
+    getBooking: (id) => {
+      const row = getBookingRow(id);
+      return row ? { ...row } : null;
+    },
     schedule,
     activity,
     oauth,

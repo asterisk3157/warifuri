@@ -29,9 +29,12 @@
 //   in the MCP config files, as for the jobs.
 //
 // - 依頼: an agent on another device asks the secretary for something (ask_secretary: most often
-//   time for a task). The request is a system row with data.request in the secretary's
-//   conversation; it starts a turn as the person's words do, the reply is the secretary's
-//   message as usual, and the asking agent may wait for it (request()).
+//   time for a task). The request is a system row with data.request in the agents' thread
+//   (kind 'agent', one; not the conversation with the person); it starts a turn there as the
+//   person's words do, the reply is the secretary's message in the same thread, and the asking
+//   agent may wait for it (request()). When the turn put a booking in, moved it or deleted it,
+//   one line says so in the secretary's conversation (data.agent_notice), and nothing else of
+//   the exchange goes there.
 //
 // The thread's runner is 'resume'. A later runner ('resident', a long-running session) would
 // take the same thread with its messages and session id; this one leaves such a thread alone.
@@ -39,7 +42,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { LedgerError, SECRETARY_THREAD } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD, AGENT_THREAD } from '../ledger/ledger.mjs';
 import { REPORT_BODY_MAX, charLength } from '../ledger/rules.mjs';
 import { readSettings, onboardingDue } from '../ledger/settings.mjs';
 import { findOnPath } from '../client/connect.mjs';
@@ -82,6 +85,18 @@ export function requestBody(r) {
   if (r.prefer) out.push(`希望: ${r.prefer}`);
   if (r.starts_at || r.ends_at) out.push(`本人が決めた日時: ${r.starts_at ?? '?'} 〜 ${r.ends_at ?? '?'}`);
   return out.join('\n');
+}
+
+// The line in the secretary's conversation for a booking an agent's request changed.
+const NOTICE_WORDS = { created: '予定を入れました', moved: '予定を動かしました', deleted: '予定を消しました' };
+export function noticeLine(c) {
+  const a = new Date(c.starts_at);
+  const b = new Date(c.ends_at);
+  const p = (n) => String(n).padStart(2, '0');
+  const hm = (d) => `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const day = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+  const span = Number.isNaN(a.getTime()) ? '' : `${day(a)} ${hm(a)}〜${Number.isNaN(b.getTime()) ? '' : day(b) === day(a) ? hm(b) : `${day(b)} ${hm(b)}`}`;
+  return `${NOTICE_WORDS[c.change]}: ${[span, c.title].filter(Boolean).join(' ')}`;
 }
 
 // Who writes the replies and the runner's own notes in the thread.
@@ -365,6 +380,7 @@ export function createChat(ledger, cfg, ctx = {}) {
 
   const note = (threadId, body, data) => ledger.addMessage(threadId, { role: 'system', body, ...(data ? { data } : {}) }, WRITER);
   const mainThread = () => ledger.getThread(SECRETARY_THREAD.kind);
+  const agentThread = () => ledger.getThread(AGENT_THREAD.kind);
 
   // The files of the person's messages in the feed: pictures and words, and the rest by name.
   function filesOf(feed) {
@@ -381,13 +397,14 @@ export function createChat(ledger, cfg, ctx = {}) {
     const trigger = feed.find((m) => m.kind === 'trigger');
     // Reports written after the last message the session saw (the secretary's conversation only).
     const since = (thread.seen_until && ledger.getMessage(thread.seen_until)?.created_at) || thread.created_at;
-    const reports = sub ? [] : ledger.listReports({ limit: 10 }).reports.filter((r) => r.created_at > since).reverse();
+    const reports = thread.kind !== 'secretary' ? [] : ledger.listReports({ limit: 10 }).reports.filter((r) => r.created_at > since).reverse();
     const earlier = () => {
       const all = ledger.listMessages(thread.id, { limit: RECENT + feed.length });
       const fed = new Set(feed.map((m) => m.id));
       return all.filter((m) => !fed.has(m.id) && !['trigger', 'digest'].includes(m.kind)).slice(-RECENT);
     };
     const files = filesOf(feed);
+    const mark = thread.kind === 'agent' ? ledger.recordMark() : null;
     const images = files.filter((f) => f.image).map((f) => ({ name: f.name, ...f.image }));
     // 最初の会話: in the secretary's conversation, when the person speaks and the settings are
     // still to be made with them (onboardingDue).
@@ -478,6 +495,14 @@ export function createChat(ledger, cfg, ctx = {}) {
       log(`secretary chat: claude ended with ${out.code ?? out.signal}; output in ${paths(cfg.home).logs}`);
       note(thread.id, '返事を作れませんでした。もう一度送ってください。', trigger ? { failure: 'exit' } : undefined);
     }
+    // The agents' thread: what the request did to the calendar, in one line each in the
+    // secretary's conversation (the rest of the exchange stays here).
+    if (mark !== null && visible) {
+      const changes = ledger.bookingChangesSince(mark, WRITER.device);
+      const main = changes.length ? mainThread() ?? ledger.ensureThread(SECRETARY_THREAD.kind, WRITER) : null;
+      for (const c of changes.slice(0, 5)) note(main.id, noticeLine(c), { agent_notice: { booking: c.id, change: c.change, thread: thread.id } });
+      if (changes.length > 5) note(main.id, `ほかに${changes.length - 5}件の予定を変えました`, { agent_notice: { thread: thread.id } });
+    }
     // A session that answered is kept; one that failed to start is not. The buttons and the
     // calendar asked for in this turn went with its reply (or are dropped with it).
     ledger.updateThread(thread.id, {
@@ -540,7 +565,7 @@ export function createChat(ledger, cfg, ctx = {}) {
   // Every thread, as at startup: what was sent before a restart gets its reply now.
   function kickAll() {
     if (!on) return Promise.resolve();
-    const ids = [mainThread()?.id, ...Object.values(ledger.threadCounts()).map((t) => t.id)].filter(Boolean);
+    const ids = [mainThread()?.id, agentThread()?.id, ...Object.values(ledger.threadCounts()).map((t) => t.id)].filter(Boolean);
     return Promise.all(ids.map((id) => kick(id)));
   }
 
@@ -574,17 +599,17 @@ export function createChat(ledger, cfg, ctx = {}) {
       if (!ledger.openAsk(out.ask.thread_id)) kick(out.ask.thread_id);
       return out;
     },
-    // An agent's request (ask_secretary) into the secretary's conversation: fields { from,
+    // An agent's request (ask_secretary) into the agents' thread: fields { from,
     // text, task_id?, minutes?, by?, prefer?, starts_at?, ends_at? }. Starts a turn and waits
     // up to waitMs for the turn that takes it: { request, reply } (reply: the secretary's
     // message, or null when the turn made none) or { request, timedOut: true }; the request
-    // stays in the conversation either way.
+    // stays in the thread either way.
     async request(fields, writer, { waitMs = REQUEST_WAIT_MS } = {}) {
       if (!on) throw new LedgerError(['秘書が止まっているので、頼めません']);
       const text = typeof fields.text === 'string' ? fields.text.trim() : '';
       if (!text) throw new LedgerError(['頼むことを text に書きます']);
       if (charLength(text) > REQUEST_MAX) throw new LedgerError([`頼むことは${REQUEST_MAX}字までです`]);
-      const thread = ledger.ensureThread(SECRETARY_THREAD.kind, writer);
+      const thread = ledger.ensureThread(AGENT_THREAD.kind, writer);
       const request = Object.fromEntries(Object.entries({ ...fields, text }).filter(([, v]) => v !== undefined && v !== null && v !== ''));
       let resolve;
       const done = new Promise((r) => {

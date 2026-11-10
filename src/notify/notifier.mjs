@@ -8,6 +8,9 @@
 // With mirror (talking in Discord is on), Discord holds the whole conversation, as the screen
 // does: what the person writes on the screen is copied there, marked WEB_MARK, and the replies
 // to it go there too.
+// An agent's request (ask_secretary) and the secretary's reply to it are kept in a thread of
+// their own (kind 'agent') that the notifier does not read; the secretary's questions (ask)
+// still come from the conversation as always.
 // Nothing goes in the night, but while the person is talking; what came then goes once the
 // night is over, oldest first.
 // A thread of the conversation opened in Discord (threads, src/notify/discord-threads.mjs)
@@ -29,8 +32,6 @@ import { askMessages, replyComponents } from './discord-chat.mjs';
 const BODY_MAX = 1500;
 // The first line of a copy of what the person wrote on the screen.
 export const WEB_MARK = '(Web から)';
-// The first line of a request an agent sent the secretary (ask_secretary).
-export const AGENT_MARK = '(エージェントから)';
 // How long after the person last wrote from Discord the secretary's replies go there too.
 export const TALK_MS = 30 * 60 * 1000;
 
@@ -41,10 +42,6 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   if (mirror && m.role === 'user' && m.actor !== 'discord') {
     const words = m.body.trim() || (m.data?.attachments?.length ? 'ファイルを送りました' : '');
     return words ? { text: `${WEB_MARK}\n${words}`, mention: false, whole: true } : null;
-  }
-  if (mirror && isAgentRequest(m)) {
-    const from = m.data.request.from ? `${AGENT_MARK} ${m.data.request.from}` : AGENT_MARK;
-    return { text: `${from}\n${m.data.request.text ?? m.body}`, mention: false, whole: true };
   }
   if (m.kind === 'ask' && m.state === 'open') {
     const messages = askMessages(m);
@@ -61,12 +58,12 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   return null;
 }
 
-const isAgentRequest = (m) => m.role === 'system' && m.kind === 'text' && Boolean(m.data?.request);
-// Who last wrote to the secretary: the person from Discord or the screen, or (with mirror) an
-// agent's request, whose reply then goes to Discord too.
-const viaOf = (m, mirror) => {
+// Who last wrote to the secretary: the person from Discord or the screen. (An agent's request
+// and the reply to it are in the agents' thread, which does not go to Discord, nor does the
+// line that says a request changed the calendar.)
+const viaOf = (m) => {
   if (m.role === 'user') return m.actor === 'discord' ? 'discord' : 'screen';
-  return mirror && isAgentRequest(m) ? 'agent' : null;
+  return null;
 };
 
 // discord: { post } (src/notify/discord.mjs). night: the secretary's night ({ start, end }).
@@ -198,12 +195,12 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
       }
       // In the night, nothing goes unless the person is talking from Discord now (by what the
       // person wrote last); then all of it goes, in order.
-      const newest = [...list].reverse().find((m) => viaOf(m, mirror));
-      const now_ = newest ? { via: viaOf(newest, mirror), viaAt: newest.created_at } : state;
+      const newest = [...list].reverse().find((m) => viaOf(m));
+      const now_ = newest ? { via: viaOf(newest), viaAt: newest.created_at } : state;
       if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) return sent;
       const save = () => write({ started: true, last: state.last, failure: state.failure ?? null, via: state.via ?? null, viaAt: state.viaAt ?? null });
       for (const m of list) {
-        const via = viaOf(m, mirror);
+        const via = viaOf(m);
         if (via) {
           state.via = via;
           state.viaAt = m.created_at;

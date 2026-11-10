@@ -20,7 +20,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import {
-  STATES, MODES, LOADS, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
+  STATES, MODES, LOADS, ONLY_AT, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
   ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION, REPLY_CALENDAR_DAYS, REPLY_CALENDAR_MARKS,
 } from '../ledger/rules.mjs';
 import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
@@ -29,7 +29,7 @@ import { createOAuth } from './oauth.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { readSettings, writeSettings, weekBands, LIMIT_DEFAULTS } from '../ledger/settings.mjs';
-import { freeTimeFor, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
+import { freeTimeFor, bookingPlaceProblems, FREE_TIME_MAX_DAYS } from '../ledger/freetime.mjs';
 import { timetableFor, TIMETABLE_MAX_DAYS } from '../ledger/timetable.mjs';
 import {
   readContext, writeNote, noteRecordChanges, secretaryConfigured, finishPeopleImport, readProfileDefaults, writeProfileDefaults, profileFolders, PROFILE_FIELDS, RECORD_TEXT_CHARS,
@@ -285,11 +285,15 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
         'out of free, so book them first. booked_hours counts task and habit bookings inside earliest-latest (not ' +
         'fixed ones); remaining_hours is day_max_hours minus that and the habits to place, and free never adds up to ' +
         'more: slots are offered from the earliest and the last one is cut. A slot may be longer than ' +
-        'limits.block_max_minutes; cut it into blocks of at most that length when booking.',
-      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+        'limits.block_max_minutes; cut it into blocks of at most that length when booking. Each slot also says where ' +
+        'the person is then: place (a booking\'s location first, then the week type of settings; null when neither ' +
+        'says, which is taken as home) and home (whether that is home: a place of settings with home: true, or null). ' +
+        'only_at: "home" keeps only the slots at home, for a task with only_at home (work that needs the home network); ' +
+        'the hours left of the day are then offered at home.',
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional(), only_at: z.enum(ONLY_AT).optional() },
       annotations: readOnly,
     },
-    guarded(async ({ from, to }) => result(freeTimeFor(ledger, { from, to }))),
+    guarded(async ({ from, to, only_at }) => result(freeTimeFor(ledger, { from, to, only_at }))),
   );
 
   server.registerTool(
@@ -300,12 +304,14 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
         'check and book; it books nothing. from and to as in schedule, but from defaults to tomorrow; at most ' +
         `${TIMETABLE_MAX_DAYS} days. Drafted are the open tasks that take the person's time (human, human_with_ai), ready or ` +
         'running, not delegated, with every task before them closed, for the minutes their estimate has left after ' +
-        'their bookings from now on; nearer due dates (the task\'s or its goal\'s) first. A band of the week type with a ' +
+        'their bookings from now on; first by the order the person gave (priority, 1 first; none after), then nearer due ' +
+        'dates (the task\'s or its goal\'s). A task with only_at home goes only in free time at home. A band of the week type with a ' +
         "profile takes only that profile's tasks and is filled first. A block is block_min_minutes to " +
         'block_max_minutes long; a task gets one block a day, none on a day it is already booked, and the daily cap is ' +
         'kept, so the day is not filled for its own sake. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
         'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes }], left: [{ task_id, ' +
-        'title, left_min, reason }] (tasks that got no block, and tasks with no estimate), habits_left (habits that ' +
+        'title, left_min, reason, misses_due? }] (tasks that got no block, and tasks with no estimate; misses_due: true ' +
+        'with due when its due date falls in the period, the case to ask the person about), habits_left (habits that ' +
         'fit nowhere) }.',
       inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
       annotations: readOnly,
@@ -468,7 +474,9 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'A task that takes a person\'s time needs done_when. place_id: the place it belongs to (board shows the one you are in). ' +
       'after: the ids of the tasks that come before it. Under a goal that already has open tasks, after is required: ' +
       'decide the order when you create the task (after: [] says it runs alongside them on purpose). When you make a goal ' +
-      'and its tasks, create them in the order they will be done, each with after set to the one before.',
+      'and its tasks, create them in the order they will be done, each with after set to the one before. ' +
+      'only_at: "home" when it can be done only at home (it needs the home network, such as a company VPN); left out, ' +
+      'anywhere. priority: the order the person gave among their tasks (1 first), only from their word.',
     {
       title: z.string(),
       body: z.string().optional(),
@@ -481,6 +489,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       due_provisional: z.boolean().optional(),
       place_id: z.string().optional(),
       delegated: z.boolean().optional(),
+      only_at: z.enum(ONLY_AT).optional(),
+      priority: z.number().int().optional(),
       after: z.array(z.string().min(1)).optional(),
     },
     async (args) => {
@@ -502,7 +512,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'update',
     'Change fields of a goal or task. Only the fields given change; null clears one. Goals take title, outcome, due, ' +
       'due_provisional, mode, human_led, profile; tasks take title, body, done_when, due, due_provisional, mode, load, ' +
-      'goal_id, estimate_min, place_id, next, delegated. State changes go through close, defer, wait, start and release.',
+      'goal_id, estimate_min, place_id, next, delegated, only_at ("home": only at home; null: anywhere), priority ' +
+      '(the order the person gave, 1 first; null: none). State changes go through close, defer, wait, start and release.',
     {
       id: z.string().min(1),
       title: z.string().optional(),
@@ -519,6 +530,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       next: clearable,
       human_led: z.boolean().optional(),
       delegated: z.boolean().optional(),
+      only_at: z.enum(ONLY_AT).nullable().optional(),
+      priority: z.number().int().nullable().optional(),
       profile: clearable,
     },
     async ({ id, ...fields }) => result(ledger.update(id, given(fields), writer)),
@@ -997,7 +1010,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'an event again is safe; with id, attaches the pair (for an event you just wrote there), unless another ' +
       'booking has it. external_id needs source. note: a note, such as an outside event\'s description; location: where it is ' +
       '(put a place the person named here, not in the title); organizer: who made it (such as an email address). A new ' +
-      'booking made here without source and organizer is marked as made by the secretary, or by this device.',
+      'booking made here without source and organizer is marked as made by the secretary, or by this device. ' +
+      'A task with only_at home is refused at a time the person is not at home (see free_time).',
     {
       id: z.string().min(1).optional(),
       kind: z.enum(BOOKING_KINDS).optional(),
@@ -1016,6 +1030,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       const fields = given(args);
       // Who made a booking made in warifuri, as the calendar shows it under 作成者.
       if (!fields.id && !fields.source && fields.organizer === undefined) fields.organizer = device.name === secretaryDevice ? '秘書' : device.name;
+      const away = bookingPlaceProblems(ledger, fields);
+      if (away.length) return refusal(away);
       return result(ledger.book(fields, writer));
     },
   );
@@ -1034,6 +1050,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'the secretary alone books, moves and removes bookings then (book and unbook refuse other devices). Do not ' +
       'pick the time yourself: give what it is for (task_id), how long (minutes), by when (by), and what is ' +
       'preferred (prefer, such as mornings); when the person already set the time, give starts_at and ends_at. ' +
+      'The secretary adds it to the person\'s plan and books it, and the reply says what went when; a task only agents ' +
+      'do (mode ai_worker) takes none of the person\'s time, and the reply says you may go ahead now. ' +
       'Also to change one of the person\'s own calendar events when the person asked you to: say in text which event and how; the secretary checks with the person first. ' +
       'text says the rest in plain words the person can read too: no tool names (book, unbook, note), ids or field ' +
       'names, since it is shown to the person as it is. The request goes into the secretary\'s conversation, which the person ' +
@@ -1195,9 +1213,10 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'settings',
     "Read or write the person's own settings that scheduling uses. With no section given it only reads, returning " +
       'life, places, limits, calendar, week and onboarding with defaults filled in (defaults lists the fields still unset). life: { rules: [one-line ' +
-      'text] } for sleep, meals and fixed commitments, as plain rules. places: { places: [{ name, note }], travel: ' +
+      'text] } for sleep, meals and fixed commitments, as plain rules. places: { places: [{ name, note, home }], travel: ' +
       '[{ from, to, minutes }] } for the physical places the person goes to and the travel time between two of them ' +
-      '(both ways; not the working folders of the places tool). life and places are replaced as given. limits: ' +
+      '(both ways; not the working folders of the places tool); home: true marks home, where work that needs the home ' +
+      'network (only_at home) can be done. life and places are replaced as given. limits: ' +
       `{ day_max_hours (default ${d.day_max_hours}), block_min_minutes (${d.block_min_minutes}), block_max_minutes ` +
       `(${d.block_max_minutes}), earliest ('${d.earliest}'), latest ('${d.latest}') }, times as HH:MM; only the fields ` +
       'given change, null puts one back to its default. Limits are the person\'s to change: write them only when the ' +

@@ -8,6 +8,8 @@ export const CLOSED_STATES = ['done', 'discarded'];
 export const MODES = ['ai_worker', 'human_with_ai', 'human'];
 export const HUMAN_TIME_MODES = ['human_with_ai', 'human'];
 export const LOADS = ['heavy', 'normal', 'light'];
+// Where a task can be done (tasks.only_at): home is only at home (家). Null is anywhere.
+export const ONLY_AT = ['home'];
 export const BODY_MAX = 2000;
 export const AUTONOMY_LEVELS = ['ask', 'act_then_tell'];
 // The kinds of the secretary's actions whose autonomy is kept (原則13), with the stage of
@@ -43,7 +45,7 @@ export const REPORT_TITLE_MAX = 200;
 export const REPORT_BODY_MAX = 20000;
 // 会話: a thread's runner, who wrote a message, and the states of a proposal. The person's
 // message is kept short enough to read back; the secretary's reply may be as long as a report.
-export const THREAD_KINDS = ['secretary', 'sub'];
+export const THREAD_KINDS = ['secretary', 'sub', 'agent'];
 export const THREAD_RUNNERS = ['resume', 'resident'];
 export const MESSAGE_ROLES = ['user', 'secretary', 'system'];
 export const MESSAGE_MAX = 4000;
@@ -292,6 +294,12 @@ export function checkTask(row, ctx = {}) {
   }
   if (!isText(row.next)) p.push('次の一手(next)は文字列です');
   if (!isFlag(row.delegated)) p.push('delegated(任せるの印)は 0 か 1 です');
+  if (row.only_at !== null && row.only_at !== undefined && !ONLY_AT.includes(row.only_at)) {
+    p.push(`できる場所(only_at)は ${ONLY_AT.join(', ')}(家だけ)か、空(どこでも)です`);
+  }
+  if (row.priority !== null && row.priority !== undefined && !(Number.isInteger(row.priority) && row.priority >= 1)) {
+    p.push('優先順(priority)は1以上の整数です。1がいちばん先です');
+  }
   return p;
 }
 
