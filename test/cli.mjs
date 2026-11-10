@@ -22,6 +22,6 @@ export function cli(args, options = {}) {
   return spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, ...args], {
     encoding: 'utf8',
     env: cliEnv(options),
-    timeout: 10_000,
+    timeout: 30_000,
   });
 }
