@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -601,6 +601,13 @@ export const MIGRATIONS = [
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
   CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records
     BEGIN SELECT RAISE(ABORT, 'records are append-only'); END;
+  `,
+
+  // 12 -> 13: where a task can be done (only_at: 'home' for only at home, NULL for anywhere),
+  // and the order the person gave (priority: 1 first, NULL for none said).
+  `
+  ALTER TABLE tasks ADD COLUMN only_at TEXT CHECK (only_at IS NULL OR only_at IN ('home'));
+  ALTER TABLE tasks ADD COLUMN priority INTEGER CHECK (priority IS NULL OR priority >= 1);
   `,
 ];
 

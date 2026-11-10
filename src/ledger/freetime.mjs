@@ -17,10 +17,16 @@
 // - The slots are offered from the earliest until they add up to the hours left under
 //   day_max_hours: the slot that crosses the limit is shortened, and dropped when that leaves
 //   it shorter than block_min_minutes. So a day never offers more than it has left.
+// - Where the person is (whereabouts.mjs): the free time is cut where the place changes, and
+//   each slot says its place (null: nothing written, so taken to be home) and whether it is
+//   home. only_at 'home' keeps only the slots at home, before the cap is applied, so a day
+//   still offers its hours left at home. Without whereabouts given, every slot is at home.
 
 import { LedgerError } from './ledger.mjs';
 import { habitOccurrences } from './habits.mjs';
-import { readSettings } from './settings.mjs';
+import { readSettings, weekBands } from './settings.mjs';
+import { whereabouts } from './whereabouts.mjs';
+import { ONLY_AT } from './rules.mjs';
 
 // The longest period asked at once, in days.
 export const FREE_TIME_MAX_DAYS = 31;
@@ -71,10 +77,23 @@ function gaps(s, e, busy) {
   return out;
 }
 
+// [s, e) cut where the place changes: [{ s, e, place, home }]. where null: home, place null.
+function atPlaces(s, e, where) {
+  if (!where) return [{ s, e, place: null, home: true }];
+  const out = [];
+  for (const x of where) {
+    if (x.e <= s || x.s >= e) continue;
+    out.push({ s: Math.max(x.s, s), e: Math.min(x.e, e), place: x.place, home: x.home });
+  }
+  return out;
+}
+
 // Free time in [from, to) (Dates, ms or ISO). limits: as readSettings gives them. bookings:
 // [{ kind, habit_id, starts_at, ends_at }] covering at least the whole local days of the
 // period (for the daily cap). habits: habit rows or views; stopped ones are skipped.
-export function freeTime({ from, to, limits, bookings = [], habits = [] }) {
+// where: whereabouts() over the period ([{ s, e, place, home }]), or null for home all along.
+// onlyAt: 'home' to keep only the slots at home, or null for all.
+export function freeTime({ from, to, limits, bookings = [], habits = [], where = null, onlyAt = null }) {
   const fromMs = ms(from);
   const toMs = ms(to);
   if (Number.isNaN(fromMs) || Number.isNaN(toMs)) throw new TypeError('from と to は日時です');
@@ -126,11 +145,13 @@ export function freeTime({ from, to, limits, bookings = [], habits = [] }) {
     const s0 = Math.max(ws, fromMs);
     const e0 = Math.min(we, toMs);
     if (e0 > s0) {
-      for (const [s, e] of gaps(s0, e0, busy)) {
+      for (const piece of gaps(s0, e0, busy).flatMap(([s, e]) => atPlaces(s, e, where))) {
+        const { s, e } = piece;
         if (left < limits.block_min_minutes) break;
+        if (onlyAt === 'home' && !piece.home) continue;
         if ((e - s) / MIN < limits.block_min_minutes) continue;
         const minutes = Math.min((e - s) / MIN, left);
-        free.push({ starts_at: iso(s), ends_at: iso(s + minutes * MIN), minutes });
+        free.push({ starts_at: iso(s), ends_at: iso(s + minutes * MIN), minutes, place: piece.place, home: piece.home });
         left -= minutes;
       }
     }
@@ -145,9 +166,21 @@ export function freeTime({ from, to, limits, bookings = [], habits = [] }) {
   return { from: iso(fromMs), to: iso(toMs), limits: { ...limits }, days };
 }
 
+// Where the person is over [fromMs, toMs) on the ledger: the week type and places of the
+// settings, and the bookings of those times (their location).
+export function whereaboutsFor(ledger, fromMs, toMs, { settings = readSettings(ledger), bookings, exceptId = null } = {}) {
+  const list = (bookings ?? ledger.schedule({ from: iso(fromMs), to: iso(toMs) }).bookings).filter((b) => exceptId === null || b.id !== exceptId);
+  return whereabouts({
+    fromMs, toMs, bands: weekBands(settings.week.slots, fromMs, toMs), bookings: list,
+    places: settings.places.places, travel: settings.places.travel,
+  });
+}
+
 // free_time on the ledger: from and to as schedule() reads them (YYYY-MM-DD is local
 // midnight; from defaults to today, to to one day after from), at most FREE_TIME_MAX_DAYS.
-export function freeTimeFor(ledger, { from, to } = {}) {
+// only_at: 'home' for the slots at home only (for a task that can be done only there).
+export function freeTimeFor(ledger, { from, to, only_at: onlyAt = null } = {}) {
+  if (onlyAt !== null && !ONLY_AT.includes(onlyAt)) throw new LedgerError([`only_at は ${ONLY_AT.join('、')} か、なし(どこでも)です`]);
   const period = ledger.schedule({ from, to });
   const fromMs = ms(period.from);
   const toMs = ms(period.to);
@@ -162,7 +195,46 @@ export function freeTimeFor(ledger, { from, to } = {}) {
   // A rule that cannot be read (a row imported for review) is skipped and named.
   const habits = ledger.listHabits();
   const readable = habits.filter((h) => typeof h.rule === 'object');
-  const out = freeTime({ from: fromMs, to: toMs, limits: readSettings(ledger).limits, bookings: whole.bookings, habits: readable });
+  const settings = readSettings(ledger);
+  // Where the person is over the whole local days, from the same bookings.
+  const where = whereaboutsFor(ledger, days[0].start, days.at(-1).end, { settings, bookings: whole.bookings });
+  const out = freeTime({ from: fromMs, to: toMs, limits: settings.limits, bookings: whole.bookings, habits: readable, where, onlyAt });
   const skipped = habits.filter((h) => !readable.includes(h)).map((h) => h.id);
-  return skipped.length ? { ...out, skipped_habits: skipped } : out;
+  const shown = onlyAt ? { ...out, only_at: onlyAt } : out;
+  return skipped.length ? { ...shown, skipped_habits: skipped } : shown;
 }
+
+// Why a booking cannot go where it is asked (an empty list when it can): a booking of a task
+// with only_at 'home' must be at home for all its time, by whereabouts without the booking
+// itself, and its own location, when given, must be a home place. fields: as book() takes
+// them; with id, the fields not given are the booking's own.
+export function bookingPlaceProblems(ledger, fields) {
+  const before = fields.id ? ledger.getBooking(fields.id) : null;
+  const next = { ...(before ?? {}), ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) };
+  if (next.kind !== 'task' || !next.task_id) return [];
+  const task = ledger.get(next.task_id);
+  if (task?.kind !== 'task' || task.only_at !== 'home') return [];
+  const s = ms(next.starts_at);
+  const e = ms(next.ends_at);
+  if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return []; // book() says what is wrong with the times
+  const settings = readSettings(ledger);
+  const homes = new Set(settings.places.places.filter((p) => p.home === true).map((p) => p.name));
+  const location = typeof next.location === 'string' ? next.location.trim() : '';
+  if (location !== '' && !homes.has(location)) {
+    return [`「${task.title}」は家でしかできないタスクです(only_at: home)。場所 ${location} は家ではないので入れられません`];
+  }
+  // Travel before and after an outside booking may reach past the booking's own day.
+  const margin = 24 * 60 * MIN;
+  const where = whereaboutsFor(ledger, s - margin, e + margin, { settings, exceptId: before?.id ?? null });
+  const away = where.filter((x) => !x.home && x.e > s && x.s < e);
+  if (away.length === 0) return [];
+  const when = away.map((x) => `${x.place}(${hm(Math.max(x.s, s))}〜${hm(Math.min(x.e, e))})`).join('、');
+  return [
+    `「${task.title}」は家でしかできないタスクです(only_at: home)。その時間は家にいません: ${when}。free_time に only_at: "home" を渡して、家にいる空きから選びます`,
+  ];
+}
+
+const hm = (n) => {
+  const d = new Date(n);
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};

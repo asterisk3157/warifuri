@@ -88,8 +88,10 @@ function checkLife(value, problems) {
   return { rules: value.rules.map((r, i) => line(r, `life.rules の ${i + 1} 件目`, RULE_MAX, problems)) };
 }
 
-// places: { places: [{ name, note? }], travel: [{ from, to, minutes }] }. A travel time names
-// two of the places and holds both ways, so a pair is given once.
+// places: { places: [{ name, note?, home? }], travel: [{ from, to, minutes }] }. home: true
+// marks a place as home (家: where the work that needs the home network, such as a company VPN,
+// can be done; whereabouts.mjs); it is kept only when true. A travel time names two of the
+// places and holds both ways, so a pair is given once.
 function checkPlaces(value, current, problems) {
   if (!isObject(value)) return refuse(problems, 'places は { places: [...], travel: [...] } の形です');
   unknownKeys(value, ['places', 'travel'], 'places ', problems);
@@ -101,15 +103,16 @@ function checkPlaces(value, current, problems) {
     out.places = value.places.map((p, i) => {
       const label = `places.places の ${i + 1} 件目`;
       if (!isObject(p)) {
-        problems.push(`${label}は { name, note } の形です`);
+        problems.push(`${label}は { name, note, home } の形です`);
         return null;
       }
-      unknownKeys(p, ['name', 'note'], `${label}`, problems);
+      unknownKeys(p, ['name', 'note', 'home'], `${label}`, problems);
       const name = line(p.name, `${label}の name `, PLACE_NAME_MAX, problems);
       if (name !== null && seen.has(name)) problems.push(`場所 ${name} が2回あります`);
       seen.add(name);
       const note = p.note === undefined || p.note === null ? undefined : line(p.note, `${label}の note `, PLACE_NOTE_MAX, problems);
-      return note === undefined ? { name } : { name, note };
+      if (p.home !== undefined && p.home !== null && typeof p.home !== 'boolean') problems.push(`${label}の home は true か false です`);
+      return { name, ...(note === undefined ? {} : { note }), ...(p.home === true ? { home: true } : {}) };
     });
   }
   if (value.travel !== undefined) {

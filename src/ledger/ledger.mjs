@@ -76,7 +76,7 @@ const GOAL_COLUMNS = [
 const TASK_COLUMNS = [
   'id', 'title', 'body', 'done_when', 'goal_id', 'state', 'mode', 'load', 'estimate_min', 'due', 'due_provisional',
   'place_id', 'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'next', 'delegated', 'review',
-  'created_at', 'updated_at', 'closed_at',
+  'created_at', 'updated_at', 'closed_at', 'only_at', 'priority',
 ];
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'profile', 'created_at', 'updated_at'];
@@ -90,7 +90,7 @@ const BOOKING_FIELDS = ['id', 'title', 'kind', 'task_id', 'habit_id', 'starts_at
 const GOAL_EDITABLE = ['title', 'outcome', 'due', 'due_provisional', 'mode', 'human_led', 'profile'];
 const TASK_EDITABLE = [
   'title', 'body', 'done_when', 'due', 'due_provisional', 'mode', 'load', 'goal_id', 'estimate_min', 'place_id',
-  'next', 'delegated',
+  'next', 'delegated', 'only_at', 'priority',
 ];
 const HABIT_EDITABLE = ['title', 'rule', 'duration_min', 'goal_id', 'active'];
 const FLAG_FIELDS = ['due_provisional', 'human_led', 'active', 'delegated'];
@@ -402,6 +402,7 @@ export function openLedger(path, options = {}) {
       goal_id: input.goal_id ?? null, state: 'ready', mode: input.mode, load: input.load ?? null,
       estimate_min: input.estimate_min ?? null, due: input.due ?? null, due_provisional: input.due_provisional ?? 0,
       place_id: input.place_id ?? null, next: input.next ?? null, delegated: input.delegated ?? 0,
+      only_at: input.only_at ?? null, priority: input.priority ?? null,
       created_at: t, updated_at: t,
     };
     row = applyState(row, state, extra, t);
@@ -2223,6 +2224,11 @@ export function openLedger(path, options = {}) {
     markSeen,
     book,
     unbook,
+    // One booking as stored, or null.
+    getBooking: (id) => {
+      const row = getBookingRow(id);
+      return row ? { ...row } : null;
+    },
     schedule,
     activity,
     oauth,
