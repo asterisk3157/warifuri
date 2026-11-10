@@ -10,7 +10,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { openLedger } from '../src/ledger/ledger.mjs';
+import { openLedger, LedgerError } from '../src/ledger/ledger.mjs';
 import { createServer } from '../src/server/mcp.mjs';
 import { checkProfile, isLoopbackHost } from '../src/server/web.mjs';
 import { layoutFlow } from '../src/web/flow.js';
@@ -695,3 +695,52 @@ test('秘書のナレッジ: the rules, places, week and people are read togethe
   assert.equal((await post(`/people/${id}`, {}, {}, 'DELETE')).status, 400);
 });
 
+
+test('人の確かめと教える: 合っている and 違う answer a guess; tell wakes the secretary once and says what it wrote', async (t) => {
+  const told = [];
+  let answer = () => ({ text: '担当に「装置の予約」を足しました。' });
+  const chat = { on: true, status: () => ({ on: true, replying: false, waiting: 0 }), tell: async (id, text) => { told.push([id, text]); return answer(); } };
+  const { base, ledger } = await start(t, { chat });
+  const post = (p, body, headers = {}) =>
+    fetch(`${base}/web/api${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify(body) });
+  const p = ledger.people.create({ name: '春野さん', role: '先輩', items: { 好きなもの: '紅茶' }, add_memos: [{ text: '火曜はいないらしい', mark: '未確認' }], profiles: ['research'], profile: 'research', unverified: true }, { all: true }, ACTOR);
+  const read = async () => (await (await get(base, '/web/api/rules')).json()).people.people.find((x) => x.id === p.id);
+  const first = await read();
+  assert.deepEqual([first.unverified, first.items[0].unverified, first.memos[0].mark], [['role'], true, '未確認']);
+
+  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true }, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true, extra: 1 })).status, 400);
+  const ok = await post(`/people/${p.id}/confirm`, { field: 'role', ok: true });
+  assert.equal(ok.status, 200);
+  assert.deepEqual((await ok.json()).people.people.find((x) => x.id === p.id).unverified, []);
+  assert.equal((await post(`/people/${p.id}/confirm`, { field: 'role', ok: true })).status, 400);
+  assert.equal((await post(`/people/${p.id}/confirm`, { item: { label: '好きなもの', profile: 'research' }, ok: false })).status, 200);
+  assert.equal((await post(`/people/${p.id}/confirm`, { memo: first.memos[0].id, ok: true })).status, 200);
+  const after = await read();
+  assert.deepEqual([after.role, after.items, after.memos[0].mark], ['先輩', [], null]);
+  assert.equal(ledger.records(p.id).filter((r) => r.action === 'confirm').every((r) => r.actor === 'web'), true);
+
+  // tell: the words go to the secretary; what it said comes back with the people.
+  assert.equal((await post(`/people/${p.id}/tell`, { text: 1 })).status, 400);
+  const res = await post(`/people/${p.id}/tell`, { text: '装置の予約も担当している' });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.said, '担当に「装置の予約」を足しました。');
+  assert.ok(Array.isArray(body.people.people));
+  assert.deepEqual(told, [[p.id, '装置の予約も担当している']]);
+  answer = () => {
+    throw new LedgerError(['時間内に登録が終わりませんでした。もう一度送ってください']);
+  };
+  const late = await post(`/people/${p.id}/tell`, { text: 'x' });
+  assert.equal(late.status, 400);
+  assert.match((await late.json()).problems[0], /時間内/);
+});
+
+test('教える with the secretary off: refused with words to show', async (t) => {
+  const { base, ledger } = await start(t);
+  const p = ledger.people.create({ name: '冬木さん', profiles: ['research'] }, { all: true }, ACTOR);
+  const res = await fetch(`${base}/web/api/people/${p.id}/tell`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ text: '会計をしている' }) });
+  assert.equal(res.status, 409);
+  assert.deepEqual((await res.json()).problems, ['秘書が止まっているので登録できません']);
+  assert.equal((await (await get(base, '/web/api/rules')).json()).secretary, false);
+});

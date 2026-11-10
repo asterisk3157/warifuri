@@ -657,7 +657,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       "to the profile's inbox.md for the secretary to sort, or, with no secretary, into knowledge.md marked 未確認. " +
       'people: true when it is about a person (who they are, their role, what they like, what came of talking with ' +
       'them; begin with their name): it becomes a memo of that person in the people tool, never through the inbox ' +
-      '(an agent\'s marked 未確認). person: the id of the person (from people); without it, the person whose name the ' +
+      '(kind human: the person\'s words, a checked memo marked 本人の言葉; kind agent: your guess, marked 未確認 until ' +
+      'the person checks it). person: the id of the person (from people); without it, the person whose name the ' +
       'text begins with, or else it waits with no person for the secretary to place. memo_kind: やりとり (what ' +
       'happened), 接し方 (how to deal with them) or その他 (default). Something that fits a column (email, role, ' +
       'birthday, 好きなもの) goes in that column with person instead. ' +
@@ -860,7 +861,11 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       'source says where they came from (default: your device). edit_memos: [{ id, text?, kind?, mark? }]. ' +
       'promote_memos: [{ id, label, value? }]: a memo that is really a column becomes that column (value: its text ' +
       'unless given) and leaves the memos. assign_memos: ids of unassigned memos about this person. link, unlink: ' +
-      '[{ kind: goal | task | booking, id }]. add_profiles, remove_profiles: the profiles the person is in. Never ' +
+      '[{ kind: goal | task | booking, id }]. add_profiles, remove_profiles: the profiles the person is in. ' +
+      'unverified: true when the columns and items you write in this call are your guess (read from a document, ' +
+      'inferred), not what the person said; they are marked 未確認 until the person checks them on the screen. ' +
+      'Default false: a checked value, as what the person said. Writing a column again replaces its value and its ' +
+      'mark, so write what the person told you with unverified false over a guess of the same column. Never ' +
       'keep numbers that open accounts or prove who someone is (My Number, cards, accounts, passwords), nor health ' +
       'or beliefs: such column names and long digit runs are refused.',
     {
@@ -885,6 +890,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       unlink: linkRef.optional(),
       source: z.string().min(1).optional(),
       allow_similar: z.boolean().optional(),
+      unverified: z.boolean().optional(),
     },
     async ({ place, profile, id, source, ...input }) => {
       const scope = peopleScope(place, profile, 'person');

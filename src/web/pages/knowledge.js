@@ -1,30 +1,34 @@
-// ナレッジ: each profile's people (one entry per person, from the ledger), knowledge and inbox,
-// and the files split out of them. It only shows: changes go through the agents (note,
-// person), as everything else on these screens. The 秘書 entry at the top of the list is the
-// secretary's own: the rules, places and week she keeps (they can be changed on the spot, in
-// knowledge-secretary.js) and the people of every profile in one table.
+// ナレッジ: on the left, the list of what to look at: 人, 生活リズム, よく行く場所, 曜日ごとの居場所
+// and GitHub (the secretary's settings, changed on the spot in knowledge-secretary.js), then each
+// profile, opened in place, with its 決まったこと (knowledge.md and knowledge/), 手順
+// (procedures/) and 未整理のメモ (inbox.md). On the right, the one chosen.
+//
+// 人 is one table of the people of every profile. A person opens in place: what is known (the
+// checked values), what is not checked yet (未確認, each answered with 合っている or 違う), and
+// a box to tell the secretary about them (POST /people/:id/tell: the secretary is woken once,
+// outside the conversation). The profile's files only show; changes go through the agents.
 
-import { h, skel, profileChip } from '../ui.js';
+import { h, s, skel, profileColor } from '../ui.js';
 import { renderMarkdown } from '../md.js';
-import { secretaryCards } from './knowledge-secretary.js';
+import { settingsCard, settingsBusy, SETTINGS } from './knowledge-secretary.js';
 
-const SECRETARY = '\u0000secretary';
-const view = { profile: null, open: null, file: null, person: null };
+// sel: 'people', one of SETTINGS, or 'profile' (with profile and part: knowledge | procedures |
+// inbox). open: the profiles opened in the list. file: the file of knowledge/ or procedures/
+// opened. person: the person opened in the table.
+const view = { sel: 'people', profile: null, part: null, open: new Set(), file: null, person: null };
 
 async function load(api) {
-  const list = await api('/knowledge');
-  if (view.profile !== SECRETARY && !list.profiles.some((p) => p.name === view.profile)) {
-    view.profile = (list.profiles.find((p) => p.people + p.knowledge + p.inbox + p.files > 0) ?? list.profiles[0])?.name ?? SECRETARY;
+  const [list, rules] = await Promise.all([api('/knowledge'), api('/rules')]);
+  if (view.sel === 'profile' && !list.profiles.some((p) => p.name === view.profile)) Object.assign(view, { sel: 'people', profile: null, part: null });
+  let one = null;
+  let file = null;
+  if (view.sel === 'profile') {
+    const base = `/knowledge/${encodeURIComponent(view.profile)}`;
+    one = await api(base).catch(() => null);
+    file = one && view.file ? await api(`${base}?name=${encodeURIComponent(view.file)}`).catch(() => null) : null;
   }
-  if (view.profile === SECRETARY) {
-    return { list, one: null, file: null, rules: await api('/rules') };
-  }
-  const one = await api(`/knowledge/${encodeURIComponent(view.profile)}`);
-  const file = one && view.open ? await api(`/knowledge/${encodeURIComponent(view.profile)}?name=${encodeURIComponent(view.open)}`).catch(() => null) : null;
-  return { list, one, file };
+  return { list, rules, one, file };
 }
-
-const count = (p) => p.people + p.knowledge + p.inbox + p.files;
 
 // A note line as warifuri writes it: "- 2026-10-24 「本人の言葉」 text (device task)". Shown
 // as the text with its date and who said it; the device stays out.
@@ -40,197 +44,294 @@ function notes(text) {
     h('span', { class: 'wf-know-meta', text: [`${Number(m[2])}/${Number(m[3])}`, m[4] ? WHO[m[4]] : null].filter(Boolean).join(' · ') }))));
 }
 
-function secretaryButton(ctx) {
-  return h('button', {
-    type: 'button', class: 'wf-goal-btn wf-know-secretary', 'aria-pressed': String(view.profile === SECRETARY), data: { key: 'profile-secretary' },
-    onclick: () => { view.profile = SECRETARY; view.open = null; view.person = null; people.query = ''; people.affiliation = ''; ctx.refresh(); },
-  }, h('span', { class: 'wf-goal-top' }, h('b', { text: '秘書' })));
-}
-
-function profileButton(p, colors, ctx) {
-  return h('button', {
-    type: 'button', class: 'wf-goal-btn', 'aria-pressed': String(view.profile === p.name), data: { key: `profile-${p.name}` },
-    onclick: () => { view.profile = p.name; view.open = null; view.person = null; people.query = ''; people.affiliation = ''; ctx.refresh(); },
-  },
-  h('span', { class: 'wf-goal-top' }, profileChip(p.name, colors, 15)),
-  h('span', { class: 'wf-goal-meta', text: count(p) ? [p.people && `人 ${p.people}`, p.knowledge && `ナレッジ ${p.knowledge}`, p.inbox && `受信箱 ${p.inbox}`, p.files && `手順 ${p.files}`].filter(Boolean).join(' · ') : 'まだありません' }));
-}
-
-// One file of the profile; always shown, with まだありません when it is empty.
-function section(title, file) {
-  const has = Boolean(file?.text?.trim());
-  return h('section', { class: 'wf-know-sec' },
-    h('div', { class: 'wf-group-head' }, h('h2', { text: title })),
-    has ? notes(file.text) : h('div', { class: 'wf-know-empty', text: 'まだありません' }),
-    has && file.truncated ? h('p', { class: 'wf-muted', text: '長いため、途中までを表示しています' }) : null);
-}
-
-const MD = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/;
-const birthdayText = (b) => {
-  const m = MD.exec(b ?? '');
-  return m ? `${m[1] ? `${m[1]}年` : ''}${Number(m[2])}月${Number(m[3])}日` : (b ?? '');
-};
-// Days from today to the next birthday (for sorting), or Infinity without one.
-function daysToBirthday(b, now) {
-  const m = MD.exec(b ?? '');
-  if (!m) return Infinity;
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let d = new Date(today.getFullYear(), Number(m[2]) - 1, Number(m[3]));
-  if (d < today) d = new Date(today.getFullYear() + 1, Number(m[2]) - 1, Number(m[3]));
-  return Math.round((d - today) / 86400000);
-}
 const memoMeta = (f) => {
   const [, mo, d] = /^\d{4}-(\d{2})-(\d{2})$/.exec(f.learned_on) ?? [];
-  return [mo ? `${Number(mo)}/${Number(d)}` : null, f.mark ? WHO[f.mark] : null].filter(Boolean).join(' · ');
+  return [mo ? `${Number(mo)}/${Number(d)}` : null, f.profile].filter(Boolean).join(' · ');
 };
 const memoList = (memos) => h('ul', { class: 'wf-know-notes' }, ...memos.map((f) => h('li', {},
   h('span', { class: 'wf-know-text' }, f.kind ? h('span', { class: 'wf-know-kind', text: f.kind }) : null, f.text),
   h('span', { class: 'wf-know-meta', text: memoMeta(f) }))));
 
-// The table of people, always drawn by the same rules, whatever is filled in:
-// - the columns are the fixed ones, all of them, in one order (名前, 所属, 役職・担当, メール,
-//   電話, 誕生日), then the profile's free columns (the most filled first), then メモ;
-// - an empty cell is a faint —, never a missing column;
-// - a birthday is month/day, with the age when the year is known;
-// - a long value is cut with … (the whole of it on hover and in the opened row);
-// - the name stays put while the table scrolls sideways;
-// - the search, the 所属 filter and the count are always there.
+// ---- 左の一覧 ----
+
+const chevron = (open) => s('svg', { 'aria-hidden': 'true', width: 12, height: 12, viewBox: '0 0 12 12', fill: 'none', class: 'wf-kn-chev', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
+  s('path', { d: open ? 'M2.5 4.5 6 8l3.5-3.5' : 'M4.5 2.5 8 6 4.5 9.5' }));
+
+function choose(ctx, sel, extra = {}) {
+  Object.assign(view, { sel, profile: null, part: null, file: null, ...extra });
+  ctx.refresh();
+}
+
+function navButton({ key, label, count, current, onclick, sub = false }) {
+  return h('button', { type: 'button', class: ['wf-kn-item', sub && 'wf-kn-sub'], 'aria-current': current ? 'true' : null, data: { key }, onclick },
+    h('span', { class: 'wf-kn-label', text: label }), count ? h('span', { class: 'wf-kn-count', text: count }) : null);
+}
+
+const TOP = [['people', '人'], ['life', '生活リズム'], ['places', 'よく行く場所'], ['week', '曜日ごとの居場所'], ['github', 'GitHub']];
+const PARTS = [['knowledge', '決まったこと'], ['procedures', '手順'], ['inbox', '未整理のメモ']];
+
+function topCount(key, rules) {
+  const n = { people: rules.people.count, life: rules.life.rules.length, places: rules.places.places.length, week: rules.week.slots.length, github: rules.github.owners.length }[key];
+  return n ? String(n) : '';
+}
+
+function partCount(part, p) {
+  if (part === 'knowledge') return p.knowledge ? `${p.knowledge}行` : p.topics ? `${p.topics}件` : '';
+  const n = part === 'procedures' ? p.procedures : p.inbox;
+  return n ? String(n) : '';
+}
+
+function sideList(list, rules, ctx) {
+  const top = TOP.map(([key, label]) => navButton({ key: `kn-${key}`, label, count: topCount(key, rules), current: view.sel === key, onclick: () => choose(ctx, key) }));
+  const profiles = list.profiles.flatMap((p) => {
+    const open = view.open.has(p.name);
+    const head = h('button', {
+      type: 'button', class: 'wf-kn-item wf-kn-profile', 'aria-expanded': String(open), data: { key: `kn-profile-${p.name}` },
+      onclick: () => { if (open) view.open.delete(p.name); else view.open.add(p.name); ctx.rerender(); },
+    }, chevron(open), h('span', { class: 'wf-dot', style: { background: profileColor(p.name, list.colors) }, 'aria-hidden': 'true' }), h('span', { class: 'wf-kn-label', text: p.name }));
+    if (!open) return [head];
+    return [head, h('div', { class: 'wf-kn-parts' }, ...PARTS.map(([part, label]) => navButton({
+      key: `kn-${p.name}-${part}`, label, count: partCount(part, p), sub: true,
+      current: view.sel === 'profile' && view.profile === p.name && view.part === part,
+      onclick: () => choose(ctx, 'profile', { profile: p.name, part }),
+    })))];
+  });
+  return h('nav', { class: 'wf-kn-side', 'aria-label': 'ナレッジの種類', data: { scroll: 'kn-side' } },
+    ...top, h('div', { class: 'wf-kn-divider', text: 'プロフィール' }), ...profiles);
+}
+
+// ---- 人 ----
+
 // Search, filter and order are kept per screen, not on the server.
 const people = { query: '', affiliation: '', sort: 'name', desc: false };
-const FIXED = [['name', '名前'], ['affiliation', '所属'], ['role', '役職・担当'], ['email', 'メール'], ['phone', '電話'], ['birthday', '誕生日']];
-const KINDS = ['やりとり', '接し方', 'その他'];
-// Month/day, and the age today when the year is known: 11/20 or 3/2(22歳).
-function birthdayCell(b, now) {
+const LABELS = { aliases: '呼び名', affiliation: '所属', role: '役職・担当', email: 'メール', phone: '電話', birthday: '誕生日' };
+const MD = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/;
+const birthdayText = (b) => {
   const m = MD.exec(b ?? '');
+  return m ? `${m[1] ? `${m[1]}年` : ''}${Number(m[2])}月${Number(m[3])}日` : (b ?? '');
+};
+const fieldText = (p, f) => (f === 'aliases' ? p.aliases.join('、') : f === 'birthday' ? birthdayText(p.birthday) : p[f] ?? '');
+const affiliationRole = (p) => [p.affiliation, p.role].filter(Boolean).join('・');
+// The day of the latest memo, as 11月9日 (the year too when it is not this year).
+const lastMemo = (p) => p.memos.reduce((a, m) => (m.learned_on > a ? m.learned_on : a), '');
+function dayText(ymd, now) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
   if (!m) return '';
-  const md = `${Number(m[2])}/${Number(m[3])}`;
-  if (!m[1]) return md;
-  const had = now.getMonth() + 1 > Number(m[2]) || (now.getMonth() + 1 === Number(m[2]) && now.getDate() >= Number(m[3]));
-  return `${md}(${now.getFullYear() - Number(m[1]) - (had ? 0 : 1)}歳)`;
+  return `${Number(m[1]) === now.getFullYear() ? '' : `${m[1]}年`}${Number(m[2])}月${Number(m[3])}日`;
 }
 
-function cell(p, key, now = new Date()) {
-  if (key === 'profiles') return (p.profiles ?? []).join('、');
-  if (key === 'birthday') return birthdayCell(p.birthday, now);
-  if (key.startsWith('item:')) return p.items.find((i) => i.label === key.slice(5))?.value ?? '';
-  return p[key] ?? '';
+const COLS = [['name', '名前'], ['profiles', 'プロフィール'], ['affiliation', '所属・役割'], ['last', '最後に話したこと']];
+const sortKey = (p) => (people.sort === 'last' ? lastMemo(p) : people.sort === 'profiles' ? (p.profiles ?? []).join('、') : people.sort === 'affiliation' ? affiliationRole(p) : p.name);
+
+const chips = (names) => h('span', { class: 'wf-kn-chips' }, ...(names ?? []).map((n) => h('span', { class: 'wf-kn-chip', text: n })));
+
+// Elements kept across redraws: what is being written in each 教える box.
+const tellBoxes = new Map();
+// The state of the 教える of each person: { busy, said, problem }.
+const telling = new Map();
+const confirming = { busy: false, problem: null };
+
+function tellBox(p) {
+  let el = tellBoxes.get(p.id);
+  if (!el) {
+    el = h('textarea', { id: `kn-tell-${p.id}`, class: 'wf-kn-tell-text', rows: '2', maxlength: '2000', data: { key: `tell-${p.id}` } });
+    tellBoxes.set(p.id, el);
+  }
+  return el;
 }
 
-function peopleTable(list, ctx, colors = null) {
-  const filled = new Map();
-  for (const p of list) for (const i of p.items) filled.set(i.label, (filled.get(i.label) ?? 0) + 1);
-  const labels = [...filled].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0], 'ja')).map(([l]) => l);
-  const cols = [FIXED[0], ...(colors ? [['profiles', 'プロフィール']] : []), ...FIXED.slice(1), ...labels.map((l) => [`item:${l}`, l]), ['memos', 'メモ']];
+const callName = (name) => (/(さん|先生|様|さま|くん|君|ちゃん|氏)$/.test(name) ? name : `${name}さん`);
+
+async function tell(ctx, p) {
+  const box = tellBoxes.get(p.id);
+  const text = box?.value.trim() ?? '';
+  if (!text || telling.get(p.id)?.busy) return;
+  telling.set(p.id, { busy: true });
+  ctx.rerender();
+  try {
+    const out = await ctx.api(`/people/${encodeURIComponent(p.id)}/tell`, { method: 'POST', body: { text } });
+    telling.set(p.id, { said: out.said });
+    box.value = '';
+    ctx.refresh();
+    return;
+  } catch (err) {
+    telling.set(p.id, { problem: err.body?.problems?.join(' ') ?? '登録できませんでした' });
+  }
+  ctx.rerender();
+}
+
+async function confirm(ctx, p, target, ok) {
+  if (confirming.busy) return;
+  confirming.busy = true;
+  confirming.problem = null;
+  ctx.rerender();
+  try {
+    await ctx.api(`/people/${encodeURIComponent(p.id)}/confirm`, { method: 'POST', body: { ...target, ok } });
+  } catch (err) {
+    confirming.problem = err.body?.problems?.join(' ') ?? '保存できませんでした';
+  }
+  confirming.busy = false;
+  ctx.refresh();
+}
+
+// What is known (checked values) and what is not checked yet, as [label, text, target] rows.
+function facts(p) {
+  const known = [];
+  const guesses = [];
+  const guessed = new Set(p.unverified ?? []);
+  for (const f of ['aliases', 'affiliation', 'role', 'email', 'phone', 'birthday']) {
+    const v = fieldText(p, f);
+    if (!v) continue;
+    (guessed.has(f) ? guesses : known).push([LABELS[f], v, { field: f }]);
+  }
+  for (const i of p.items) (i.unverified ? guesses : known).push([i.label, i.value, { item: { label: i.label, profile: i.profile } }]);
+  for (const m of p.memos) (m.mark === '未確認' ? guesses : known).push([m.kind, m.text, { memo: m.id }]);
+  return { known, guesses };
+}
+
+function personDetail(p, ctx) {
+  const { known, guesses } = facts(p);
+  const links = p.links?.length ? p.links.map((l) => `${{ goal: 'ゴール', task: 'タスク', booking: '予定' }[l.kind]}: ${l.title}`).join('、') : null;
+  const knownBox = h('section', { class: 'wf-kn-facts', 'aria-label': '分かっていること' }, h('h3', { text: '分かっていること' }),
+    known.length || links
+      ? h('dl', { class: 'wf-kn-dl' }, ...known.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })]), links ? [h('dt', { text: 'つながり' }), h('dd', { text: links })] : null)
+      : h('div', { class: 'wf-know-empty', text: 'まだありません' }));
+  const guessBox = h('section', { class: 'wf-kn-facts', 'aria-label': 'まだ確かめていないこと' }, h('h3', { text: 'まだ確かめていないこと' }),
+    guesses.length
+      ? h('div', { class: 'wf-kn-guesses' }, ...guesses.map(([k, v, target]) => h('div', { class: 'wf-kn-guess' },
+        h('span', { class: 'wf-kn-guess-text' }, target.memo === undefined ? `${k}: ` : null, v),
+        h('button', { type: 'button', class: 'wf-kn-small', disabled: confirming.busy, onclick: () => confirm(ctx, p, target, true), text: '合っている' }),
+        h('button', { type: 'button', class: 'wf-kn-small', disabled: confirming.busy, onclick: () => confirm(ctx, p, target, false), text: '違う' }))))
+      : h('div', { class: 'wf-know-empty', text: 'ありません' }),
+    confirming.problem ? h('p', { class: 'wf-kn-problem', role: 'alert', text: confirming.problem }) : null);
+  const state = telling.get(p.id) ?? {};
+  const box = tellBox(p);
+  box.disabled = Boolean(state.busy);
+  const tellArea = h('div', { class: 'wf-kn-tell' },
+    h('label', { for: box.id, class: 'wf-kn-tell-label', text: `${callName(p.name)}について教える` }),
+    h('div', { class: 'wf-kn-tell-row' }, box,
+      h('button', { type: 'button', class: 'wf-kn-tell-btn', disabled: Boolean(state.busy), data: { key: `tell-send-${p.id}` }, onclick: () => tell(ctx, p), text: '登録' })),
+    state.busy ? h('div', { class: 'wf-kn-said', role: 'status' }, h('span', { text: '登録しています' })) : null,
+    state.said ? h('div', { class: 'wf-kn-said', role: 'status' }, h('span', { class: 'wf-kn-said-head', text: '秘書がこう登録しました' }), h('span', { class: 'wf-kn-said-text', text: state.said })) : null,
+    state.problem ? h('div', { class: 'wf-kn-said', role: 'alert' }, h('span', { class: 'wf-kn-problem', text: state.problem })) : null);
+  return [h('div', { class: 'wf-kn-detail' }, knownBox, guessBox), tellArea];
+}
+
+function personRow(p, ctx, open) {
+  const last = lastMemo(p);
+  return h('div', { role: 'row', class: 'wf-kn-row' },
+    h('span', { role: 'cell', class: 'wf-kn-name' }, h('button', {
+      type: 'button', class: 'wf-kn-name-btn', 'aria-expanded': String(open), data: { key: `person-${p.id}` },
+      onclick: () => { view.person = open ? null : p.id; ctx.rerender(); }, text: p.name,
+    })),
+    h('span', { role: 'cell' }, chips(p.profiles)),
+    h('span', { role: 'cell', class: ['wf-kn-sub-text', !affiliationRole(p) && 'wf-ptable-blank'], text: affiliationRole(p) || '—' }),
+    h('span', { role: 'cell', class: ['wf-kn-day', !last && 'wf-ptable-blank'], text: last ? dayText(last, ctx.now) : '—' }));
+}
+
+function peoplePane(rules, ctx) {
+  const list = rules.people.people;
   const q = people.query.trim().toLowerCase();
   let rows = list.filter((p) => (!people.affiliation || p.affiliation === people.affiliation) &&
     (!q || [p.name, ...p.aliases, ...(p.profiles ?? []), p.email, p.phone, p.affiliation, p.role, ...p.items.map((i) => i.value), ...p.memos.map((m) => m.text)]
       .some((v) => v && v.toLowerCase().includes(q))));
-  const key = (p) => (people.sort === 'memos' ? p.memos.length : people.sort === 'birthday' ? daysToBirthday(p.birthday, ctx.now) : cell(p, people.sort));
   rows = rows.slice().sort((a, b) => {
-    const x = key(a);
-    const y = key(b);
-    const empty = (v) => v === '' || v === Infinity;
-    if (empty(x) !== empty(y)) return empty(x) ? 1 : -1; // blanks last, either way
-    const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'ja', { numeric: true });
+    const x = sortKey(a);
+    const y = sortKey(b);
+    if ((x === '') !== (y === '')) return x === '' ? 1 : -1; // blanks last, either way
+    const c = String(x).localeCompare(String(y), 'ja', { numeric: true });
     return (people.desc ? -c : c) || a.name.localeCompare(b.name, 'ja');
   });
   const affiliations = [...new Set(list.map((p) => p.affiliation).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'ja'));
-  const sortBy = (k) => () => { if (people.sort === k) people.desc = !people.desc; else { people.sort = k; people.desc = false; } ctx.rerender(); };
-  const head = h('tr', {}, ...cols.map(([k, label]) => h('th', { scope: 'col', class: `wf-pcol-${k === 'name' || k === 'memos' ? k : k.startsWith('item:') ? 'item' : 'fixed'}`, 'aria-sort': people.sort === k ? (people.desc ? 'descending' : 'ascending') : 'none' },
-    h('button', { type: 'button', class: 'wf-ptable-sort', title: k === 'birthday' ? '次の誕生日が近い順' : null, data: { key: `sort-${k}` }, onclick: sortBy(k) },
+  const sortBy = (k) => () => { if (people.sort === k) people.desc = !people.desc; else { people.sort = k; people.desc = k === 'last'; } ctx.rerender(); };
+  const head = h('div', { role: 'row', class: 'wf-kn-row wf-kn-headrow' }, ...COLS.map(([k, label]) => h('span', { role: 'columnheader', 'aria-sort': people.sort === k ? (people.desc ? 'descending' : 'ascending') : 'none' },
+    h('button', { type: 'button', class: 'wf-ptable-sort', data: { key: `sort-${k}` }, onclick: sortBy(k) },
       label, h('span', { class: 'wf-ptable-arrow', 'aria-hidden': 'true', text: people.sort === k ? (people.desc ? '▼' : '▲') : '' })))));
-  const body = rows.flatMap((p) => {
+  const body = rows.map((p) => {
     const open = view.person === p.id;
-    const toggle = () => { view.person = open ? null : p.id; ctx.rerender(); };
-    const tr = h('tr', { class: open ? 'wf-ptable-open' : '' }, ...cols.map(([k]) => {
-      if (k === 'name') {
-        return h('th', { scope: 'row', class: 'wf-pcol-name' }, h('button', { type: 'button', class: 'wf-ptable-name', 'aria-expanded': String(open), data: { key: `person-${p.id}` }, onclick: toggle, text: p.name }));
-      }
-      if (k === 'memos') return h('td', { class: 'wf-pcol-memos', text: p.memos.length ? String(p.memos.length) : '—' });
-      if (k === 'profiles') {
-        return p.profiles?.length
-          ? h('td', { class: 'wf-pcol-profiles' }, ...p.profiles.map((n) => profileChip(n, colors, 13)))
-          : h('td', { class: 'wf-ptable-blank', text: '—' });
-      }
-      const v = cell(p, k, ctx.now);
-      return h('td', { class: v ? '' : 'wf-ptable-blank', title: v && v.length > 12 ? v : null, text: v || '—' });
-    }));
-    if (!open) return [tr];
-    return [tr, h('tr', { class: 'wf-ptable-detail' }, h('td', { colspan: String(cols.length) }, personDetail(p)))];
+    if (!open) return personRow(p, ctx, false);
+    return h('div', { class: 'wf-kn-open' }, personRow(p, ctx, true), ...personDetail(p, ctx));
   });
-  return h('div', { class: 'wf-ptable-wrap' },
-    h('div', { class: 'wf-ptable-tools' },
+  const waiting = rules.people.unassigned ?? [];
+  return [
+    h('div', { class: 'wf-kn-head' }, h('h2', { text: '人' }),
       h('input', {
-        type: 'search', class: 'wf-ptable-search', placeholder: '名前、所属、メモで探す', value: people.query, 'aria-label': '人を探す', data: { key: 'people-search' },
+        type: 'search', class: 'wf-ptable-search wf-kn-search', placeholder: '名前、所属で探す', value: people.query, 'aria-label': '人を探す', data: { key: 'people-search' },
         oninput: (e) => { people.query = e.target.value; ctx.rerender(); },
-      }),
+      })),
+    h('div', { class: 'wf-ptable-tools' },
       h('select', {
         class: 'wf-ptable-select', 'aria-label': '所属で絞る', data: { key: 'people-affiliation' }, disabled: affiliations.length === 0,
         onchange: (e) => { people.affiliation = e.target.value; ctx.rerender(); },
       }, h('option', { value: '', text: '所属: すべて', selected: people.affiliation === '' }),
       ...affiliations.map((a) => h('option', { value: a, text: a, selected: people.affiliation === a }))),
       h('span', { class: 'wf-ptable-count', text: `${rows.length} / ${list.length}人` })),
-    h('div', { class: 'wf-ptable-scroll', data: { scroll: `people-${view.profile === SECRETARY ? 'secretary' : view.profile}` } },
-      h('table', { class: 'wf-ptable' }, h('thead', {}, head), h('tbody', {}, ...body))),
-    rows.length ? null : h('div', { class: 'wf-know-empty', text: '当てはまる人はいません' }));
+    list.length
+      ? h('div', { role: 'table', 'aria-label': '人の一覧', class: 'wf-kn-table' }, head, ...body)
+      : h('div', { class: 'wf-know-empty', text: 'まだいません' }),
+    list.length && !rows.length ? h('div', { class: 'wf-know-empty', text: '当てはまる人はいません' }) : null,
+    waiting.length ? h('div', { class: 'wf-know-sub' }, h('h3', { text: 'だれのことか、まだ決まっていないメモ' }), memoList(waiting)) : null,
+  ];
 }
 
-// Under an opened row: every column in full (the table cuts long ones), and the memos by kind.
-function personDetail(p) {
-  const fields = [
-    ['呼び名', p.aliases.join('、')], ['所属', p.affiliation], ['役職・担当', p.role], ['メール', p.email], ['電話', p.phone],
-    ['誕生日', p.birthday && birthdayText(p.birthday)], ...p.items.map((i) => [i.label, i.value]),
-  ].filter(([, v]) => v);
-  const byKind = KINDS.map((k) => [k, p.memos.filter((m) => (m.kind ?? 'その他') === k)]).filter(([, m]) => m.length);
-  return h('div', { class: 'wf-know-detail' },
-    fields.length ? h('dl', { class: 'wf-know-fields' }, ...fields.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })])) : null,
-    ...byKind.map(([k, memos]) => h('div', { class: 'wf-know-sub' }, h('h3', { text: `メモ: ${k}` }), memoList(memos.map((m) => ({ ...m, kind: null }))))),
-    p.links?.length ? h('div', { class: 'wf-know-sub' }, h('h3', { text: 'つながり' }),
-      h('ul', { class: 'wf-know-links' }, ...p.links.map((l) => h('li', { text: `${{ goal: 'ゴール', task: 'タスク', booking: '予定' }[l.kind]}: ${l.title}` })))) : null,
-    !byKind.length && !p.links?.length ? h('div', { class: 'wf-know-empty', text: 'メモはまだありません' }) : null);
+// ---- プロフィールのファイル ----
+
+function filesList(names, file, ctx) {
+  return names.map((n) => h('div', { class: 'wf-know-file' },
+    h('button', { type: 'button', class: 'wf-know-name', 'aria-expanded': String(view.file === n), data: { key: `file-${n}` }, onclick: () => { view.file = view.file === n ? null : n; ctx.refresh(); }, text: n.replace(/^(knowledge|procedures)\//, '').replace(/\.md$/, '') }),
+    view.file === n && file?.text ? h('div', { class: 'wf-md wf-know-body' }, renderMarkdown(h, file.text)) : null));
 }
 
-function peopleSection(one, ctx, colors = null) {
-  const list = one.people?.people ?? [];
-  const waiting = one.people?.unassigned ?? [];
-  const old = one.people_md?.text?.trim() ? one.people_md : null;
-  return h('section', { class: 'wf-know-sec' },
-    h('div', { class: 'wf-group-head' }, h('h2', { text: '人' })),
-    list.length ? peopleTable(list, ctx, colors) : h('div', { class: 'wf-know-empty', text: 'まだいません' }),
-    waiting.length ? h('div', { class: 'wf-know-sub' },
-      h('h3', { text: 'だれのことか、まだ決まっていないメモ' }), memoList(waiting)) : null,
-    old ? h('div', { class: 'wf-know-sub' },
-      h('h3', { text: '取り込む前の people.md' }),
-      h('p', { class: 'wf-muted', text: '秘書が人に取り込むまで、前の形のまま表示しています' }),
-      notes(old.text)) : null);
+function fileText(f) {
+  if (!f?.text?.trim()) return null;
+  return [notes(f.text), f.truncated ? h('p', { class: 'wf-muted', text: '長いため、途中までを表示しています' }) : null];
 }
 
-function filesSection(one, file, ctx) {
-  const names = [...(one.files.knowledge ?? []), ...(one.files.procedures ?? [])];
-  return h('section', { class: 'wf-know-sec' },
-    h('div', { class: 'wf-group-head' }, h('h2', { text: '手順' }), names.length ? h('span', { class: 'wf-group-count', text: `${names.length}件` }) : null),
-    names.length ? null : h('div', { class: 'wf-know-empty', text: 'まだありません' }),
-    ...names.map((n) => h('div', { class: 'wf-know-file' },
-      h('button', { type: 'button', class: 'wf-know-name', 'aria-expanded': String(view.open === n), data: { key: `file-${n}` }, onclick: () => { view.open = view.open === n ? null : n; ctx.refresh(); }, text: n.replace(/^(knowledge|procedures)\//, '').replace(/\.md$/, '') }),
-      view.open === n && file?.text ? h('div', { class: 'wf-md wf-know-body' }, renderMarkdown(h, file.text)) : null)));
+function profilePane(one, file, list, ctx) {
+  const label = PARTS.find(([k]) => k === view.part)?.[1] ?? '';
+  const head = h('div', { class: 'wf-kn-head' }, h('h2', { text: label }),
+    h('span', { class: 'wf-pchip' }, h('span', { class: 'wf-dot', style: { background: profileColor(view.profile, list.colors) }, 'aria-hidden': 'true' }), view.profile));
+  if (!one) return [head, h('div', { class: 'wf-know-empty', text: 'まだありません' })];
+  let body = [];
+  if (view.part === 'knowledge') {
+    const topics = one.files.knowledge ?? [];
+    body = [fileText(one.knowledge), topics.length ? h('div', { class: 'wf-know-sub' }, h('h3', { text: '話題ごと' }), ...filesList(topics, file, ctx)) : null];
+  } else if (view.part === 'procedures') {
+    body = filesList(one.files.procedures ?? [], file, ctx);
+  } else {
+    const waiting = one.people?.unassigned ?? [];
+    const old = one.people_md?.text?.trim() ? one.people_md : null;
+    body = [fileText(one.inbox),
+      waiting.length ? h('div', { class: 'wf-know-sub' }, h('h3', { text: 'だれのことか、まだ決まっていないメモ' }), memoList(waiting.map((m) => ({ ...m, profile: null })))) : null,
+      old ? h('div', { class: 'wf-know-sub' }, h('h3', { text: '取り込む前の people.md' }), notes(old.text)) : null];
+  }
+  const filled = body.flat(Infinity).filter(Boolean);
+  return [head, ...(filled.length ? filled : [h('div', { class: 'wf-know-empty', text: 'まだありません' })])];
 }
+
+// ---- 全体 ----
 
 function render(data, ctx) {
-  const { list, one, file, rules } = data;
-  const header = ctx.head('ナレッジ');
-  const left = h('section', { class: 'wf-goals', 'aria-label': 'プロフィール', data: { scroll: 'profiles' } },
-    secretaryButton(ctx), h('h2', { text: 'プロフィール' }), ...list.profiles.map((p) => profileButton(p, list.colors, ctx)));
-  const right = rules ? [secretaryCards(ctx, rules), peopleSection({ people: { people: rules.people.people } }, ctx, list.colors)] : one ? [peopleSection(one, ctx), section('ナレッジ', one.knowledge), section('受信箱', one.inbox), filesSection(one, file, ctx)] : [];
-  return h('div', { class: 'wf-page-tasks' }, header, ctx.banner(),
-    h('div', { class: 'wf-tasks-body' }, left, h('section', { class: 'wf-tasklist', 'aria-label': 'ナレッジ', data: { scroll: `know-${view.profile === SECRETARY ? 'secretary' : view.profile}` } }, ...right)));
+  const { list, rules, one, file } = data;
+  let right;
+  if (view.sel === 'people') right = peoplePane(rules, ctx);
+  else if (SETTINGS.includes(view.sel)) right = [settingsCard(ctx, rules, view.sel)];
+  else right = profilePane(one, file, list, ctx);
+  const key = view.sel === 'profile' ? `${view.profile}-${view.part}` : view.sel;
+  return h('div', { class: 'wf-page-tasks' }, ctx.head('ナレッジ'), ctx.banner(),
+    h('div', { class: 'wf-tasks-body' }, sideList(list, rules, ctx),
+      h('section', { class: 'wf-tasklist wf-kn-main', 'aria-label': 'ナレッジ', data: { scroll: `know-${key}` } }, ...right)));
 }
 
 function skeleton(ctx) {
-  const row = () => h('div', { class: 'wf-goal-btn' }, skel('50%', '15px'), skel('80%', '13px'));
+  const row = () => h('div', { class: 'wf-kn-item' }, skel('60%', '15px'));
   return h('div', { class: 'wf-page-tasks' }, ctx.head('ナレッジ'), ctx.banner(),
     h('div', { class: 'wf-tasks-body', 'aria-busy': 'true' },
-      h('section', { class: 'wf-goals' }, h('h2', { text: 'プロフィール' }), row(), row(), row()),
-      h('section', { class: 'wf-tasklist' }, skel('30%', '22px'), skel('100%', '120px', { borderRadius: '10px' }), skel('30%', '22px'), skel('100%', '120px', { borderRadius: '10px' }))));
+      h('nav', { class: 'wf-kn-side' }, row(), row(), row(), row(), row()),
+      h('section', { class: 'wf-tasklist' }, skel('30%', '22px'), skel('100%', '240px', { borderRadius: '10px' }))));
 }
 
-export default { load, render, skeleton };
+// While a write is going, the screen is not read again under it.
+const busy = () => settingsBusy() || confirming.busy || [...telling.values()].some((t) => t.busy);
+
+export default { load, render, skeleton, busy };

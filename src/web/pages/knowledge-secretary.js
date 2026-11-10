@@ -1,5 +1,5 @@
-// ナレッジの「秘書」: 秘書と話して決めた生活の決まり、場所、週の居場所と、GitHub から読み込むオーナーを、その場で足す・直す・消す。
-// 設定は POST /web/api/rules/settings で書く。人は knowledge.js の表で見る。
+// ナレッジの設定の欄: 秘書と話して決めた生活リズム、よく行く場所、曜日ごとの居場所と、GitHub から読み込むオーナーを、その場で足す・直す・消す。
+// 設定は POST /web/api/rules/settings で書く。左の一覧と人の表は knowledge.js。
 //
 // 書いている途中の欄は、画面を読み直しても同じ要素を使い回す(fields)ので、打った文字が消えない。
 
@@ -138,7 +138,7 @@ function lifeCard(ctx) {
     const v = add.value.trim();
     if (v) put([...rules, v], 'life-new');
   }
-  return card('生活の決まり', list(items), addArea(ctx, 'life-new', [add], addRule));
+  return card('生活リズム', list(items), addArea(ctx, 'life-new', [add], addRule));
 }
 
 // ---- 場所 ----
@@ -184,7 +184,7 @@ function placesCard(ctx) {
     const text = note.value.trim();
     if (n) put([...places, { name: n, ...(text ? { note: text } : {}), ...(fields.get('place-new-home')?.checked ? { home: true } : {}) }], travel, null, 'place-new');
   }
-  return card('場所', list(items), addArea(ctx, 'place-new', [name, note, home], addPlace));
+  return card('よく行く場所', list(items), addArea(ctx, 'place-new', [name, note, home], addPlace));
 }
 
 // ---- 週の居場所 ----
@@ -232,7 +232,7 @@ function weekCard(ctx) {
     ], openEdit(ctx, key));
   });
   const form = slotForm(ctx, 'slot-new', { days: 'weekdays' }, (v) => put([...slots, v], 'slot-new'));
-  return card('週の居場所', list(items), addArea(ctx, 'slot-new', form.inputs, form.save));
+  return card('曜日ごとの居場所', list(items), addArea(ctx, 'slot-new', form.inputs, form.save));
 }
 
 // ---- GitHub ----
@@ -280,13 +280,19 @@ function githubCard(ctx) {
 
 // ---- 全体 ----
 
-// 読み込んだ結果(GET /rules)から、4つのカードを作る。書いている最中は、読み直しで置き換えない。
-export function secretaryCards(ctx, data) {
+const CARDS = { life: lifeCard, places: placesCard, week: weekCard, github: githubCard };
+export const SETTINGS = Object.keys(CARDS);
+
+// 読み込んだ結果(GET /rules)から、which(life、places、week、github)のカードを作る。書いている最中は、読み直しで置き換えない。
+export function settingsCard(ctx, data, which) {
   if (data !== state.seen) {
     state.seen = data;
     if (!state.busy && state.editing.size === 0) state.data = data;
   }
   state.data ??= data;
   const problems = state.problems.length ? h('ul', { class: 'wf-errors', role: 'alert' }, ...state.problems.map((x) => h('li', { text: x }))) : null;
-  return h('div', { class: 'wf-rl-wrap' }, problems, lifeCard(ctx), placesCard(ctx), weekCard(ctx), githubCard(ctx));
+  return h('div', { class: 'wf-rl-wrap' }, problems, CARDS[which](ctx));
 }
+
+// 書いている途中か(画面の読み直しを待つ)。
+export const settingsBusy = () => state.busy;

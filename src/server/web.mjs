@@ -482,6 +482,7 @@ export function createWeb({
       return {
         name, people: peopleCounts[name] ?? 0, knowledge: lines(c?.knowledge), inbox: lines(c?.inbox),
         files: (c?.files?.knowledge?.length ?? 0) + (c?.files?.procedures?.length ?? 0),
+        topics: c?.files?.knowledge?.length ?? 0, procedures: c?.files?.procedures?.length ?? 0,
       };
     });
     res.json({ now: nowIso(), profiles, colors: profileColors(home, profiles.map((p) => p.name)) });
@@ -930,7 +931,8 @@ export function createWeb({
       week: { slots: week.slots },
       github: { owners: github.owners, others: github.others },
       profiles: profileNames(),
-      people: { count: list.count, more: list.more, people: list.people.map((p) => ledger.people.get(p.id, { all: true })) },
+      people: { count: list.count, more: list.more, people: list.people.map((p) => ledger.people.get(p.id, { all: true })), unassigned: list.unassigned },
+      secretary: Boolean(chat?.on),
     };
   };
   const WEB = { actor: 'web', device: null };
@@ -974,6 +976,38 @@ export function createWeb({
     try {
       ledger.people.update(req.params.id, req.body, { all: true }, WEB);
       res.json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  // The person's answer to a guess (未確認) about someone: { field } (a fixed column), { item:
+  // { label, profile } } or { memo: id }, and ok (true: 合っている, false: 違う).
+  api.post('/people/:id/confirm', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, ['field', 'item', 'memo', 'ok'])) {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "field" か "item" か "memo", "ok": true か false } です'] });
+      return;
+    }
+    try {
+      ledger.people.confirm(req.params.id, req.body, { all: true }, WEB);
+      res.json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  // 〇〇さんについて教える: { text }. The secretary is woken once, outside the conversation, and
+  // writes it about the person as checked values; said is what it changed, in its words.
+  api.post('/people/:id/tell', sameOrigin, smallJson, async (req, res) => {
+    if (!exact(req.body, ['text']) || typeof req.body.text !== 'string') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "text": "…" } です'] });
+      return;
+    }
+    if (!chat?.on || typeof chat.tell !== 'function') {
+      res.status(409).json({ error: 'secretary off', problems: ['秘書が止まっているので登録できません'] });
+      return;
+    }
+    try {
+      const out = await chat.tell(req.params.id, req.body.text);
+      res.json({ said: out.text, ...rulesOut() });
     } catch (err) {
       refused(res, err);
     }

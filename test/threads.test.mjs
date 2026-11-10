@@ -49,7 +49,7 @@ test('schema: a version 7 file gains threads and messages and keeps its records'
   assert.throws(() => ins.run('2026-10-02T00:00:00.000Z', 'web', null, 'message', 'm1', 'create', '{}'), /CHECK/);
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 15);
+  assert.equal(SCHEMA_VERSION, 16);
   const L = openLedger(file, { now: ticking() });
   assert.deepEqual(L.records('r1').map((r) => [r.id, r.entity]), [[1, 'report']]);
   const thread = L.ensureThread('secretary', WEB);
@@ -228,7 +228,7 @@ test('schema 13: エージェントの欄 is a thread of kind agent, one; a vers
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '15');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '16');
   for (const t of ['threads_v12', 'messages_v12', 'attachments_v12']) assert.equal(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(t), undefined);
   assert.equal(check.prepare("SELECT message_id FROM attachments WHERE id = 'a_20261001000000_cccccc'").get().message_id, 'm_20261001000000_aaaaaa');
   assert.equal(check.prepare("SELECT sql FROM sqlite_master WHERE name = 'attachments'").get().sql.includes('messages_v12'), false);
