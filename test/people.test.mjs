@@ -31,7 +31,7 @@ test('schema 12: a version 11 file gains the people tables and keeps its records
   raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '11')").run();
   raw.prepare("INSERT INTO records (at, actor, entity, entity_id, action, changes) VALUES ('2026-11-01T00:00:00Z', 'human', 'goal', 'g_1', 'create', '{}')").run();
   raw.close();
-  assert.equal(SCHEMA_VERSION, 15);
+  assert.equal(SCHEMA_VERSION, 16);
   const ledger = openLedger(file);
   const p = ledger.people.create({ name: '田中先生' }, LAB, W);
   assert.deepEqual(ledger.records('g_1').map((r) => r.action), ['create']);
@@ -335,4 +335,105 @@ test('columns: each free column says how many fill it and the values written the
   ledger.people.create({ name: '五さん' }, LAB, W);
   assert.deepEqual(ledger.people.columns(LAB).free, [{ label: '出身', count: 4, values: ['東京', '大阪', '福岡'] }]);
   ledger.close();
+});
+
+test('schema 16: a version 15 file keeps its people as checked values and can mark columns 未確認', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-people-'));
+  const file = path.join(dir, 'ledger.sqlite');
+  const raw = new DatabaseSync(file);
+  raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  for (const sql of MIGRATIONS.slice(0, 15)) raw.exec(sql);
+  raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '15')").run();
+  raw.prepare("INSERT INTO people (id, name, role, created_at, updated_at) VALUES ('n_1', '春野さん', '先輩', 'x', 'x')").run();
+  raw.prepare("INSERT INTO person_profiles (person_id, profile) VALUES ('n_1', '研究')").run();
+  raw.prepare("INSERT INTO person_items (person_id, profile, label, value, updated_at) VALUES ('n_1', '研究', '好きなもの', '紅茶', 'x')").run();
+  raw.close();
+  const ledger = openLedger(file);
+  const p = ledger.people.get('n_1', LAB);
+  assert.deepEqual([p.role, p.unverified, p.items], ['先輩', [], [{ label: '好きなもの', value: '紅茶' }]]);
+  const after = ledger.people.update('n_1', { affiliation: '研究室', items: { 苦手なもの: '朝' }, unverified: true }, LAB, W);
+  assert.deepEqual(after.unverified, ['affiliation']);
+  assert.deepEqual(after.items.map((i) => [i.label, i.unverified ?? false]), [['好きなもの', false], ['苦手なもの', true]]);
+  ledger.close();
+  const check = new DatabaseSync(file);
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '16');
+  assert.throws(() => check.prepare("UPDATE person_items SET unverified = 2 WHERE person_id = 'n_1'").run(), /CHECK/);
+  check.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('未確認: a guess is marked, the person\'s words replace it, and edit writes or removes it', () => {
+  const ledger = openLedger(':memory:');
+  const guess = ledger.people.create({ name: '冬木さん', role: '会計', email: 'f@example.com', items: { 好きなもの: '紅茶' }, unverified: true }, CLUB, W);
+  assert.deepEqual(guess.unverified, ['email', 'role']);
+  assert.equal(guess.items[0].unverified, true);
+  assert.throws(() => ledger.people.update(guess.id, { role: 'x', unverified: 'yes' }, CLUB, W), /unverified は true/);
+
+  // Written again without the mark: the value and its mark are replaced. A cleared field leaves.
+  let p = ledger.people.update(guess.id, { role: '部長', items: { 好きなもの: 'コーヒー' } }, CLUB, W);
+  assert.deepEqual([p.role, p.unverified, p.items[0].unverified], ['部長', ['email'], undefined]);
+  p = ledger.people.update(guess.id, { phone: '03-0000-0000', unverified: true }, CLUB, W);
+  assert.deepEqual(p.unverified, ['email', 'phone']);
+  p = ledger.people.update(guess.id, { phone: null, unverified: true }, CLUB, W);
+  assert.deepEqual(p.unverified, ['email']);
+
+  // Changed on the screen: the person's words replace the guess. Empty removes it.
+  p = ledger.people.edit(guess.id, { field: 'email', value: 'fuyu@example.com' }, CLUB, W);
+  assert.deepEqual([p.email, p.unverified], ['fuyu@example.com', []]);
+  ledger.people.update(guess.id, { affiliation: '経済学部', items: { 得意なこと: '計算' }, add_memos: [{ text: '火曜はいないらしい', mark: '未確認' }, { text: '本人から聞いた', mark: '本人の言葉' }], unverified: true }, CLUB, W);
+  p = ledger.people.edit(guess.id, { field: 'affiliation', value: '  ' }, CLUB, W);
+  assert.deepEqual([p.affiliation, p.unverified], [null, []]);
+  p = ledger.people.edit(guess.id, { field: 'aliases', value: 'ふゆ、ふゆきち' }, CLUB, W);
+  assert.deepEqual(p.aliases, ['ふゆ', 'ふゆきち']);
+  p = ledger.people.edit(guess.id, { field: 'birthday', value: '3月5日' }, CLUB, W);
+  assert.equal(p.birthday, '03-05');
+  p = ledger.people.edit(guess.id, { item: { label: '得意なこと' }, value: '暗算' }, CLUB, W);
+  assert.deepEqual(p.items.find((i) => i.label === '得意なこと'), { label: '得意なこと', value: '暗算' });
+  p = ledger.people.edit(guess.id, { item: { label: '得意なこと' }, value: '' }, CLUB, W);
+  assert.equal(p.items.some((i) => i.label === '得意なこと'), false);
+  const [maybe, said] = p.memos;
+  p = ledger.people.edit(guess.id, { memo: maybe.id, value: '火曜は授業で来ない' }, CLUB, W);
+  assert.deepEqual([p.memos[0].text, p.memos[0].mark], ['火曜は授業で来ない', '本人の言葉']);
+  p = ledger.people.edit(guess.id, { memo: said.id, value: '' }, CLUB, W);
+  assert.deepEqual(p.memos.map((m) => m.text), ['火曜は授業で来ない']);
+  ledger.people.update(guess.id, { add_profiles: ['研究'] }, ALL, W);
+  p = ledger.people.edit(guess.id, { field: 'profiles', value: 'サークル' }, ALL, W);
+  assert.deepEqual(p.profiles, ['サークル']);
+
+  // One thing at a time, a text value, and only in the scope; the name and the last profile stay.
+  assert.throws(() => ledger.people.edit(guess.id, { value: 'x' }, CLUB, W), /1つ/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'role', memo: 1, value: 'x' }, CLUB, W), /1つ/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'role' }, CLUB, W), /value は文字列/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'name', value: '' }, CLUB, W), /名前は空/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'profiles', value: '' }, ALL, W), /プロフィール/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'secret', value: 'x' }, CLUB, W), /直せる列ではありません/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'email', value: 'x' }, CLUB, W), /メールアドレス/);
+  assert.throws(() => ledger.people.edit(guess.id, { field: 'role', value: 'x' }, LAB, W), /いません/);
+  assert.throws(() => ledger.people.edit(guess.id, { item: { label: '好きなもの' }, value: 'x' }, ALL, W), /profile/);
+  // The records say what was changed, never the value.
+  const recs = ledger.records(guess.id).filter((r) => r.action === 'edit');
+  assert.equal(recs.length, 8);
+  assert.equal(JSON.stringify(recs).includes('暗算'), false);
+  assert.equal(recs.filter((r) => JSON.stringify(r).includes('removed')).length, 3);
+  ledger.close();
+});
+
+test('merge carries the marks: a guessed field taken from the other entry stays 未確認', () => {
+  const ledger = openLedger(':memory:');
+  const a = ledger.people.create({ name: '秋山さん', role: '窓口' }, LAB, W);
+  const b = ledger.people.create({ name: '秋山', email: 'a@example.com', items: { 好きなもの: '紅茶' }, unverified: true, allow_similar: true }, LAB, W);
+  const out = ledger.people.merge(a.id, b.id, LAB, W);
+  assert.deepEqual(out.person.unverified, ['email']);
+  assert.equal(out.person.items[0].unverified, true);
+  ledger.close();
+});
+
+test('person tool: unverified marks the columns written as a guess; without it they are checked values', async (t) => {
+  const { call } = await start(t);
+  const made = (await call('person', { profile: '研究', name: '夏目先生', role: '指導教員', items: { 好きなもの: '紅茶' }, unverified: true })).data;
+  assert.deepEqual([made.unverified, made.items[0].unverified], [['role'], true]);
+  const fixed = (await call('person', { profile: '研究', id: made.id, role: '指導教員' })).data;
+  assert.deepEqual(fixed.unverified, []);
+  const plain = (await call('person', { profile: '研究', name: '秋山さん', role: '窓口' })).data;
+  assert.deepEqual(plain.unverified, []);
 });

@@ -859,8 +859,116 @@ button.wf-allday-ev { border: none; font: inherit; font-size: 13px; font-weight:
 .wf-know-fields dd { margin: 0; overflow-wrap: anywhere; }
 .wf-know-kind { font-size: 12px; color: var(--sub); border: 1px solid var(--hair); border-radius: 6px; padding: 0 6px; margin-right: 6px; }
 .wf-know-links { margin: 0; padding-left: 1.2em; font-size: 14px; }
-.wf-know-secretary { margin-bottom: 6px; }
-.wf-know-secretary b { font-size: 15px; }
+
+/* ナレッジ: 左の一覧、人の表、開いた人 */
+.wf-kn-side { flex: 0 0 240px; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 12px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: 10px; }
+.wf-kn-item { min-height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.wf-kn-item:hover { background: var(--hover); }
+.wf-kn-item[aria-current="true"] { background: var(--tint); color: var(--accent); font-weight: 600; }
+.wf-kn-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-kn-count { flex: none; font-size: 12px; font-weight: 400; color: var(--sub); font-variant-numeric: tabular-nums; }
+.wf-kn-divider { margin: 12px 12px 4px; padding-top: 12px; border-top: 1px solid var(--hair); font-size: 12px; color: var(--sub); }
+.wf-kn-profile { justify-content: flex-start; }
+.wf-kn-chev { flex: none; stroke: var(--sub); }
+.wf-kn-parts { display: flex; flex-direction: column; gap: 2px; padding-left: 28px; }
+.wf-kn-sub { color: var(--sub); }
+.wf-kn-sub[aria-current="true"] { color: var(--accent); }
+.wf-kn-main { gap: 14px; padding: 20px 24px; }
+.wf-kn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.wf-kn-head h2 { margin: 0; font-size: 17px; font-weight: 600; flex: 1; }
+.wf-kn-search { flex: 0 1 240px; }
+.wf-kn-table { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wf-kn-row { display: grid; grid-template-columns: minmax(100px, 180px) minmax(90px, 150px) minmax(0, 1fr) minmax(80px, 120px) 16px; gap: 12px; align-items: center; padding: 10px 12px; font-size: 14px; }
+.wf-kn-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-kn-headrow { padding: 8px 12px; font-size: 12px; color: var(--sub); border-bottom: 1px solid var(--hair); }
+.wf-kn-rowbtn { width: 100%; min-height: 44px; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.wf-kn-stripe { background: var(--fill); }
+.wf-kn-rowbtn:hover { background: var(--hover); }
+.wf-kn-name { font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
+.wf-kn-chips { display: flex; gap: 6px; overflow: hidden; }
+.wf-kn-chip { flex: none; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--sub); }
+.wf-kn-sub-text { color: var(--sub); }
+.wf-kn-day { font-size: 12px; color: var(--sub); }
+.wf-kn-open { margin: 6px 0; border: 1px solid var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, var(--surface)); display: flex; flex-direction: column; }
+.wf-kn-open-head { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px 10px 0 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.wf-kn-open-head:hover { background: var(--hover); }
+.wf-kn-open-name { font-size: 16px; font-weight: 600; }
+.wf-kn-open-fill { flex: 1; }
+.wf-kn-detail { padding: 0 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.wf-kn-line { display: grid; grid-template-columns: minmax(84px, 120px) minmax(0, 1fr) 32px; gap: 10px; align-items: center; min-height: 32px; padding: 4px 8px; border-radius: 8px; font-size: 14px; }
+.wf-kn-line-wide { grid-template-columns: minmax(0, 1fr) 32px; }
+.wf-kn-line-label { color: var(--sub); display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
+.wf-kn-line-value { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; overflow-wrap: anywhere; }
+.wf-kn-line-text { min-width: 0; }
+.wf-kn-line-meta { font-size: 12px; color: var(--sub); }
+.wf-kn-line-head { margin: 10px 8px 2px; font-size: 12px; font-weight: 600; color: var(--sub); }
+.wf-kn-line-editing { grid-template-columns: minmax(84px, 120px) minmax(0, 1fr); }
+.wf-kn-line-wide.wf-kn-line-editing { grid-template-columns: minmax(0, 1fr); }
+.wf-kn-line-problem { grid-column: 1 / -1; }
+.wf-kn-edit { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.wf-kn-edit-input { flex: 1; min-width: 0; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--well); color: var(--ink); font: inherit; font-size: 14px; }
+.wf-kn-icon { flex: none; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--sub); cursor: pointer; justify-self: end; }
+.wf-kn-icon:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.wf-kn-icon:disabled { opacity: .5; cursor: default; }
+.wf-kn-icon-main { background: var(--accent-fill); color: var(--on-accent); }
+.wf-kn-icon-main:hover:not(:disabled) { background: var(--accent-hover); color: var(--on-accent); }
+.wf-kn-guess { flex: none; padding: 0 6px; border: 1px dashed var(--line); border-radius: 6px; font-size: 11px; line-height: 1.6; color: var(--sub); }
+.wf-kn-fresh, .wf-kn-rowbtn.wf-kn-fresh { background: var(--ok-bg); }
+.wf-kn-fresh-note { flex: none; font-size: 11px; font-weight: 400; color: var(--ok-ink); }
+.wf-kn-said-head { font-size: 12px; color: var(--sub); }
+.wf-kn-said-text { overflow-wrap: anywhere; white-space: pre-line; }
+.wf-kn-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.wf-kn-problem { margin: 0; color: var(--red); font-size: 13px; }
+/* 秘書と話す欄: a column of the frame at the right, so the page narrows by its width. */
+.wf-kn-drawer { flex: none; width: 0; height: 100%; overflow: hidden; background: var(--surface); transition: width .22s ease; }
+.wf-kn-drawer-open { width: 360px; border-left: 1px solid var(--hair); }
+.wf-kn-drawer-in { width: 360px; height: 100%; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.wf-kn-drawer-head { flex: none; display: flex; align-items: center; gap: 10px; }
+.wf-kn-drawer-title { flex: 1; margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.wf-kn-drawer-close { width: 36px; height: 36px; border-radius: 8px; }
+.wf-kn-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+.wf-kn-me { align-self: flex-end; max-width: 88%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--well); overflow-wrap: anywhere; white-space: pre-line; }
+.wf-kn-sec { display: flex; flex-direction: column; gap: 4px; }
+.wf-kn-typing { flex-direction: row; padding: 4px 0; }
+.wf-kn-dots { display: inline-flex; gap: 4px; }
+.wf-kn-dots i { width: 6px; height: 6px; border-radius: 999px; background: var(--sub); animation: wf-kn-dot 1.2s infinite ease-in-out; }
+.wf-kn-dots i:nth-child(2) { animation-delay: .15s; }
+.wf-kn-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes wf-kn-dot { 0%, 80%, 100% { opacity: .25; transform: none; } 40% { opacity: 1; transform: translateY(-2px); } }
+.wf-kn-composer { flex: none; display: flex; gap: 8px; align-items: flex-end; padding: 4px 4px 4px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--well); }
+.wf-kn-talk-input { flex: 1; min-width: 0; box-sizing: border-box; max-height: 160px; padding: 6px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 14px; resize: none; outline: none; }
+.wf-kn-composer:focus-within { border-color: var(--accent); }
+.wf-kn-send { flex: none; width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px; background: var(--accent-fill); color: var(--on-accent); cursor: pointer; }
+.wf-kn-send:hover:not(:disabled) { background: var(--accent-hover); }
+.wf-kn-send:disabled { opacity: .6; cursor: default; }
+/* While the panel is open, the page gives it room: a narrower list on the left, and the people
+   with the name and 所属・役割 only. */
+.wf-kn-talking .wf-page-tasks { padding: 24px 20px; }
+.wf-kn-talking .wf-tasks-body { gap: 14px; }
+.wf-kn-talking .wf-kn-side { flex-basis: 180px; }
+.wf-kn-talking .wf-kn-main { padding: 16px 18px; }
+.wf-kn-talking .wf-kn-row { grid-template-columns: minmax(90px, 160px) minmax(0, 1fr) 16px; }
+.wf-kn-talking .wf-kn-row > :nth-child(2), .wf-kn-talking .wf-kn-row > :nth-child(4) { display: none; }
+.wf-kn-talking .wf-kn-line { grid-template-columns: 84px minmax(0, 1fr) 32px; }
+.wf-kn-talking .wf-kn-line-wide { grid-template-columns: minmax(0, 1fr) 32px; }
+.wf-kn-talking .wf-kn-line-editing { grid-template-columns: 84px minmax(0, 1fr); }
+.wf-kn-talking .wf-kn-line-wide.wf-kn-line-editing { grid-template-columns: minmax(0, 1fr); }
+.wf-kn-talk-input:focus, .wf-kn-talk-input:focus-visible { outline: none; box-shadow: none; }
+.wf-kn-fab { position: fixed; right: 28px; bottom: 28px; z-index: 19; width: 52px; height: 52px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--accent-fill); color: var(--on-accent); box-shadow: 0 8px 22px rgba(0,0,0,.28); cursor: pointer; }
+.wf-kn-fab:hover { background: var(--accent-hover); }
+.wf-kn-fab[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .wf-kn-drawer { transition: none; }
+  .wf-kn-dots i { animation: none; opacity: .6; }
+}
+@media (max-width: 760px) {
+  .wf-kn-side { flex: none; }
+  .wf-kn-row { grid-template-columns: minmax(0, 1fr) auto 16px; }
+  .wf-kn-row > :nth-child(3), .wf-kn-row > :nth-child(4) { display: none; }
+  .wf-kn-headrow > :nth-child(3), .wf-kn-headrow > :nth-child(4) { display: none; }
+  .wf-kn-drawer-open { position: fixed; inset: 0; z-index: 20; width: 100%; border-left: 0; }
+  .wf-kn-drawer-in { width: 100%; }
+}
 .wf-know-sub { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 .wf-know-sub h3 { font-size: 14px; font-weight: 600; color: var(--sub); margin: 0; }
 

@@ -482,6 +482,7 @@ export function createWeb({
       return {
         name, people: peopleCounts[name] ?? 0, knowledge: lines(c?.knowledge), inbox: lines(c?.inbox),
         files: (c?.files?.knowledge?.length ?? 0) + (c?.files?.procedures?.length ?? 0),
+        topics: c?.files?.knowledge?.length ?? 0, procedures: c?.files?.procedures?.length ?? 0,
       };
     });
     res.json({ now: nowIso(), profiles, colors: profileColors(home, profiles.map((p) => p.name)) });
@@ -930,7 +931,8 @@ export function createWeb({
       week: { slots: week.slots },
       github: { owners: github.owners, others: github.others },
       profiles: profileNames(),
-      people: { count: list.count, more: list.more, people: list.people.map((p) => ledger.people.get(p.id, { all: true })) },
+      people: { count: list.count, more: list.more, people: list.people.map((p) => ledger.people.get(p.id, { all: true })), unassigned: list.unassigned },
+      secretary: Boolean(chat?.on),
     };
   };
   const WEB = { actor: 'web', device: null };
@@ -962,6 +964,42 @@ export function createWeb({
     try {
       ledger.people.create({ ...fields, profiles: [profile] }, { all: true }, WEB);
       res.status(201).json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  // A value changed on the screen: { field } (a fixed column, or profiles), { item: { label,
+  // profile } } or { memo: id }, and value. It is written as the person's words (a guess loses
+  // its mark); an empty value removes it.
+  api.post('/people/:id/edit', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, ['field', 'item', 'memo', 'value']) || typeof req.body?.value !== 'string') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "field" か "item" か "memo", "value": "…" } です'] });
+      return;
+    }
+    try {
+      ledger.people.edit(req.params.id, req.body, { all: true }, WEB);
+      res.json(rulesOut());
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  // 人について教える: { text, person? }: what the person says about people, one or many
+  // (person: the id of the one opened on the screen). The secretary is woken once, outside the
+  // conversation, finds each by name and writes it as checked values; said is what it changed,
+  // in its words.
+  api.post('/people/tell', sameOrigin, smallJson, async (req, res) => {
+    const { text, person } = req.body ?? {};
+    if (!exact(req.body, ['text', 'person']) || typeof text !== 'string' || (person !== undefined && person !== null && typeof person !== 'string')) {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "text": "…", "person": "開いている人の id" } です'] });
+      return;
+    }
+    if (!chat?.on || typeof chat.tell !== 'function') {
+      res.status(409).json({ error: 'secretary off', problems: ['秘書が停止しているため、登録できません'] });
+      return;
+    }
+    try {
+      const out = await chat.tell(text, { person: person ?? null });
+      res.json({ said: out.text, ...rulesOut() });
     } catch (err) {
       refused(res, err);
     }

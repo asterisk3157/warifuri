@@ -13,6 +13,12 @@
 // { profile, secretary: true } (the secretary naming a profile) sees that profile like anyone,
 // and may also put people in other profiles.
 //
+// How sure a value is: a column (the fixed ones but the name, and the free ones) and a memo
+// can be marked 未確認, a guess not yet checked with the person (people.unverified,
+// person_items.unverified, a memo's mark). A column is written as a checked value unless the
+// writer says unverified: true; writing it again clears or sets the mark, so what the person
+// said replaces a guess. edit writes a value changed on the screen as the person's words.
+//
 // People can be forgotten for good: forget deletes the rows (the database runs with
 // secure_delete, and the write-ahead log is emptied afterwards). So the ledger's records of
 // people say which fields changed, never their values or the text of a memo.
@@ -22,6 +28,8 @@
 import { randomInt } from 'node:crypto';
 
 export const FIELDS = ['name', 'aliases', 'email', 'phone', 'affiliation', 'role', 'birthday'];
+// The fixed fields that may hold a guess (未確認). The name is always the one they are known by.
+export const UNVERIFIABLE = ['aliases', 'email', 'phone', 'affiliation', 'role', 'birthday'];
 export const LINK_KINDS = ['goal', 'task', 'booking'];
 export const MARKS = ['本人の言葉', '未確認'];
 // やりとり: something that happened (a meeting, a request), 接し方: how to deal with them (how they
@@ -116,6 +124,19 @@ function cleanFields(input, { creating }) {
   return { values, problems };
 }
 
+// The guessed fields after writing values as guesses: the ones written (with a value) join
+// those already marked; a field cleared leaves.
+function marked(values, before) {
+  const set = new Set(before);
+  for (const f of UNVERIFIABLE) {
+    if (values[f] === undefined) continue;
+    const empty = values[f] === null || (Array.isArray(values[f]) && values[f].length === 0);
+    if (empty) set.delete(f);
+    else set.add(f);
+  }
+  return UNVERIFIABLE.filter((f) => set.has(f));
+}
+
 function cleanItems(items) {
   const out = [];
   const problems = [];
@@ -197,6 +218,12 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return out;
   }
 
+  // The fixed fields of the row that hold a guess, in the order of FIELDS.
+  const unverifiedOf = (row) => {
+    const set = new Set(JSON.parse(row.unverified ?? '[]'));
+    return UNVERIFIABLE.filter((f) => set.has(f));
+  };
+
   function memoView(f, scope) {
     return { id: f.id, kind: f.kind, text: f.text, mark: f.mark, source: f.source, learned_on: f.learned_on, ...(scope.all ? { profile: f.profile } : {}) };
   }
@@ -213,9 +240,10 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       affiliation: row.affiliation,
       role: row.role,
       birthday: row.birthday,
+      unverified: unverifiedOf(row),
       ...(scope.all ? { profiles: profilesOf(row.id) } : {}),
-      items: all(`SELECT profile, label, value FROM person_items WHERE person_id = ?${cond} ORDER BY profile, label`, row.id, ...args)
-        .map((i) => ({ label: i.label, value: i.value, ...(scope.all ? { profile: i.profile } : {}) })),
+      items: all(`SELECT profile, label, value, unverified FROM person_items WHERE person_id = ?${cond} ORDER BY profile, label`, row.id, ...args)
+        .map((i) => ({ label: i.label, value: i.value, ...(scope.all ? { profile: i.profile } : {}), ...(i.unverified ? { unverified: true } : {}) })),
       memos: all(`SELECT * FROM person_memos WHERE person_id = ?${cond} ORDER BY learned_on, id`, row.id, ...args).map((f) => memoView(f, scope)),
       links: linksOf(row.id),
       created_at: row.created_at,
@@ -241,6 +269,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       affiliation: row.affiliation,
       role: row.role,
       birthday: row.birthday,
+      unverified: unverifiedOf(row),
       items: Object.fromEntries(itemsOf(row.id, scope).map((i) => [scope.all ? `${i.profile}/${i.label}` : i.label, i.value])),
       memos: one(`SELECT count(*) AS n FROM person_memos WHERE person_id = ?${cond}`, row.id, ...args).n,
       ...(scope.all ? { profiles: profilesOf(row.id) } : {}),
@@ -332,11 +361,12 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
         if (value === null) db.prepare('DELETE FROM person_items WHERE person_id = ? AND profile = ? AND label = ?').run(id, p, label);
         else {
           db.prepare(
-            'INSERT INTO person_items (person_id, profile, label, value, updated_at) VALUES (?, ?, ?, ?, ?) ' +
-              'ON CONFLICT(person_id, profile, label) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
-          ).run(id, p, label, value, nowIso());
+            'INSERT INTO person_items (person_id, profile, label, value, unverified, updated_at) VALUES (?, ?, ?, ?, ?, ?) ' +
+              'ON CONFLICT(person_id, profile, label) DO UPDATE SET value = excluded.value, unverified = excluded.unverified, updated_at = excluded.updated_at',
+          ).run(id, p, label, value, input.unverified === true ? 1 : 0, nowIso());
         }
       }
+      if (input.unverified === true) changes.unverified = true;
       changes.items = input.items.map((i) => i.label);
     }
     if (input.add_memos?.length) {
@@ -386,6 +416,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     }
     const items = cleanItems(Object.keys(promoted).length ? { ...(input.items ?? {}), ...promoted } : input.items);
     problems.push(...items.problems);
+    if (input.unverified !== undefined && typeof input.unverified !== 'boolean') problems.push('unverified は true(推測、未確認)か false(確かな値)です');
     problems.push(...checkMemos(input.add_memos, 'add_memos'));
     problems.push(...checkLinks(input.link, 'link'));
     problems.push(...checkLinks(input.unlink, 'unlink'));
@@ -446,9 +477,10 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       const id = newId();
       const t = nowIso();
       db.prepare(
-        'INSERT INTO people (id, name, aliases, email, phone, affiliation, role, birthday, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO people (id, name, aliases, email, phone, affiliation, role, birthday, unverified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ).run(id, values.name, JSON.stringify(values.aliases ?? []), values.email ?? null, values.phone ?? null,
-        values.affiliation ?? null, values.role ?? null, values.birthday ?? null, t, t);
+        values.affiliation ?? null, values.role ?? null, values.birthday ?? null,
+        JSON.stringify(input.unverified === true ? marked(values, []) : []), t, t);
       for (const p of profiles) db.prepare('INSERT INTO person_profiles (person_id, profile) VALUES (?, ?)').run(id, p);
       const changes = applyParts(w, id, parts, scope);
       recordPerson(w, id, 'create', { fields: Object.keys(values), profiles, ...changes });
@@ -479,8 +511,9 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return transaction(() => {
       const fields = Object.keys(values);
       if (fields.length) {
-        db.prepare(`UPDATE people SET ${fields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`)
-          .run(...fields.map((f) => (f === 'aliases' ? JSON.stringify(values[f]) : values[f])), row.id);
+        const unverified = input.unverified === true ? marked(values, unverifiedOf(row)) : unverifiedOf(row).filter((f) => values[f] === undefined);
+        db.prepare(`UPDATE people SET ${fields.map((f) => `${f} = ?`).join(', ')}, unverified = ? WHERE id = ?`)
+          .run(...fields.map((f) => (f === 'aliases' ? JSON.stringify(values[f]) : values[f])), JSON.stringify(unverified), row.id);
       }
       for (const p of input.add_profiles ?? []) db.prepare('INSERT OR IGNORE INTO person_profiles (person_id, profile) VALUES (?, ?)').run(row.id, p);
       for (const p of input.remove_profiles ?? []) db.prepare('DELETE FROM person_profiles WHERE person_id = ? AND profile = ?').run(row.id, p);
@@ -488,6 +521,7 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
       db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
       recordPerson(w, row.id, 'update', {
         ...(fields.length ? { fields } : {}),
+        ...(fields.length && input.unverified === true ? { unverified: true } : {}),
         ...(input.add_profiles?.length ? { add_profiles: input.add_profiles } : {}),
         ...(input.remove_profiles?.length ? { remove_profiles: input.remove_profiles } : {}),
         ...changes,
@@ -645,13 +679,21 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
         .filter((a) => nameKey(a) !== nameKey(into.name)).slice(0, MAX_ALIASES);
       const kept = [];
       const filled = [];
+      // A field taken from `from` keeps its mark; the names it went by are checked as names.
+      const fromGuesses = new Set(unverifiedOf(from));
+      const guesses = new Set(unverifiedOf(into));
       for (const f of ['email', 'phone', 'affiliation', 'role', 'birthday']) {
         if (from[f] === null) continue;
-        if (into[f] === null) { db.prepare(`UPDATE people SET ${f} = ? WHERE id = ?`).run(from[f], into.id); filled.push(f); } else if (into[f] !== from[f]) kept.push(f);
+        if (into[f] === null) {
+          db.prepare(`UPDATE people SET ${f} = ? WHERE id = ?`).run(from[f], into.id);
+          filled.push(f);
+          if (fromGuesses.has(f)) guesses.add(f);
+        } else if (into[f] !== from[f]) kept.push(f);
       }
-      db.prepare('UPDATE people SET aliases = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(aliases), nowIso(), into.id);
+      db.prepare('UPDATE people SET aliases = ?, unverified = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(aliases), JSON.stringify(UNVERIFIABLE.filter((f) => guesses.has(f))), nowIso(), into.id);
       db.prepare('INSERT OR IGNORE INTO person_profiles (person_id, profile) SELECT ?, profile FROM person_profiles WHERE person_id = ?').run(into.id, from.id);
-      db.prepare('INSERT OR IGNORE INTO person_items (person_id, profile, label, value, updated_at) SELECT ?, profile, label, value, updated_at FROM person_items WHERE person_id = ?').run(into.id, from.id);
+      db.prepare('INSERT OR IGNORE INTO person_items (person_id, profile, label, value, unverified, updated_at) SELECT ?, profile, label, value, unverified, updated_at FROM person_items WHERE person_id = ?').run(into.id, from.id);
       db.prepare('UPDATE person_memos SET person_id = ? WHERE person_id = ?').run(into.id, from.id);
       db.prepare('INSERT OR IGNORE INTO person_links (person_id, kind, target_id, created_at) SELECT ?, kind, target_id, created_at FROM person_links WHERE person_id = ?').run(into.id, from.id);
       db.prepare('DELETE FROM people WHERE id = ?').run(from.id);
@@ -698,6 +740,92 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return out;
   }
 
+  // A value changed on the screen, in the person's own words: target { field } (a fixed one, or
+  // profiles: the names joined by 、), { item: { label, profile? } } (profile: for { all }) or
+  // { memo: id }, and value, the new text. It becomes a checked value: a guess loses its mark,
+  // a memo is marked 本人の言葉. An empty value removes it (a field is cleared, an item or memo
+  // deleted, the log emptied as forget does); the name and the last profile cannot go. The
+  // records say what was changed, never the value. Returns the person.
+  function edit(id, { field, item, memo, value }, scope, opts) {
+    const w = requireWriter(opts);
+    const row = personRow(id, scope);
+    const named = [field, item, memo].filter((v) => v !== undefined && v !== null).length;
+    if (named !== 1) fail(['直すものを1つ(field、item、memo のどれか)渡します']);
+    if (typeof value !== 'string') fail(['value は文字列です(空にすると消す)']);
+    const v = value.trim();
+    let changes;
+    const removed = v === '';
+    if (field !== undefined && field !== null) {
+      if (field === 'profiles') {
+        const list = [...new Set(v.split(/[、,，]/u).map((x) => x.trim()).filter(Boolean))];
+        if (list.length === 0) fail(['どのプロフィールにも入らない人は持てません。消すなら forget を使います']);
+        const before = profilesOf(row.id);
+        const add = list.filter((x) => !before.includes(x));
+        const drop = before.filter((x) => !list.includes(x));
+        if (!add.length && !drop.length) return view(row, scope);
+        update(row.id, { ...(add.length ? { add_profiles: add } : {}), ...(drop.length ? { remove_profiles: drop } : {}) }, scope, opts);
+        return view(one('SELECT * FROM people WHERE id = ?', row.id), scope);
+      }
+      if (!FIELDS.includes(field)) fail([`${field} は直せる列ではありません`]);
+      if (field === 'name' && removed) fail(['名前は空にできません']);
+      let given = v || null;
+      if (field === 'aliases') given = v ? v.split(/[、,，]/u) : null;
+      if (field === 'birthday' && v) {
+        const m = /^(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日?$/u.exec(v);
+        if (m) given = `${m[1] ? `${m[1]}-` : ''}${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+      }
+      const { values, problems } = cleanFields({ [field]: given }, { creating: false });
+      if (problems.length) fail(problems);
+      transaction(() => {
+        const rest = JSON.stringify(unverifiedOf(row).filter((f) => f !== field));
+        const out = field === 'aliases' ? JSON.stringify(values.aliases) : values[field];
+        db.prepare(`UPDATE people SET ${field} = ?, unverified = ?, updated_at = ? WHERE id = ?`).run(out, rest, nowIso(), row.id);
+        changes = { field };
+        recordPerson(w, row.id, 'edit', { ...changes, ...(removed ? { removed: true } : {}) });
+      });
+    } else if (item !== undefined && item !== null) {
+      if (typeof item?.label !== 'string') fail(['item は { label, profile? } です']);
+      const p = scope.all === true ? item.profile : scope.profile;
+      if (typeof p !== 'string' || p === '') fail(['item の profile を渡します']);
+      const it = one('SELECT * FROM person_items WHERE person_id = ? AND profile = ? AND label = ?', row.id, p, item.label);
+      if (!it) fail([`「${item.label}」という列は、この人にありません`]);
+      if (!removed) {
+        const checked = cleanItems({ [item.label]: v });
+        if (checked.problems.length) fail(checked.problems);
+      }
+      transaction(() => {
+        if (removed) db.prepare('DELETE FROM person_items WHERE person_id = ? AND profile = ? AND label = ?').run(row.id, p, item.label);
+        else db.prepare('UPDATE person_items SET value = ?, unverified = 0, updated_at = ? WHERE person_id = ? AND profile = ? AND label = ?').run(v, nowIso(), row.id, p, item.label);
+        db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
+        changes = { item: item.label, profile: p };
+        recordPerson(w, row.id, 'edit', { ...changes, ...(removed ? { removed: true } : {}) });
+      });
+    } else {
+      const found = memosNamed([memo], scope, 'memo', { personId: row.id });
+      if (found.problems.length) fail(found.problems);
+      const [f] = found.rows;
+      if (!removed) {
+        const problems = checkMemoText(v);
+        if (problems.length) fail(problems);
+      }
+      transaction(() => {
+        if (removed) db.prepare('DELETE FROM person_memos WHERE id = ?').run(f.id);
+        else db.prepare("UPDATE person_memos SET text = ?, mark = '本人の言葉' WHERE id = ?").run(v.replace(/\r\n?/g, '\n'), f.id);
+        db.prepare('UPDATE people SET updated_at = ? WHERE id = ?').run(nowIso(), row.id);
+        changes = { memo: f.id };
+        recordPerson(w, row.id, 'edit', { ...changes, ...(removed ? { removed: true } : {}) });
+      });
+    }
+    if (removed) {
+      try {
+        db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      } catch {
+        // An in-memory database has no log.
+      }
+    }
+    return view(one('SELECT * FROM people WHERE id = ?', row.id), scope);
+  }
+
   // How many people each profile has (for the screens' counts).
   function counts() {
     return Object.fromEntries(all('SELECT profile, count(*) AS n FROM person_profiles GROUP BY profile').map((r) => [r.profile, r.n]));
@@ -709,5 +837,5 @@ export function peopleStore({ db, one, all, transaction, record, now, LedgerErro
     return all('SELECT person_id FROM person_links WHERE kind = ? AND target_id = ? ORDER BY created_at, person_id', kind, id).map((r) => r.person_id);
   }
 
-  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, counts, linked };
+  return { create, update, learn, match, list, columns, get: getPerson, birthdays, merge, forget, edit, counts, linked };
 }

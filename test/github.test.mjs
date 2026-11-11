@@ -314,14 +314,14 @@ test('schema 15: a version 14 file gains github_items and keeps its rows', (t) =
   raw.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('life.rules', '[\"a\"]', '2026-11-01T00:00:00.000Z')").run();
   raw.close();
 
-  assert.equal(SCHEMA_VERSION, 15);
+  assert.equal(SCHEMA_VERSION, 16);
   const L = openLedger(file);
   assert.deepEqual(readSettings(L).life.rules, ['a']);
   readOwner(L);
   assert.equal(takeGithubEvent(L, 'pull_request', pr()), 'stored');
   L.close();
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '15');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '16');
   assert.equal(check.prepare('SELECT count(*) AS n FROM github_items').get().n, 1);
   // A row that is neither a pull request nor an issue is refused by the table itself.
   assert.throws(() => check.prepare("INSERT INTO github_items (key, owner, repo, number, kind, title, state, url, updated_at, received_at) VALUES ('a/b#1', 'a', 'b', 1, 'commit', 't', 'open', 'u', 'x', 'x')").run());

@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -705,6 +705,14 @@ export const MIGRATIONS = [
     received_at TEXT NOT NULL
   );
   CREATE INDEX github_items_updated ON github_items(updated_at);
+  `,
+  // 15 → 16: 人 hold a mark of certainty on their columns, as memos do. people.unverified is a
+  // JSON array of the fixed fields (aliases, email, phone, affiliation, role, birthday) whose
+  // value is a guess (未確認) and not yet checked with the person; person_items.unverified is 1
+  // for a free column that is. Rows from before are all checked values (as they were shown).
+  `
+  ALTER TABLE people ADD COLUMN unverified TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE person_items ADD COLUMN unverified INTEGER NOT NULL DEFAULT 0 CHECK (unverified IN (0, 1));
   `,
 ];
 
