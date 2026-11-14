@@ -51,7 +51,9 @@ function relayGuard(res, csp = relayCsp()) {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'SAMEORIGIN',
-    'Cache-Control': 'no-store',
+    // no-transform: a proxy in front (Cloudflare) must not change the page, for example by adding
+    // its own script or minifying the inline ones, which would no longer match their hashes.
+    'Cache-Control': 'no-store, no-transform',
   });
 }
 
