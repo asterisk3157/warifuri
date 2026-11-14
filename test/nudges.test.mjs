@@ -255,7 +255,7 @@ test('closedTasksSince: what the secretary closed after the mark and is still cl
 // --- schema --------------------------------------------------------------------------------
 
 test('schema 18: a version 17 file keeps its threads, messages, files and travel, and takes withdrawn', (t) => {
-  assert.equal(SCHEMA_VERSION, 18);
+  assert.equal(SCHEMA_VERSION, 19);
   const file = path.join(dir(t), 'v17.sqlite');
   const raw = new DatabaseSync(file);
   raw.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -276,7 +276,7 @@ test('schema 18: a version 17 file keeps its threads, messages, files and travel
   L.close();
 
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '18');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '19');
   for (const n of ['threads_v17', 'messages_v17', 'attachments_v17']) assert.equal(check.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(n), undefined);
   assert.equal(check.prepare("SELECT message_id FROM attachments WHERE id = 'a_20261001000000_cccccc'").get().message_id, 'm_20261001000000_aaaaaa');
   assert.equal(check.prepare("SELECT parent_id FROM threads WHERE id = 'c_20261001000001_bbbbbb'").get().parent_id, 'm_20261001000000_aaaaaa');

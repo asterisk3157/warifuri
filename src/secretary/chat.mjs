@@ -98,13 +98,25 @@ export const isRequest = (m) => m.role === 'system' && m.kind === 'text' && Bool
 
 // The words of a request in the conversation: who asks, what, and the conditions given.
 export function requestBody(r) {
-  const out = [`${r.from} のエージェントからの依頼: ${r.text}`];
+  // A guest (a device with a scope, such as an AI outside) is named so, and the secretary is
+  // told that its reply goes back outside, so the profiles it may not see stay out of it.
+  if (r.guest) {
+    const hidden = Array.isArray(r.guest) && r.guest.length ? `プロフィール ${r.guest.join('、')} の人・ナレッジ・タスクの中身は、返事に書きません。` : '';
+    const out = [`${r.from}(外の AI)からの依頼: ${r.text}`, `返事は、そのまま外の AI に渡ります。${hidden}予定を入れる・動かす前は、本人に確かめます。`];
+    return [...out, ...requestDetails(r)].join('\n');
+  }
+  const out = [`${r.from} のエージェントからの依頼: ${r.text}`, ...requestDetails(r)];
+  return out.join('\n');
+}
+
+function requestDetails(r) {
+  const out = [];
   if (r.task_id) out.push(`タスク: ${r.task_id}`);
   if (r.minutes) out.push(`長さ: ${r.minutes}分`);
   if (r.by) out.push(`期限: ${r.by}`);
   if (r.prefer) out.push(`希望: ${r.prefer}`);
   if (r.starts_at || r.ends_at) out.push(`本人が決めた日時: ${r.starts_at ?? '?'} 〜 ${r.ends_at ?? '?'}`);
-  return out.join('\n');
+  return out;
 }
 
 // The line in the secretary's conversation for a booking an agent's request changed.

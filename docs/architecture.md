@@ -320,6 +320,12 @@ warifuri connect --url https://<サーバー> --device <デバイスの名前>
 
 あわせて、タスク確認、作業の終わりの確認と書き漏れの確認、会話の始めの要点、カレンダーのフック(下の節)を Claude Code の `~/.claude/settings.json` と Codex の `~/.codex/hooks.json` に足し、パッケージの `harness/skills/` にある指示書を、それぞれの skills のフォルダにコピーします。ほかのフックや設定はそのまま残し、ファイルを書き換える前に、元のファイルを `<ファイル>.bak-warifuri-<日時>` として隣にコピーします。すでに入っているものは書き換えないので、何度実行しても同じ形になります。指示書は、すでにあるファイルを残し、`--force` のときだけ上書きします。前の版が別の名前でコピーしたスキル(`warifuri-secretary`)が残っていれば、ハーネスが両方を読まないよう、スキルのフォルダの隣の `skills.bak-warifuri-<日時>/` に移します。移すのは、`SKILL.md` の `name` がその名前のフォルダだけです。`--no-hook` と `--no-skills` でそれぞれを省けて、`--dry-run` では何も変えずに、することだけを出します。Windows では、ホームを `%USERPROFILE%` から読み、`warifuri.cmd` もコマンドとして探します。
 
+### 範囲つきのシークレット
+
+Muse のような、ほかの会社のクラウドで動く AI には、範囲つきのシークレットを渡します(`warifuri key add <デバイスの名前> --guest`)。範囲は、データベースのデバイスの行に JSON で持ちます。見せるプロフィール(`profiles`)、プロフィールごとに伏せるもの(`hide`。人の `people`、ナレッジの `knowledge`、タスクの中身の `details`)、許す書き込み(`write`。`note` と `ask_secretary` から選ぶ)の3つです。範囲のないデバイス(エージェントと秘書)は、これまでどおりすべてを読み書きします。
+
+範囲つきのデバイスには、読むツールのうち `board`、`get`、`search`、`flow`、`schedule`、`free_time`、`timetable`、`people`、`context` と、許した書き込みのツールだけを出します。作業フォルダを持たないので、`place` は断り、`profile` で選ばせます。秘書と同じように全体を見られますが、伏せたプロフィールの人とナレッジは断り、ゴールとタスクは題・期限・状態だけを返します。見せないプロフィールのゴール、タスク、予定は、ないものとして扱います。`ask_secretary` の依頼には、外の AI からの依頼であることと、伏せたプロフィールの名前を付けて、秘書の会話に入れます。`/api` は断ります。つなぎ方は[連携の例](integrations.md)にまとめました。
+
 ### タスク確認
 
 タスク確認は、ファイルを編集するツール(Claude Code の Edit、Write、MultiEdit、NotebookEdit と、Codex の apply_patch)の前に走る PreToolUse のフックで、`warifuri hook gate` が中身です。ハーネスが渡す JSON を標準入力で受け、編集するファイルのディレクトリ(まだないディレクトリなら、一番近い親)を `GET /api/held` で聞きます。そのデバイスで作業中のタスクがあれば通し、どの作業フォルダにも入らないディレクトリでも通します。作業フォルダに入るのに作業中のタスクがないときだけ止め、`search` で同じタスクを探し、なければ `create_task` で作り、`start` に `place` としてそのディレクトリを渡して着手するよう、エージェントに返します。Claude Code と Codex は同じ形の JSON を受け取るので、1つのコマンドで両方に使えます。Codex では、足したフックを `/hooks` で一度信頼すると動きます。
@@ -472,7 +478,8 @@ npm install -g warifuri
 | `warifuri config` | すべての設定の値と、それをどこから読んだかを出す。秘密は伏せる |
 | `warifuri serve` | サーバーを動かす |
 | `warifuri connect` | 使う機械で、ハーネスに登録し、シークレット、タスク確認と作業の終わりの確認と会話の始めの要点とカレンダーのフック、指示書を入れる |
-| `warifuri key add` | シークレットを発行する |
+| `warifuri key add` | シークレットを発行する。`--guest` で範囲つきにする |
+| `warifuri key scope` | 範囲つきのシークレットの範囲を見る、直す、外す(`--clear`) |
 | `warifuri google login` | サーバーの機械で、warifuri が Google カレンダーを読む許可を取り、トークンを `secrets.env` に書く |
 | `warifuri oauth clients` / `warifuri oauth revoke` | GitHub でログインしてつないだアプリを一覧する、そのトークンを取り消す |
 | `warifuri backup` | データベースを日付つきのファイルにコピーする。新しいほうから `--keep` の数(既定は7)だけ残し、古いものは消す |

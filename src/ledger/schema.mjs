@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -818,6 +818,11 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, created_at);
   CREATE INDEX IF NOT EXISTS messages_state ON messages(state) WHERE state IS NOT NULL;
   CREATE INDEX IF NOT EXISTS attachments_message ON attachments(message_id);
+  `,
+  `
+  -- What a guest device (an AI outside, such as one in someone else's cloud) may see and write:
+  -- JSON { profiles, hide, write } (src/ledger/scope.mjs), or NULL for an agent or the secretary.
+  ALTER TABLE devices ADD COLUMN scope TEXT;
   `,
 ];
 

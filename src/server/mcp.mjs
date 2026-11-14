@@ -4,7 +4,8 @@
 // Every /mcp request carries a bearer that tells which device is calling: a device's machine
 // key (wf_…), or, when OAuth is configured (oauth.mjs), an access token issued after the
 // person logged in with GitHub and chose the device. The read tools return the ledger as it
-// is: whoever holds a valid bearer sees everything. The write tools write as that device: the
+// is: whoever holds a valid bearer sees everything, unless its device has a scope (a guest,
+// scope.mjs), which sees and writes only what the scope allows. The write tools write as that device: the
 // device always comes from the bearer, never from a tool's arguments, and the actor names the
 // kind of bearer (device-key, or oauth:<client_id>). /api takes machine keys only.
 // Bearers are never logged.
@@ -26,6 +27,7 @@ import {
 import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
+import { scopedRegistrar } from './scope.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { githubWebhook } from './github.mjs';
@@ -111,8 +113,11 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
   const writer = { actor: device.actor, device: device.name };
+  // A device with a scope (a guest) gets only the tools its scope allows, each wrapped so it
+  // sees only what it may (scope.mjs). Other devices get every tool as it is.
+  const tools = device.scope ? scopedRegistrar(server, ledger, device.scope) : server;
 
-  server.registerTool(
+  tools.registerTool(
     'board',
     {
       description:
@@ -146,7 +151,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'get',
     {
       description: 'Read one goal, task, habit or place by id, with its order, hold and records.',
@@ -160,7 +165,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     },
   );
 
-  server.registerTool(
+  tools.registerTool(
     'places',
     {
       description:
@@ -172,7 +177,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     async ({ profile }) => result({ places: ledger.listPlaces({ profile }) }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'search',
     {
       description: 'Find goals and tasks whose title contains the text, closed ones too. Use it before creating one, to avoid duplicates.',
@@ -182,7 +187,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     async ({ text, limit }) => result(ledger.search(text, { limit: limit ?? 20 })),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'flow',
     {
       description:
@@ -198,7 +203,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     },
   );
 
-  server.registerTool(
+  tools.registerTool(
     'stale',
     {
       description:
@@ -218,7 +223,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       result({ ...ledger.stale({ heldDays, readyDays, waitingDays }), merged: githubMergedOpen(ledger) }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'context',
     {
       description:
@@ -243,7 +248,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'schedule',
     {
       description:
@@ -263,7 +268,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'activity',
     {
       description:
@@ -280,7 +285,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ from, to }) => result(ledger.activity({ from, to }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'free_time',
     {
       description:
@@ -304,7 +309,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ from, to, only_at }) => result(freeTimeFor(ledger, { from, to, only_at }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'timetable',
     {
       description:
@@ -337,7 +342,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ from, to, replan }) => result(timetableFor(ledger, { from, to, replan }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'autonomy',
     {
       description:
@@ -351,7 +356,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
   );
 
   // Loose types here, so the ledger says in Japanese what is wrong.
-  server.registerTool(
+  tools.registerTool(
     'reports',
     {
       description:
@@ -364,7 +369,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ kind, limit, before }) => result(ledger.listReports({ kind, limit, before }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'proposals',
     {
       description:
@@ -384,7 +389,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       })),
   );
 
-  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat });
+  registerWriteTools(tools, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat });
   return server;
 }
 
@@ -813,7 +818,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   // 人 (people.mjs), kept as a table. A caller names a profile (profile, or place for its
   // profile) and sees the people in it, with that profile's free columns and memos. The
   // secretary may name none and see everyone, and may put people in other profiles.
-  const isSecretary = secretaryDevice === undefined || device.name === secretaryDevice;
+  // A guest is never the secretary, even on a server that lets any device call the secretary's tools.
+  const isSecretary = !device.scope && (secretaryDevice === undefined || device.name === secretaryDevice);
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const peopleScope = (place, profile, name) => {
     if (place === undefined && profile === undefined) {
@@ -1099,7 +1105,10 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
         return refusal(['秘書が有効になっていないので、頼めません。free_time で空き時間を見て、本人の了承を得てから book で入れます']);
       }
       if (device.name === secretaryDevice) return refusal(['秘書は自分に頼めません']);
-      const out = await chat.request({ from: device.name, ...fields }, writer, { waitMs: (wait_seconds ?? ASK_SECRETARY_WAIT_MAX) * 1000 });
+      // A guest's request says so, with the profiles whose people or knowledge it may not see,
+      // since the secretary's reply goes back to it as it is.
+      const guest = device.scope ? { guest: Object.keys(device.scope.hide).filter((p) => device.scope.hide[p].length) } : {};
+      const out = await chat.request({ from: device.name, ...fields, ...guest }, writer, { waitMs: (wait_seconds ?? ASK_SECRETARY_WAIT_MAX) * 1000 });
       if (out.timedOut) {
         return result({ status: 'waiting', request_id: out.request.id, say: '秘書に頼みました。決まったら秘書の画面に出ます' });
       }
@@ -1399,7 +1408,8 @@ function threadOf(ledger, req) {
 }
 
 async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat) {
-  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req), secretaryDevice, chat);
+  const name = req.auth.extra.device;
+  const server = buildServer(ledger, { name, actor: actorFor(req.auth), scope: ledger.deviceScope(name) }, knowledge, threadOf(ledger, req), secretaryDevice, chat);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -1419,6 +1429,11 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
     const device = ledger.deviceForKey(m ? m[1] : null);
     if (!device) {
       res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'a valid device key is required' });
+      return;
+    }
+    // A guest's key is for /mcp alone: the hooks' answers (brief, held) are an agent's.
+    if (ledger.deviceScope(device.name)) {
+      res.status(403).json({ error: 'this device key is scoped to /mcp' });
       return;
     }
     ledger.markSeen(device.name);

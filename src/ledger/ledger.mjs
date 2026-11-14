@@ -20,6 +20,7 @@ import { renderFlow } from './flow.mjs';
 import { oauthStore } from './oauth.mjs';
 import { peopleStore } from './people.mjs';
 import { githubStore } from './github.mjs';
+import { normalizeScope, parseScope } from './scope.mjs';
 import {
   STATES,
   CLOSED_STATES,
@@ -2052,6 +2053,7 @@ export function openLedger(path, options = {}) {
     created_at: r.created_at,
     revoked_at: r.revoked_at,
     last_seen_at: r.last_seen_at,
+    scope: parseScope(r.scope),
   });
 
   // Notes that a device called the server with its key or a login token. Written at most
@@ -2132,6 +2134,30 @@ export function openLedger(path, options = {}) {
       record(w, 'device', name, 'revoke', { key: { before: before.key_hash === null ? 'none' : 'issued', after: 'revoked' }, oauth_tokens: tokens });
       return { name, revoked_at: t, oauth_tokens: tokens };
     });
+  }
+
+  // Sets or clears (scope null) what a device may see and write (scope.mjs). The device must
+  // exist. The record keeps the scope as it was and as it is: it names profiles, not secrets.
+  function setDeviceScope(name, scope, opts) {
+    const w = requireWriter(opts);
+    const before = getDeviceRow(name);
+    if (!before) throw new LedgerError([`デバイス ${name} がありません`]);
+    let text = null;
+    if (scope !== null) {
+      const out = normalizeScope(scope);
+      if (out.problems) throw new LedgerError(out.problems);
+      text = JSON.stringify(out.scope);
+    }
+    return transaction(() => {
+      db.prepare('UPDATE devices SET scope = ? WHERE name = ?').run(text, name);
+      record(w, 'device', name, 'scope', { scope: { before: parseScope(before.scope), after: parseScope(text) } });
+      return deviceView(getDeviceRow(name));
+    });
+  }
+
+  // What the device may see and write, or null for a device with no scope (or no row).
+  function deviceScope(name) {
+    return parseScope(getDeviceRow(name)?.scope ?? null);
   }
 
   function listDevices() {
@@ -2305,6 +2331,8 @@ export function openLedger(path, options = {}) {
     issueKey,
     revokeKey,
     listDevices,
+    setDeviceScope,
+    deviceScope,
     deviceForKey,
     markSeen,
     book,
