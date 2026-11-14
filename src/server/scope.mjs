@@ -4,11 +4,16 @@
 // Each registered tool is wrapped: before, the arguments are checked (a guest names a profile,
 // never a place, since it has no directories); after, what it may not see is taken out of the
 // answer. A goal, task, habit or place of a profile it may not see answers as if it were not
-// there.
+// there. 下調べ (prep) is written, and offered by prep_candidates, only for tasks of a profile it
+// sees in full (details not hidden).
 
 import { seesProfile, hides } from '../ledger/scope.mjs';
 
-export const GUEST_READ_TOOLS = ['board', 'get', 'search', 'flow', 'schedule', 'free_time', 'timetable', 'people', 'context'];
+export const GUEST_READ_TOOLS = ['board', 'get', 'search', 'flow', 'schedule', 'free_time', 'timetable', 'people', 'context', 'prep_candidates'];
+
+// Whether the scope may write 下調べ to (and be offered) a task of this profile: a profile it
+// sees, with the details not hidden. A task with no profile always may.
+export const prepAllowed = (scope, profile) => seesProfile(scope, profile) && !hides(scope, profile ?? null, 'details');
 
 // What is kept of a goal or task whose profile hides its details.
 const TASK_KEEP = ['id', 'kind', 'title', 'state', 'due', 'due_provisional', 'goal_id', 'profile', 'mode', 'created_at', 'updated_at', 'closed_at', 'open_before', 'actionable'];
@@ -123,6 +128,18 @@ const GUARDS = {
       const { people: _people, ...rest } = out;
       return { ...rest, people: null, people_hidden: true };
     },
+  },
+  prep: {
+    before: (ledger, scope, args) => {
+      const task = typeof args.task_id === 'string' ? ledger.get(args.task_id) : null;
+      if (task?.kind !== 'task' || !seesProfile(scope, task.profile)) return errorResult(`${args.task_id} というタスクはありません`);
+      if (!prepAllowed(scope, task.profile)) return errorResult(`プロフィール ${task.profile} のタスクには、この鍵からは下調べを書けません`);
+      return null;
+    },
+  },
+  prep_candidates: {
+    before: (ledger, scope, args) => needProfile(scope, args, 'prep_candidates'),
+    after: (ledger, scope, out) => ({ ...out, candidates: out.candidates.filter((c) => prepAllowed(scope, c.profile)) }),
   },
   note: {
     before: (ledger, scope, args) => {
