@@ -6,7 +6,8 @@
 // - A pair that is on a task's or habit's booking is an event warifuri wrote: no fixed
 //   booking is made of it. When its time was changed in the calendar, the booking follows.
 // - Any other event becomes a fixed booking (title, time, place, description, organizer),
-//   changed when the event changed.
+//   changed when the event changed. That holds for an event whose description ends in
+//   割り振りで作成 (the line the secretary writes) too: only the pair says warifuri wrote it.
 // - Not taken in, and their copies deleted: cancelled events, events the person declined,
 //   events shown as free (transparent), and the events of calendar.skip.
 // - An all-day event runs from that day's midnight to the next (the server's local time). A
