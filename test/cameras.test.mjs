@@ -44,7 +44,7 @@ test('parseCameras refuses what it cannot use', () => {
   assert.ok(setting.check('部屋=https://camera.example.ts.net'));
 });
 
-test('pageCsp lets in only the given origins, for pictures and frames', () => {
+test('pageCsp lets in only the given origins, for pictures, frames and the permission request', () => {
   const plain = pageCsp();
   assert.match(plain, /img-src 'self' data:;/);
   assert.doesNotMatch(plain, /frame-src/);
@@ -52,7 +52,8 @@ test('pageCsp lets in only the given origins, for pictures and frames', () => {
   const cam = pageCsp(['https://camera.example.ts.net']);
   assert.match(cam, /img-src 'self' data: https:\/\/camera\.example\.ts\.net;/);
   assert.match(cam, /frame-src https:\/\/camera\.example\.ts\.net;/);
-  assert.match(cam, /connect-src 'self';/);
+  assert.match(cam, /connect-src 'self' https:\/\/camera\.example\.ts\.net;/);
+  assert.match(plain, /connect-src 'self';/);
   assert.match(cam, /script-src 'self';/);
   assert.match(cam, /frame-ancestors 'none'/);
 });

@@ -265,11 +265,12 @@ function readCookie(req, name) {
   return '';
 }
 
-// The pages' policy. With cameras, the pages also let in the cameras' origins: their pictures (img) and
-// their live view (frame), and nothing else of them.
+// The pages' policy. With cameras, the pages also let in the cameras' origins: their pictures
+// (img), their live view (frame), and the request that asks Chrome for the permission to reach
+// a local network (connect), and nothing else of them.
 export function pageCsp(origins = []) {
   const extra = origins.length ? ` ${origins.join(' ')}` : '';
-  return `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:${extra}; connect-src 'self'; ` +
+  return `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:${extra}; connect-src 'self'${extra}; ` +
     `font-src 'self'; ${origins.length ? `frame-src${extra}; ` : ''}base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
 }
 const PAGE_CSP = pageCsp();

@@ -3,6 +3,11 @@
 // does not come (this browser is outside the network the camera is on), a short line says where
 // it shows instead, and the picture is tried again at each reading.
 //
+// Chrome asks before a page on the internet reads from a machine on a local network (the
+// cameras sit on Tailscale's 100.x addresses): until the person allows it, the picture does not
+// come. So when the permission is still to be asked, a button asks for it; when it was refused,
+// a line says where to allow it.
+//
 // A live view starts again whenever its frame is put back in the page, so the page is drawn
 // again only when the cameras change: each tile is made once and kept.
 
@@ -33,23 +38,62 @@ function probe(frame, ok) {
   img.src = `${frame}${frame.includes('?') ? '&' : '?'}t=${Date.now()}`;
 }
 
+// The state of Chrome's permission to reach local networks: 'granted', 'prompt', 'denied', or
+// 'granted' where the browser has no such permission (it then lets the picture through).
+async function localAccess() {
+  try {
+    return (await navigator.permissions.query({ name: 'local-network-access' })).state;
+  } catch {
+    return 'granted';
+  }
+}
+
+// Asks Chrome for the permission: a request to the camera, made from the person's click.
+async function askAccess(frame) {
+  try {
+    await fetch(frame, { mode: 'no-cors', cache: 'no-store', targetAddressSpace: 'local' });
+  } catch {
+    // refused or out of reach: the check after this says which
+  }
+}
+
 function makeTile(cam) {
   const box = h('div', { class: 'wf-cam-view', 'aria-busy': 'true' }, skel('100%', '100%', { borderRadius: '0' }));
   const tile = { cam, box, state: 'checking' };
-  tile.check = () => {
+  const show = (...kids) => {
+    box.removeAttribute('aria-busy');
+    box.replaceChildren(h('div', { class: 'wf-cam-away' }, ...kids));
+  };
+  tile.check = async () => {
     tile.state = 'checking';
+    const access = await localAccess();
+    if (access === 'prompt') {
+      tile.state = 'away';
+      show(
+        h('p', { text: 'このブラウザで映像を見るには、許可が要ります' }),
+        h('button', { type: 'button', class: 'wf-btn-line', text: '許可する', onclick: async () => {
+          await askAccess(cam.frame);
+          tile.check();
+        } }),
+      );
+      return;
+    }
+    if (access === 'denied') {
+      tile.state = 'away';
+      show(h('p', { text: 'ローカル ネットワークへのアクセスが、このサイトで拒否されています。アドレスバーの左のボタンから許可してください' }));
+      return;
+    }
     probe(cam.frame, (ok) => {
       if (ok) {
         tile.state = 'live';
         box.removeAttribute('aria-busy');
         box.replaceChildren(h('iframe', {
-          src: cam.stream, title: cam.name, loading: 'lazy', allow: 'autoplay; fullscreen', allowfullscreen: true,
+          src: cam.stream, title: cam.name, loading: 'lazy', allow: 'autoplay; fullscreen; local-network-access; local-network', allowfullscreen: true,
           referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin',
         }));
       } else {
         tile.state = 'away';
-        box.removeAttribute('aria-busy');
-        box.replaceChildren(h('p', { class: 'wf-cam-away', text: 'Tailscale につないだ端末で開くと映ります' }));
+        show(h('p', { text: 'Tailscale につないだ端末で開くと映ります' }));
       }
     });
   };
