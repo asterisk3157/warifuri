@@ -96,11 +96,11 @@ const noSecret = (value, what) => {
 };
 
 test('scope: normalizeScope fills the guest defaults and refuses what it cannot be', () => {
-  assert.deepEqual(normalizeScope({}).scope, { profiles: null, hide: {}, write: ['note', 'ask_secretary'] });
+  assert.deepEqual(normalizeScope({}).scope, { profiles: null, hide: {}, write: ['note', 'ask_secretary', 'prep'] });
   assert.deepEqual(normalizeScope({ profiles: ['趣味'], hide: { 仕事: ['details', 'people'] }, write: [] }).scope, {
     profiles: ['趣味'], hide: { 仕事: ['people', 'details'] }, write: [],
   });
-  assert.match(normalizeScope({ write: ['create_task'] }).problems.join('\n'), /note, ask_secretary だけ/);
+  assert.match(normalizeScope({ write: ['create_task'] }).problems.join('\n'), /note, ask_secretary, prep だけ/);
   assert.match(normalizeScope({ hide: { 仕事: ['memos'] } }).problems.join('\n'), /知らないもの/);
   assert.match(normalizeScope({ hide: { 仕事: [] } }).problems.join('\n'), /1つ以上/);
   assert.match(normalizeScope({ other: 1 }).problems.join('\n'), /知らない項目/);
@@ -121,14 +121,14 @@ test('scope: a guest lists only the read tools and the writes it may make', asyn
   const { connect } = await start(t);
   const muse = await connect('muse');
   const names = (await muse.listTools()).tools.map((x) => x.name).sort();
-  assert.deepEqual(names, ['ask_secretary', 'board', 'context', 'flow', 'free_time', 'get', 'note', 'people', 'schedule', 'search', 'timetable']);
+  assert.deepEqual(names, ['ask_secretary', 'board', 'context', 'flow', 'free_time', 'get', 'note', 'people', 'prep', 'prep_candidates', 'schedule', 'search', 'timetable']);
 });
 
 test('scope: write [] leaves a read-only guest; profiles keeps out the others', async (t) => {
   const { connect, ids } = await start(t, { scope: { profiles: ['趣味'], write: [] } });
   const muse = await connect('muse');
   const names = (await muse.listTools()).tools.map((x) => x.name);
-  assert.ok(!names.includes('note') && !names.includes('ask_secretary'));
+  assert.ok(!names.includes('note') && !names.includes('ask_secretary') && !names.includes('prep'));
   const { data: board } = await call(muse, 'board');
   assert.deepEqual(board.goals.map((g) => g.id), [ids.hobby]);
   assert.deepEqual(board.unassigned, []);
@@ -317,11 +317,11 @@ test('scope: key add --guest --hide makes a scoped key, key scope shows and clea
   const run = (...args) => execFileSync(process.execPath, [bin, ...args, '--home', home, '--db', db], { encoding: 'utf8', env: { ...process.env, WARIFURI_HOME: '', WARIFURI_DB: '' } });
   const added = run('key', 'add', 'muse', '--guest', '--hide', '仕事');
   assert.match(added, /^key for muse:\nwf_/);
-  assert.match(added, /scope: profiles: all {2}hide: 仕事=people,knowledge,details {2}write: note,ask_secretary/);
+  assert.match(added, /scope: profiles: all {2}hide: 仕事=people,knowledge,details {2}write: note,ask_secretary,prep/);
   assert.match(run('key', 'list'), /muse .*\[guest: /);
   assert.match(run('key', 'scope', 'muse', '--hide', '仕事=people', '--write', ''), /hide: 仕事=people {2}write: nothing/);
   assert.match(run('key', 'scope', 'muse', '--clear'), /no scope/);
-  assert.throws(() => run('key', 'add', 'other', '--write', 'book'), /note, ask_secretary だけ/);
+  assert.throws(() => run('key', 'add', 'other', '--write', 'book'), /note, ask_secretary, prep だけ/);
   assert.doesNotMatch(run('key', 'list'), /other/);
   // An agent's key is made as before, with no scope.
   assert.match(run('key', 'add', 'laptop'), /^key for laptop:\nwf_[^\n]+\nThis key will not be shown again\. Keep it in that device's settings\.\n$/);

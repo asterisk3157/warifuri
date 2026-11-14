@@ -9,12 +9,13 @@
 //   people (the people and their memos), knowledge (knowledge.md, knowledge/, procedures/, the
 //   inbox) and details (of goals and tasks only the title, due date, state and goal are shown;
 //   body, next, result, done_when, outcome, records, holds and links are not).
-//   It also may not write notes to a profile with anything hidden.
+//   It also may not write notes to a profile with anything hidden, nor 下調べ (prep) to a task
+//   of a profile whose details are hidden.
 // - write: the write tools it may call, out of WRITE_TOOLS. Every other write tool is left out.
 
 export const HIDE_ITEMS = ['people', 'knowledge', 'details'];
-export const WRITE_TOOLS = ['note', 'ask_secretary'];
-export const GUEST_WRITE = ['note', 'ask_secretary'];
+export const WRITE_TOOLS = ['note', 'ask_secretary', 'prep'];
+export const GUEST_WRITE = ['note', 'ask_secretary', 'prep'];
 
 const isList = (v) => Array.isArray(v) && v.every((s) => typeof s === 'string' && s.trim() !== '');
 

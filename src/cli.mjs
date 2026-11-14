@@ -5,7 +5,7 @@
 //   warifuri config
 //   warifuri import <snapshot.json> [--actor <name>]
 //   warifuri key add <device> [--guest] [--profiles <a,b>] [--hide <profile>[=people,knowledge,details]]...
-//                             [--write <note,ask_secretary>]   (a guest: a key with a scope)
+//                             [--write <note,ask_secretary,prep>]   (a guest: a key with a scope)
 //   warifuri key scope <device> [the same flags | --clear]       (show or change a device's scope)
 //   warifuri key list
 //   warifuri key revoke <device>     (also ends the device's GitHub logins)
@@ -80,7 +80,7 @@ const USAGE = [
   '       warifuri config',
   '       warifuri import <snapshot.json> [--actor <name>]',
   '       warifuri key add <device> [--guest] [--profiles <a,b>] [--hide <profile>[=people,knowledge,details]]',
-  '                                 [--write <note,ask_secretary>]',
+  '                                 [--write <note,ask_secretary,prep>]',
   '       warifuri key scope <device> [--guest ... | --clear]',
   '       warifuri key list',
   '       warifuri key revoke <device>',
@@ -109,7 +109,7 @@ const USAGE = [
   'key revoke also ends every GitHub login of that device.',
   'key add --guest makes a key for an AI outside (such as one in another cloud): it sees the',
   'board, schedule, search and the people and knowledge of the profiles not hidden, and may',
-  'write only note and ask_secretary. --hide 仕事 hides that profile\'s people, knowledge and',
+  'write only note, ask_secretary and prep. --hide 仕事 hides that profile\'s people, knowledge and',
   'task details (or only those named after =); --profiles lists the only profiles it sees;',
   '--write lists the writes it may make (none: --write ""). key scope shows or changes it.',
   '',
@@ -272,7 +272,7 @@ function fail(err, what) {
 
 // The scope the flags of key add or key scope give (src/ledger/scope.mjs), or undefined when
 // none is given. --guest alone is the guest's defaults: every profile, nothing hidden, writes
-// note and ask_secretary. Throws a usage message when a flag cannot be read.
+// note, ask_secretary and prep. Throws a usage message when a flag cannot be read.
 function scopeFromFlags(values) {
   const named = values.guest || values.profiles !== undefined || values.hide !== undefined || values.write !== undefined;
   if (!named) return undefined;

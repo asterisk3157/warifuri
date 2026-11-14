@@ -27,7 +27,7 @@ import {
 import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
-import { scopedRegistrar } from './scope.mjs';
+import { scopedRegistrar, prepAllowed } from './scope.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { githubWebhook } from './github.mjs';
@@ -166,6 +166,31 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
   );
 
   tools.registerTool(
+    'prep_candidates',
+    {
+      description:
+        'List tasks worth looking into before the person starts them (下調べ): open, not held by anyone, mode ai_worker or ' +
+        'human_with_ai, or titled like research. Those holding up the most other tasks come first (blocks), then the ' +
+        'nearest due date. One with a 下調べ in the last recent_days (default 3) goes last, marked recent_prep. ' +
+        'Write what you find with prep. profile or place (the place id or the directory you work in) narrows to that profile. ' +
+        'limit: default 20, at most 100.',
+      inputSchema: {
+        profile: z.string().optional(),
+        place: z.string().min(1).optional(),
+        limit: z.number().int().optional(),
+        recent_days: z.number().optional(),
+      },
+      annotations: readOnly,
+    },
+    guarded(async ({ profile, place, limit, recent_days: recentDays }) => {
+      const p = profile ?? (place === undefined ? undefined : resolvePlace(ledger, device.name, place, 'prep_candidates').profile ?? null);
+      // A guest is offered only the tasks it may write a 下調べ to.
+      const keep = device.scope ? (t) => prepAllowed(device.scope, t.profile ?? null) : undefined;
+      return result(ledger.prepCandidates({ profile: p, limit, recentDays, keep }));
+    }),
+  );
+
+  tools.registerTool(
     'places',
     {
       description:
@@ -274,10 +299,10 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       description:
         "What moved in [from, to), from the ledger's own records of goals and tasks: created, started, released " +
         '(let go, with its next line), waiting, deferred, resumed, done (with result), discarded (with reason), ' +
-        'reopened. from and to as in schedule; from defaults to yesterday 00:00, to to now; at most ' +
+        'reopened, prepped (a 下調べ written, with its summary). from and to as in schedule; from defaults to yesterday 00:00, to to now; at most ' +
         `${ACTIVITY_MAX_DAYS} days. Returns { from, to, counts: { <kind>: n }, goals: [{ id, title, items }] (the goals ` +
         `that moved, most first), items: [{ at, kind, entity, id, title, device, actor, goal, profile, and result, ` +
-        `reason, next, waiting_on, waiting_for or defer_until where they apply }] (newest first, at most ` +
+        `reason, next, summary, waiting_on, waiting_for or defer_until where they apply }] (newest first, at most ` +
         `${ACTIVITY_ITEMS_MAX}), more (items cut) }. Commits and merges are not in the ledger and do not appear.`,
       inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
       annotations: readOnly,
@@ -590,12 +615,43 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
         // The order is a plan, not a lock (原則3): starting early is allowed, and said.
         const open = ledger.openBefore(taskId);
         const notice = open.length ? { open_before: open, notice: `前のタスク ${open.join(', ')} がまだ閉じていません。順序どおりでなくてよいか確かめてください` } : {};
-        return result({ ...task, ...(moved ? { moved_from: before } : {}), ...notice });
+        return result({ ...task, ...(moved ? { moved_from: before } : {}), ...notice, ...prepNotice(taskId) });
       } catch (err) {
         if (!(err instanceof LedgerError) || !err.heldTaskId) throw err;
         return refusal(err.problems, { held: ledger.held({ device: device.name, placeId: place.id }) });
       }
     },
+  );
+
+  // What start says of the task's 下調べ: the newest in full, so the one starting sees it.
+  function prepNotice(taskId) {
+    const list = ledger.preps(taskId);
+    if (!list.length) return {};
+    const [latest] = list;
+    return {
+      prep: {
+        notice: `下調べがあります(${list.length}件)。読んでから始めてください`,
+        count: list.length,
+        latest: { by: latest.device ?? latest.actor, at: latest.created_at, summary: latest.summary, artifacts: latest.artifacts, unknowns: latest.unknowns, next: latest.next },
+      },
+    };
+  }
+
+  tool(
+    'prep',
+    'Write a 下調べ to a task the person has not started: what you looked into ahead of them. summary: what you found ' +
+      '(required). artifacts: where the results are, each { label, url } (url: a URL, or a path such as one in a repository). ' +
+      'unknowns: what is still unknown, one line each. next: one line on what to do next. It only adds; the task\'s state ' +
+      'does not change and it is not closed (closing is the person\'s call). A closed task is refused. The person and ' +
+      'whoever starts the task see it (get, start, the Web screen).',
+    {
+      task_id: z.string().min(1),
+      summary: z.string(),
+      artifacts: z.array(z.object({ label: z.string().optional(), url: z.string() })).optional(),
+      unknowns: z.array(z.string()).optional(),
+      next: z.string().optional(),
+    },
+    async ({ task_id: taskId, ...fields }) => result(ledger.writePrep(taskId, given(fields), writer)),
   );
 
   tool(

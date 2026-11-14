@@ -1,6 +1,6 @@
 // タスク: the open goals, each with its flowchart and tasks, and the tasks with no goal.
 
-import { h, s, icon, skel, profileChip, dueDay, daysFrom, md } from '../ui.js';
+import { h, s, icon, skel, profileChip, dueDay, daysFrom, md, hhmm2 } from '../ui.js';
 import { layoutFlow, arrowHead, SIZES } from '../flow.js';
 
 const view = { filter: 0, goal: null, hl: null };
@@ -96,7 +96,8 @@ function taskRow(t, today) {
   return h('div', { class: ['wf-task', closed && 'wf-closed', view.hl === t.id && 'wf-hl'] },
     h('span', { class: ['wf-avatar', w[2] && 'wf-ai'], 'aria-hidden': 'true', text: w[1] }),
     h('span', { class: 'wf-task-main' },
-      h('span', { class: 'wf-task-meta' }, h('b', { text: w[0] }), chip(shown(t)), t.hold ? h('span', { text: `@${t.hold.device}` }) : null),
+      h('span', { class: 'wf-task-meta' }, h('b', { text: w[0] }), chip(shown(t)), t.hold ? h('span', { text: `@${t.hold.device}` }) : null,
+        t.preps?.length && !closed ? h('span', { class: 'wf-prep-tag', text: '下調べあり' }) : null),
       h('span', { class: 'wf-task-title', text: t.title }),
       before ? h('span', { class: 'wf-task-note' }, icon('after', 14, 2), before) : null,
       note ? h('span', { class: 'wf-task-note', text: note }) : null),
@@ -105,15 +106,40 @@ function taskRow(t, today) {
       h('small', { text: t.due ? `期限 ${md(dueDay(t.due))}${prov(t)}` : '期限なし' })));
 }
 
+// An artifact of a 下調べ: a link when it is a web URL, else the path as text.
+function artifact(a) {
+  if (/^https?:\/\//i.test(a.url)) return h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer', text: a.label ?? a.url });
+  return [a.label ? `${a.label}: ` : null, h('code', { text: a.url })];
+}
+
+// 下調べ: what an AI looked into ahead, newest first. Who and when, the summary, where the
+// results are, what is still unknown, and what it would do next.
+function preps(list) {
+  if (!list?.length) return null;
+  const when = (iso) => {
+    const d = new Date(iso);
+    return `${md(d)} ${hhmm2(d)}`;
+  };
+  return h('section', { class: 'wf-prep', 'aria-label': '下調べ' },
+    h('h3', { class: 'wf-prep-head', text: '下調べ' }),
+    ...list.map((p) => h('div', { class: 'wf-prep-item' },
+      h('span', { class: 'wf-prep-meta', text: `${p.by} · ${when(p.created_at)}` }),
+      h('p', { class: 'wf-prep-summary', text: p.summary }),
+      p.artifacts.length ? h('div', { class: 'wf-prep-part' }, h('b', { text: '成果物' }), h('ul', {}, ...p.artifacts.map((a) => h('li', {}, artifact(a))))) : null,
+      p.unknowns.length ? h('div', { class: 'wf-prep-part' }, h('b', { text: 'まだ分からないこと' }), h('ul', {}, ...p.unknowns.map((u) => h('li', { text: u })))) : null,
+      p.next ? h('div', { class: 'wf-prep-part' }, h('b', { text: '次の一手' }), h('span', { text: p.next })) : null)));
+}
+
 // The task picked in the flowchart, in full: who, state, title, before it, note, due, what it
-// is (body), when it is done (done_when), and the result once closed.
+// is (body), when it is done (done_when), the result once closed, and its 下調べ.
 function detail(t, today) {
   if (!t) return h('div', { class: 'wf-detail wf-detail-empty', text: '図のタスクを選ぶと、詳細が表示されます' });
   return h('div', { class: 'wf-detail' },
     taskRow(t, today),
     t.done_when ? h('p', { class: 'wf-detail-line' }, h('b', { text: '完了の条件' }), t.done_when) : null,
     t.result ? h('p', { class: 'wf-detail-line' }, h('b', { text: '成果' }), t.result) : null,
-    t.body ? h('p', { class: 'wf-detail-body', text: t.body }) : null);
+    t.body ? h('p', { class: 'wf-detail-body', text: t.body }) : null,
+    preps(t.preps));
 }
 
 function group(title, profile, tasks, today, colors, { showMeta }) {

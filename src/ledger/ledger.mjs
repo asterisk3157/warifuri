@@ -46,6 +46,7 @@ import {
   checkPlace,
   checkBooking,
   checkReport,
+  checkPrep,
   checkMessage,
   checkProposal,
   checkAsk,
@@ -126,6 +127,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // A device's last_seen_at is written at most once in this long.
 const SEEN_MS = 60 * 1000;
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+// Words that make a task read like something to look into ahead (下調べの候補).
+const PREP_WORDS = /調べ|調査|検証|比較|試作|試す|試し|選定|リサーチ|見積|洗い出|PoC|research|investigat|prototype|survey|evaluat|compare/i;
 const blank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
 // A task with the profile it belongs to: its goal's if it has a goal, else its place's (原則20).
@@ -178,7 +181,7 @@ function diff(before, after, columns) {
 }
 
 // The kinds of activity(): which records of goals and tasks count as something that moved.
-export const ACTIVITY_KINDS = ['created', 'started', 'released', 'waiting', 'deferred', 'resumed', 'done', 'discarded', 'reopened'];
+export const ACTIVITY_KINDS = ['created', 'started', 'released', 'waiting', 'deferred', 'resumed', 'done', 'discarded', 'reopened', 'prepped'];
 export const ACTIVITY_MAX_DAYS = 31;
 export const ACTIVITY_ITEMS_MAX = 50;
 
@@ -187,6 +190,7 @@ function activityKind(entity, action, changes) {
   if (action === 'reopen') return 'reopened';
   if (entity === 'task' && action === 'start') return 'started';
   if (entity === 'task' && action === 'release') return 'released';
+  if (entity === 'task' && action === 'prep') return 'prepped';
   if (action !== 'state' || !changes.state) return null;
   const { before, after } = changes.state;
   if (after === 'ready') return ['waiting', 'deferred'].includes(before) ? 'resumed' : null;
@@ -1033,6 +1037,7 @@ export function openLedger(path, options = {}) {
       if (kind === 'discarded') item.reason = after('reason');
       if (kind === 'waiting') Object.assign(item, { waiting_on: after('waiting_on'), waiting_for: after('waiting_for') });
       if (kind === 'deferred') item.defer_until = after('defer_until');
+      if (kind === 'prepped') item.summary = changes.prep?.summary ?? null;
       if (isTask && changes.next) item.next = after('next');
       items.push(item);
     }
@@ -1217,6 +1222,107 @@ export function openLedger(path, options = {}) {
       record(w, 'report', row.id, 'create', diff(null, row, REPORT_COLUMNS));
       return { ...one('SELECT * FROM reports WHERE id = ?', row.id) };
     });
+  }
+
+  // 下調べ (prep) as callers see it: artifacts and unknowns as arrays.
+  const prepView = (r) => ({
+    id: r.id, task_id: r.task_id, device: r.device, actor: r.actor, summary: r.summary,
+    artifacts: JSON.parse(r.artifacts), unknowns: JSON.parse(r.unknowns), next: r.next, created_at: r.created_at,
+  });
+
+  // Writes a 下調べ to an open task: summary (required), artifacts ([{ label, url }]), unknowns
+  // (lines) and next (one line). The task itself is not changed: not its state, not its
+  // updated_at; closing it stays the person's call (原則7). A closed task is refused.
+  function writePrep(taskId, fields, opts) {
+    const w = requireWriter(opts);
+    const task = typeof taskId === 'string' ? getTaskRow(taskId) : null;
+    if (!task) throw new LedgerError([`${taskId} というタスクはありません`]);
+    const input = fields ?? {};
+    const problems = unknownFields(input, ['summary', 'artifacts', 'unknowns', 'next']);
+    if (CLOSED_STATES.includes(task.state)) problems.push(`タスク ${taskId} は閉じています(${task.state})。閉じたタスクには下調べを書けません`);
+    const tidy = (v) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').trim() : v);
+    const artifacts = input.artifacts ?? [];
+    const unknowns = input.unknowns ?? [];
+    const row = {
+      task_id: taskId,
+      summary: tidy(input.summary),
+      artifacts: Array.isArray(artifacts)
+        ? artifacts.map((a) => {
+          if (!a || typeof a !== 'object' || Array.isArray(a)) return a;
+          const { label, url, ...rest } = a;
+          return { label: blank(label) ? null : tidy(label), url: tidy(url), ...rest };
+        })
+        : artifacts,
+      unknowns: Array.isArray(unknowns) ? unknowns.map(tidy).filter((u) => u !== '') : unknowns,
+      next: blank(input.next) ? null : tidy(input.next),
+    };
+    problems.push(...checkPrep(row));
+    if (problems.length) throw new LedgerError(problems);
+    return transaction(() => {
+      const t = nowIso();
+      const { lastInsertRowid } = db.prepare(
+        'INSERT INTO preps (task_id, actor, device, summary, artifacts, unknowns, next, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(taskId, w.actor, w.device, row.summary, JSON.stringify(row.artifacts), JSON.stringify(row.unknowns), row.next, t);
+      const prep = prepView(one('SELECT * FROM preps WHERE id = ?', lastInsertRowid));
+      const { id, summary, artifacts: a, unknowns: u, next } = prep;
+      record(w, 'task', taskId, 'prep', { prep: { id, summary, artifacts: a, unknowns: u, next } });
+      return prep;
+    });
+  }
+
+  // A task's 下調べ, newest first.
+  function preps(taskId) {
+    return all('SELECT * FROM preps WHERE task_id = ? ORDER BY created_at DESC, id DESC', taskId).map(prepView);
+  }
+
+  // Tasks worth looking into ahead of the person (下調べの候補): open and not yet started by
+  // anyone (ready, waiting or deferred, and held by no device), whose mode is ai_worker or
+  // human_with_ai, or whose title or body reads like something to look into (PREP_WORDS).
+  // Those holding up the most open tasks come first, then the nearest due date. A task with a
+  // 下調べ written in the last recentDays goes to the end, marked recent_prep. keep: a filter
+  // (a guest's scope) applied before limit. more: how many were cut.
+  function prepCandidates({ profile, recentDays = 3, limit = 20, keep = () => true } = {}) {
+    const problems = [];
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) problems.push('limit は 1〜100 の整数です');
+    if (!(typeof recentDays === 'number' && Number.isFinite(recentDays) && recentDays >= 0)) problems.push('recent_days は0以上の数です');
+    if (problems.length) throw new LedgerError(problems);
+    const nowMs = now().getTime();
+    const closed = CLOSED_STATES.map(() => '?').join(', ');
+    const holding = new Map(all(
+      `SELECT b.before_id AS id, count(*) AS n FROM blocks b JOIN tasks a ON a.id = b.after_id WHERE a.state NOT IN (${closed}) GROUP BY b.before_id`,
+      ...CLOSED_STATES,
+    ).map((r) => [r.id, r.n]));
+    const last = new Map(all('SELECT task_id, max(created_at) AS at, count(*) AS n FROM preps GROUP BY task_id').map((r) => [r.task_id, r]));
+    const goals = new Map();
+    const goalOf = (id) => {
+      if (!id) return null;
+      if (!goals.has(id)) {
+        const g = getGoalRow(id);
+        goals.set(id, g ? { id: g.id, title: g.title } : null);
+      }
+      return goals.get(id);
+    };
+    const dueMs = (v) => (!v ? Infinity : DATE_ONLY.test(v) ? Date.parse(`${v}T00:00:00`) : Date.parse(v));
+    const rows = all(
+      `${TASK_SELECT} WHERE t.state IN ('ready', 'waiting', 'deferred') AND t.id NOT IN (SELECT task_id FROM holds) ORDER BY t.created_at, t.id`,
+    );
+    const out = [];
+    for (const t of rows) {
+      if (profile !== undefined && (t.profile ?? null) !== profile) continue;
+      const byMode = t.mode === 'ai_worker' || t.mode === 'human_with_ai';
+      if (!byMode && !PREP_WORDS.test(`${t.title}\n${t.body ?? ''}`)) continue;
+      if (!keep(t)) continue;
+      const p = last.get(t.id);
+      out.push({
+        id: t.id, title: t.title, state: t.state, mode: t.mode, due: t.due, due_provisional: t.due_provisional === 1,
+        goal: goalOf(t.goal_id), profile: t.profile ?? null, blocks: holding.get(t.id) ?? 0,
+        preps: p?.n ?? 0, last_prep_at: p?.at ?? null,
+        recent_prep: Boolean(p && nowMs - Date.parse(p.at) < recentDays * DAY_MS),
+        why: byMode ? 'mode' : 'words',
+      });
+    }
+    out.sort((a, b) => Number(a.recent_prep) - Number(b.recent_prep) || b.blocks - a.blocks || dueMs(a.due) - dueMs(b.due));
+    return { candidates: out.slice(0, limit), more: Math.max(0, out.length - limit) };
   }
 
   // Reports, newest first. kind: only that kind. limit: how many (REPORTS_DEFAULT, at most
@@ -1888,6 +1994,7 @@ export function openLedger(path, options = {}) {
         ...taskView(task),
         blocked_by: all('SELECT before_id FROM blocks WHERE after_id = ? ORDER BY before_id', id).map((r) => r.before_id),
         blocks: all('SELECT after_id FROM blocks WHERE before_id = ? ORDER BY after_id', id).map((r) => r.after_id),
+        preps: preps(id),
         records: records(id),
       };
     }
@@ -2222,6 +2329,8 @@ export function openLedger(path, options = {}) {
       ).map((r) => ({ ...r }));
       const unbookStmt = db.prepare('DELETE FROM bookings WHERE id = ?');
       for (const b of droppedBookings) unbookStmt.run(b.id);
+      // 下調べ of tasks that did not come back go too; the task's records keep them.
+      const droppedPreps = Number(db.prepare('DELETE FROM preps WHERE task_id NOT IN (SELECT id FROM tasks)').run().changes);
 
       const openTasks = new Set(snap.tasks.filter((x) => !CLOSED_STATES.includes(x.state)).map((x) => x.id));
       const placeIds = new Set(snap.places.map((x) => x.id));
@@ -2245,6 +2354,7 @@ export function openLedger(path, options = {}) {
       if (detached.length) changes.detached_habits = detached;
       if (droppedHolds.length) changes.dropped_holds = droppedHolds;
       if (droppedBookings.length) changes.dropped_bookings = droppedBookings;
+      if (droppedPreps) changes.dropped_preps = droppedPreps;
       const source = typeof doc.source === 'string' && doc.source.trim() !== '' ? doc.source : 'snapshot';
       record(w, 'import', source, 'replace', changes);
       return {
@@ -2302,6 +2412,9 @@ export function openLedger(path, options = {}) {
     recordKnowledge,
     writeReport,
     listReports,
+    writePrep,
+    preps,
+    prepCandidates,
     getThread,
     ensureThread,
     updateThread,

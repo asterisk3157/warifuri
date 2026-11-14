@@ -19,7 +19,7 @@ export const TAIL_BYTES = 4 * 1024 * 1024;
 // mcp__<server>__<tool>; the server is named warifuri, or something that contains it.
 export const WRITE_TOOLS = new Set([
   'create_goal', 'create_task', 'update', 'close', 'note', 'person', 'reopen', 'resume',
-  'defer', 'wait', 'book', 'ask_secretary', 'habit',
+  'defer', 'wait', 'book', 'ask_secretary', 'habit', 'prep',
 ]);
 
 export function isLedgerWrite(name) {

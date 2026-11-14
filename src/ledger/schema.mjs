@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -823,6 +823,25 @@ export const MIGRATIONS = [
   -- What a guest device (an AI outside, such as one in someone else's cloud) may see and write:
   -- JSON { profiles, hide, write } (src/ledger/scope.mjs), or NULL for an agent or the secretary.
   ALTER TABLE devices ADD COLUMN scope TEXT;
+  `,
+  // 19 → 20: 下調べ (prep). What an AI (an agent, or a guest such as one in another cloud) found
+  // out ahead of the person, written back to a task: a summary, the artifacts ({ label, url } as
+  // JSON) and what is still unknown (JSON array of lines), and what it would do next. Only
+  // added; the task's own row is not changed. Each one is also in the records, as the task's
+  // 'prep', so it stays there if a snapshot drops the task.
+  `
+  CREATE TABLE preps (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    TEXT NOT NULL REFERENCES tasks(id),
+    actor      TEXT NOT NULL CHECK (length(actor) > 0),
+    device     TEXT,
+    summary    TEXT NOT NULL CHECK (length(summary) > 0),
+    artifacts  TEXT NOT NULL DEFAULT '[]',
+    unknowns   TEXT NOT NULL DEFAULT '[]',
+    next       TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX preps_task ON preps(task_id, created_at);
   `,
 ];
 

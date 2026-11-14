@@ -635,6 +635,8 @@ export function createWeb({
       after: prev.filter((id) => inList.has(id)),
       open_before: open.map((x) => ({ id: x.id, title: x.title })),
       blocked: t.state === 'ready' && open.length > 0,
+      // 下調べ, newest first (who wrote it, when, the summary, artifacts and what is unknown).
+      preps: ledger.preps(t.id).map(({ device, actor, summary, artifacts, unknowns, next, created_at }) => ({ by: device ?? actor, summary, artifacts, unknowns, next, created_at })),
     };
   };
 
