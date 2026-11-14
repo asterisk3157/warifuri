@@ -21,8 +21,10 @@
 //   the minutes left when that falls in between. A task gets one block a day, and none on a day
 //   that already has a booking of it, so the work is spread and the day is not filled for the
 //   sake of it (原則12).
-// - Weekdays are filled first. Saturday and Sunday take only what did not fit on the weekdays
-//   of the period, under the same daily cap.
+// - Weekdays are filled first. Saturday takes only what did not fit on the weekdays of the
+//   period, under the same daily cap. Sunday is a day with no duties: it takes nothing, but for
+//   one spare block (予備の枠) a Sunday, for a task that would otherwise miss a due date that
+//   comes soon (from that Sunday to SPARE_DAYS days after it); the block ends by the due date.
 // - 移動 (planTravel): when bookings at different places follow one another in a day, the way
 //   between them (places.travel, the shortest way through the times written) is put before
 //   the booking it leads to, from home before the first and back home after the last. A way of
@@ -49,6 +51,9 @@ import { LedgerError } from './ledger.mjs';
 export const TIMETABLE_MAX_DAYS = 7;
 // How far ahead the bookings of a task are counted against its estimate, in days.
 const AHEAD_DAYS = 366;
+// How soon a due date must come for a spare block on Sunday, in days from that Sunday's start:
+// 4 takes a due date on Sunday to the end of Wednesday.
+export const SPARE_DAYS = 4;
 
 const MIN = 60_000;
 const ms = (v) => new Date(v).getTime();
@@ -88,12 +93,18 @@ export function planTimetable({ days, bands = [], tasks, limits }) {
   const left = new Map(tasks.map((t) => [t.task_id, t.remaining_min]));
   const placed = new Set();
   const blocks = [];
-  // Weekdays first; Saturday and Sunday take what the weekdays could not (the cap is the same).
-  const weekend = (day) => {
+  // Weekdays first; Saturday takes what the weekdays could not (the cap is the same); Sunday
+  // last, for a spare block only.
+  const dayOf = (day) => {
     const [y, m, d] = day.date.split('-').map(Number);
-    return [0, 6].includes(new Date(y, m - 1, d).getDay());
+    return new Date(y, m - 1, d);
   };
-  for (const day of [...days.filter((d) => !weekend(d)), ...days.filter(weekend)]) {
+  const dow = (day) => dayOf(day).getDay();
+  const order = [...days.filter((d) => ![0, 6].includes(dow(d))), ...days.filter((d) => dow(d) === 6), ...days.filter((d) => dow(d) === 0)];
+  const dueOf = (t) => (t.due ? ms(t.due) : Infinity);
+  // The minutes placed for a task that end by its due date.
+  const beforeDue = (t) => blocks.filter((b) => b.task_id === t.task_id && ms(b.ends_at) <= dueOf(t)).reduce((n, b) => n + b.minutes, 0);
+  for (const day of order) {
     for (const h of day.habits_to_place ?? []) {
       if (!h.starts_at) continue;
       blocks.push({
@@ -105,6 +116,30 @@ export function planTimetable({ days, bands = [], tasks, limits }) {
     const pieces = day.free.flatMap((f) => cutAtBands(ms(f.starts_at), ms(f.ends_at), withProfile, f.home !== false));
     // The bands with a profile first: they are where that work goes.
     pieces.sort((a, b) => Number(b.profile !== null) - Number(a.profile !== null) || a.s - b.s);
+    if (dow(day) === 0) {
+      // Sunday: one spare block, for the first task that would miss a due date coming soon.
+      const start = dayOf(day).getTime();
+      const soon = new Date(start);
+      soon.setDate(soon.getDate() + SPARE_DAYS);
+      const fits = (t, piece) => left.get(t.task_id) > 0 && !used.has(t.task_id) && (piece.profile === null || t.profile === piece.profile)
+        && (t.only_at !== 'home' || piece.home) && dueOf(t) > start && dueOf(t) <= soon.getTime() && beforeDue(t) < t.remaining_min;
+      spare: for (const piece of pieces) {
+        for (const t of tasks) {
+          if (!fits(t, piece)) continue;
+          const end = Math.min(piece.e, dueOf(t));
+          const minutes = Math.min(Math.max(t.remaining_min - beforeDue(t), minLen), maxLen, (end - piece.s) / MIN, budget);
+          if (minutes < minLen) continue;
+          blocks.push({
+            kind: 'task', task_id: t.task_id, title: t.title, goal: t.goal, profile: t.profile, due: t.due, human_led: t.human_led,
+            starts_at: iso(piece.s), ends_at: iso(piece.s + minutes * MIN), minutes, spare: true,
+          });
+          left.set(t.task_id, Math.max(0, left.get(t.task_id) - minutes));
+          placed.add(t.task_id);
+          break spare;
+        }
+      }
+      continue;
+    }
     for (const piece of pieces) {
       let at = piece.s;
       while ((piece.e - at) / MIN >= minLen && budget >= minLen) {

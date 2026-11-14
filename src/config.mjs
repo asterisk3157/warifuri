@@ -82,6 +82,11 @@ export const SETTINGS = [
     commands: ['serve'],
   },
   {
+    name: 'WARIFURI_OPERATOR_CONTACT',
+    about: 'プライバシーポリシー(/privacy)に載せる、運営者への問い合わせ先。メールアドレスか URL。空なら「このサーバーの運営者」と書く',
+    commands: ['serve'],
+  },
+  {
     name: 'WARIFURI_GITHUB_USER',
     flag: 'github-user',
     about: 'ログインしてよい人の GitHub のユーザー名。GitHub のログインに要る',
@@ -336,6 +341,11 @@ export const SETTINGS = [
     name: 'WARIFURI_GOOGLE_CLIENT_ID',
     about: 'Google カレンダーを warifuri が自分で読むための、ユーザーの Google Cloud の OAuth クライアントの ID。下の2つと一緒に設定すると、カレンダーの変更を AI なしで取り込む',
     commands: GOOGLE,
+  },
+  {
+    name: 'WARIFURI_GOOGLE_ACCOUNT',
+    about: 'カレンダーを読む Google アカウントのメールアドレス。設定すると、warifuri google login でほかのアカウントで許可したときに断り、トークンを保存しない',
+    commands: ['google'],
   },
   {
     name: 'WARIFURI_GOOGLE_CLIENT_SECRET',

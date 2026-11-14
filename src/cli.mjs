@@ -416,6 +416,7 @@ function runServe(args) {
       monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES), step: Number(values.WARIFURI_MONITOR_STEP) } : null,
       githubWebhookSecret: values.WARIFURI_GITHUB_WEBHOOK_SECRET ?? null,
       calendarWatch: watch,
+      operatorContact: values.WARIFURI_OPERATOR_CONTACT ?? null,
     });
   } catch (err) {
     chat.stop();

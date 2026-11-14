@@ -210,20 +210,51 @@ test('replan: a booking the person moved in the calendar stays, and one of a tas
   L.close();
 });
 
-test('weekdays first: Saturday and Sunday take only what the weekdays could not', () => {
+test('weekdays first: Saturday takes only what the weekdays could not, Sunday nothing', () => {
   // Now: Thursday 2026-11-05 12:00; the period runs Friday to Sunday.
-  const { L } = clockLedger(at(12, 0, 5));
+  const { L } = clockLedger(new Date(2026, 10, 5, 12));
   writeSettings(L, { limits: { earliest: '09:00', latest: '11:00', day_max_hours: 2 } }, { byPerson: true }, AGENT);
   const human = { mode: 'human', done_when: 'd' };
-  const tasks = ['P', 'Q', 'R'].map((t) => L.createTask({ title: t, ...human, estimate_min: 60 }, AGENT));
+  ['P', 'Q', 'R'].forEach((t) => L.createTask({ title: t, ...human, estimate_min: 60 }, AGENT));
+  // Saturday and Sunday only: Saturday takes two, Sunday none (no due date is near).
   const out = timetableFor(L, { from: iso(0, 0, 7), to: iso(0, 0, 9) });
-  // Saturday and Sunday only: the first day of the weekend fills first.
-  assert.deepEqual(out.blocks.map((b) => new Date(b.starts_at).getDate()), [7, 7, 8]);
-  const week = timetableFor(L, { from: iso(0, 0, 6), to: iso(0, 0, 9) });
+  assert.deepEqual(out.blocks.map((b) => new Date(b.starts_at).getDate()), [7, 7]);
+  assert.equal(out.left.length, 1);
   // Friday takes two; Saturday the one that did not fit.
+  const week = timetableFor(L, { from: iso(0, 0, 6), to: iso(0, 0, 9) });
   assert.deepEqual(week.blocks.map((b) => new Date(b.starts_at).getDate()), [6, 6, 7]);
-  assert.equal(tasks.length, 3);
+  // With replan the order is the same.
+  const again = timetableFor(L, { from: iso(0, 0, 6), to: iso(0, 0, 9), replan: true });
+  assert.deepEqual(again.blocks.map((b) => new Date(b.starts_at).getDate()), [6, 6, 7]);
   L.close();
+});
+
+test('Sunday: one spare block only for a task that would miss a due date coming soon', () => {
+  // Now: Thursday 2026-11-05 12:00; the period runs Saturday 11/7 to Monday 11/9 (Sunday is 11/8).
+  const { L } = clockLedger(new Date(2026, 10, 5, 12));
+  writeSettings(L, { limits: { earliest: '09:00', latest: '12:00', day_max_hours: 2 } }, { byPerson: true }, AGENT);
+  const human = { mode: 'human', done_when: 'd' };
+  // Saturday holds two hours: A and B take it. C (due Monday) and D (due in two weeks) are left.
+  L.createTask({ title: 'A', ...human, estimate_min: 60, priority: 1 }, AGENT);
+  L.createTask({ title: 'B', ...human, estimate_min: 60, priority: 2 }, AGENT);
+  L.createTask({ title: 'C', ...human, estimate_min: 60, priority: 3, due: new Date(2026, 10, 9, 12).toISOString() }, AGENT);
+  L.createTask({ title: 'D', ...human, estimate_min: 60, priority: 4, due: new Date(2026, 10, 20, 12).toISOString() }, AGENT);
+  L.createTask({ title: 'E', ...human, estimate_min: 60, priority: 5, due: new Date(2026, 10, 10, 12).toISOString() }, AGENT);
+  const out = timetableFor(L, { from: iso(0, 0, 7), to: new Date(2026, 10, 9).toISOString() });
+  const sunday = out.blocks.filter((b) => new Date(b.starts_at).getDay() === 0);
+  // One block on Sunday, for C (due Monday), marked spare; E, also due soon, waits.
+  assert.deepEqual(sunday.map((b) => [b.title, b.spare]), [['C', true]]);
+  assert.deepEqual(out.blocks.filter((b) => new Date(b.starts_at).getDay() === 6).map((b) => b.title), ['A', 'B']);
+  assert.equal(out.left.some((l) => l.title === 'C'), false);
+  assert.equal(out.left.some((l) => l.title === 'D'), true);
+  // No task due soon: nothing on Sunday.
+  const { L: L2 } = clockLedger(new Date(2026, 10, 5, 12));
+  writeSettings(L2, { limits: { earliest: '09:00', latest: '12:00', day_max_hours: 2 } }, { byPerson: true }, AGENT);
+  ['A', 'B', 'D'].forEach((t, i) => L2.createTask({ title: t, ...human, estimate_min: 60, priority: i + 1, ...(t === 'D' ? { due: new Date(2026, 10, 20, 12).toISOString() } : {}) }, AGENT));
+  const none = timetableFor(L2, { from: iso(0, 0, 7), to: new Date(2026, 10, 9).toISOString(), replan: true });
+  assert.deepEqual(none.blocks.filter((b) => new Date(b.starts_at).getDay() === 0), []);
+  L.close();
+  L2.close();
 });
 
 // --- travel --------------------------------------------------------------------------------

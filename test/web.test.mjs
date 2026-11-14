@@ -754,3 +754,28 @@ test('教える with the secretary off: refused with words to show', async (t) =
   assert.deepEqual((await res.json()).problems, ['秘書が停止しているため、登録できません']);
   assert.equal((await (await get(base, '/web/api/rules')).json()).secretary, false);
 });
+
+test('/about and /privacy: no login, the page guard, and the operator contact', async (t) => {
+  const { base } = await start(t, { host: '0.0.0.0', operatorContact: 'operator@example.com' });
+  for (const p of ['/about', '/privacy']) {
+    const res = await get(base, p);
+    assert.equal(res.status, 200, p);
+    assert.match(res.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.match(res.headers.get('content-type'), /text\/html/);
+  }
+  assert.match(await (await get(base, '/about')).text(), /https:\/\/github\.com\/asterisk3157\/warifuri/);
+  const privacy = await (await get(base, '/privacy')).text();
+  assert.match(privacy, /href="mailto:operator@example\.com"/);
+  assert.match(privacy, /運営者本人の Google アカウント/);
+  // The other pages still need a login.
+  assert.equal((await get(base, '/calendar')).status, 401);
+});
+
+test('/privacy without a contact names the operator, and a contact is escaped', async (t) => {
+  const { base } = await start(t, { host: '0.0.0.0' });
+  assert.match(await (await get(base, '/privacy')).text(), /<p>このサーバーの運営者<\/p>/);
+  const { privacyHtml } = await import('../src/server/web.mjs');
+  assert.match(privacyHtml('https://example.com/contact'), /<a href="https:\/\/example\.com\/contact">/);
+  assert.doesNotMatch(privacyHtml('<script>x</script>'), /<script>/);
+});

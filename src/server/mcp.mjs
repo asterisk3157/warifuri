@@ -316,13 +316,14 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
         'dates (the task\'s or its goal\'s). A task with only_at home goes only in free time at home. A band of the week type with a ' +
         "profile takes only that profile's tasks and is filled first. A block is block_min_minutes to " +
         'block_max_minutes long; a task gets one block a day, none on a day it is already booked, and the daily cap is ' +
-        'kept, so the day is not filled for its own sake. Weekdays are filled first; Saturday and Sunday take what did not fit. ' +
+        'kept, so the day is not filled for its own sake. Weekdays are filled first; Saturday takes what did not fit. Sunday has no ' +
+        'duties: only one spare block (spare: true) a Sunday, for a task that would otherwise miss a due date within 4 days of it. ' +
         'Travel (移動): when bookings at different places (location) follow one another in a day, the way between them ' +
         '(places.travel) goes right before the booking it leads to, from home before the first and back home after the last; ' +
         'a way of 0 minutes puts nothing. replan: true lets the task bookings warifuri made in the period (from now on, not ' +
         'moved by the person in the calendar) move; fixed bookings never move; the oldest bookings are kept first and the ' +
         'newest go first when a task would miss its due date. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
-        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes, booking_id? }] (booking_id: ' +
+        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes, booking_id?, spare? }] (booking_id: ' +
         'move that booking here with book and its id; without it, a new booking), travel: [{ title, from, to, starts_at, ' +
         'ends_at, minutes, short?, booking_id? }] (book as kind travel; short: the way does not fit before the booking), ' +
         'unbook: [{ booking_id, kind, title, starts_at, ends_at }] (warifuri\'s bookings no longer needed), changes: [{ kind, ' +
@@ -1496,6 +1497,7 @@ export function createApp({
   githubWebhookSecret = null,
   githubLimit,
   calendarWatch = null,
+  operatorContact = null,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1535,7 +1537,7 @@ export function createApp({
   }
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
-    ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,
+    ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), operatorContact, chat, limit: webLimit,
     secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor,
   });
   app.use(web.router);

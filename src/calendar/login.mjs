@@ -7,6 +7,10 @@
 // server has no screen), the page it is sent back to does not open there: the person copies
 // that page's URL from the address bar and pastes it into the command instead.
 //
+// The OAuth client is the operator's own, for the operator's own calendar only. When
+// WARIFURI_GOOGLE_ACCOUNT is set, a login with another Google account (the id of its primary
+// calendar, which is the account's address) is refused and nothing is saved.
+//
 // The refresh token is written to secrets.env (WARIFURI_GOOGLE_REFRESH_TOKEN, owner-only) and
 // is never printed.
 
@@ -17,7 +21,7 @@ import readline from 'node:readline';
 import { createHash, randomBytes } from 'node:crypto';
 import { setEnvLine } from '../client/connect.mjs';
 import { decodeText, SECRETS_FILE } from '../config.mjs';
-import { AUTH_URL, SCOPE, tokenRequest } from './google.mjs';
+import { AUTH_URL, SCOPE, tokenRequest, createGoogle } from './google.mjs';
 
 const b64 = (buf) => buf.toString('base64url');
 
@@ -54,6 +58,17 @@ export async function exchange({ clientId, clientSecret, code, verifier, redirec
   );
   if (typeof body.refresh_token !== 'string' || !body.refresh_token) throw new Error('Google gave no refresh token');
   return body.refresh_token;
+}
+
+// Whether the login is of the account allowed: { ok: true } when none is set or the primary
+// calendar's id (the account's address) is that account, else { problem }.
+export async function checkAccount({ clientId, clientSecret, refreshToken, account, fetch: fetchImpl }) {
+  const want = typeof account === 'string' ? account.trim().toLowerCase() : '';
+  if (!want) return { ok: true };
+  const calendars = await createGoogle({ clientId, clientSecret, refreshToken, fetch: fetchImpl }).calendars();
+  const primary = calendars.find((c) => c.primary)?.id ?? '';
+  if (primary.toLowerCase() === want) return { ok: true };
+  return { problem: 'this is not the Google account in WARIFURI_GOOGLE_ACCOUNT; nothing was saved. Log in again with that account' };
 }
 
 // Writes the refresh token into secrets.env of the data directory (owner-only). Returns the file.
@@ -110,6 +125,8 @@ export async function login(cfg, io, { fetch: fetchImpl = globalThis.fetch, time
     });
     if (answer.problem) return answer;
     const token = await exchange({ clientId, clientSecret, code: answer.code, verifier: request.verifier, redirectUri, fetch: fetchImpl });
+    const checked = await checkAccount({ clientId, clientSecret, refreshToken: token, account: cfg.values.WARIFURI_GOOGLE_ACCOUNT, fetch: fetchImpl });
+    if (checked.problem) return checked;
     return { file: saveRefreshToken(cfg.home, token) };
   } catch (err) {
     return { problem: err.message };

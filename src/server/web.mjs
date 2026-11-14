@@ -17,6 +17,8 @@
 //   HttpOnly, SameSite=Strict cookie (Secure over https). When the GitHub login is on, the
 //   login page offers it too, for the one person allowed (oauth.mjs). A session lasts 30 days
 //   and is kept (as a hash) in the data directory, so a restart of the server does not end it.
+// - Public: /about (what warifuri is) and /privacy (the privacy policy) need no login: Google's
+//   OAuth consent screen links to them. They are static pages, with the same guard.
 // Device keys and OAuth tokens are never taken here, as cookies or otherwise. No response
 // carries a key, a token or a hash of one.
 
@@ -295,12 +297,62 @@ function notice(res, status, title, text, link) {
     );
 }
 
+export const REPOSITORY_URL = 'https://github.com/asterisk3157/warifuri';
+export const PUBLIC_PAGES = ['/about', '/privacy'];
+
+// How the operator is reached on /privacy: a link for a URL or a mail address, else the text.
+function contactHtml(contact) {
+  const c = typeof contact === 'string' ? contact.trim() : '';
+  if (!c) return 'このサーバーの運営者';
+  if (/^https?:\/\//i.test(c)) return `<a href="${escapeHtml(c)}">${escapeHtml(c)}</a>`;
+  if (/^[^\s@]+@[^\s@]+$/.test(c)) return `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`;
+  return escapeHtml(c);
+}
+
+// The pages anyone may read. body: HTML written here (only the contact comes from settings).
+function publicPage(res, title, body) {
+  guard(res);
+  res
+    .type('html')
+    .send(
+      '<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+        `<title>warifuri · ${escapeHtml(title)}</title><link rel="stylesheet" href="/web/app.css"><script src="/web/theme.js"></script></head>` +
+        `<body class="wf-notice wf-doc"><main>${body}</main></body></html>`,
+    );
+}
+
+export function aboutHtml() {
+  return '<h1>warifuri</h1>' +
+    '<p>warifuri は、AI エージェントと働く人のための、タスクと予定の秘書です。タスクと目標を1つの台帳にまとめ、Google カレンダーの予定と空いている時間から、作業の時間割を組みます。</p>' +
+    '<p>warifuri は、使う人が自分のサーバーに置いて動かします。このサーバーも、運営者が自分で使うために動かしているものです。</p>' +
+    `<p><a href="${REPOSITORY_URL}">GitHub のリポジトリ</a></p>` +
+    '<p><a href="/privacy">プライバシーポリシー</a></p>';
+}
+
+export function privacyHtml(contact) {
+  return '<h1>プライバシーポリシー</h1>' +
+    '<p>このサーバーの warifuri は、運営者が自分だけで使うために、自分のサーバーで動かしています。ほかの人に向けたサービスではありません。</p>' +
+    '<p>Google の OAuth クライアントは運営者本人のもので、運営者本人の Google アカウントのカレンダーを読むためだけに使います。ほかの人のアカウントでのログインには使いません。</p>' +
+    '<h2>Google カレンダーから読むもの</h2>' +
+    '<ul><li>読むのは、Google カレンダーの予定だけです。Google に求める許可も、カレンダーを読む許可だけです。</li>' +
+    '<li>読んだ予定は、時間割を組むために、このサーバーのデータベースに写しを持ちます。</li></ul>' +
+    '<h2>データの扱い</h2>' +
+    '<ul><li>読んだ予定を、第三者に渡しません。</li>' +
+    '<li>Google の許可のトークンは、このサーバーの <code>secrets.env</code> に置き、外に出しません。</li></ul>' +
+    '<h2>許可の取り消し</h2>' +
+    '<ul><li>Google アカウントの「サードパーティのアクセス」から warifuri を外すと、以後カレンダーを読めなくなります。</li>' +
+    '<li>サーバーの <code>secrets.env</code> から <code>WARIFURI_GOOGLE_REFRESH_TOKEN</code> の行を消すと、サーバーもトークンを持たなくなります。</li></ul>' +
+    '<h2>問い合わせ先</h2>' +
+    `<p>${contactHtml(contact)}</p>` +
+    '<p><a href="/about">warifuri について</a></p>';
+}
+
 // The router of the Web screens. ledger: the open ledger. home: the data directory (profile
 // colours, backups), or null. host: the address the server listens on. publicUrl: the
 // public URL, or null. trustProxy: express's trust proxy value, when one is set. githubUser:
 // the GitHub login of the person, when the GitHub login is on. limit: the rate limit per
 // address. githubLogin: whether the login page offers GitHub (the router of oauth.mjs then
-// calls finishLogin). chat: the conversation runner (src/secretary/chat.mjs), or null when the
+// calls finishLogin). operatorContact: how to reach the operator, for /privacy, or null. chat: the conversation runner (src/secretary/chat.mjs), or null when the
 // secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
 export function createWeb({
   ledger,
@@ -310,6 +362,7 @@ export function createWeb({
   trustProxy,
   githubUser = null,
   githubLogin = false,
+  operatorContact = null,
   chat = null,
   secretaryDevice = null,
   serverDevices = [],
@@ -404,6 +457,10 @@ export function createWeb({
   });
 
   router.get('/', limited, (req, res) => res.redirect(302, '/calendar'));
+
+  // The pages for Google's consent screen: no login, no device key.
+  router.get('/about', limited, (req, res) => publicPage(res, 'warifuri について', aboutHtml()));
+  router.get('/privacy', limited, (req, res) => publicPage(res, 'プライバシーポリシー', privacyHtml(operatorContact)));
 
   // Pages: the same shell for each; the script reads the path.
   for (const p of PAGES) {

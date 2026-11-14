@@ -58,6 +58,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_HOST` | 待ち受けるアドレス。この機械の外から受けるときだけ変える | `127.0.0.1` | `--host` |  | serve、secretary |
 | `WARIFURI_PORT` | 待ち受けるポート | `8787` | `--port` |  | serve、connect、secretary |
 | `WARIFURI_PUBLIC_URL` | ハーネスから見えるサーバーの URL。https で始まり、道を含まない。GitHub のログインに要る | なし | `--public-url` |  | serve |
+| `WARIFURI_OPERATOR_CONTACT` | プライバシーポリシー(/privacy)に載せる、運営者への問い合わせ先。メールアドレスか URL。空なら「このサーバーの運営者」と書く | なし |  |  | serve |
 | `WARIFURI_GITHUB_USER` | ログインしてよい人の GitHub のユーザー名。GitHub のログインに要る | なし | `--github-user` |  | serve |
 | `WARIFURI_GITHUB_ID` | ログインしてよい人の GitHub の数値の ID。空なら最初のログインで覚える | なし |  |  | serve |
 | `WARIFURI_GITHUB_CLIENT_ID` | GitHub の OAuth App の Client ID。GitHub のログインに要る | なし |  |  | serve |
@@ -94,6 +95,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_DISCORD_USER` | 本人の Discord のユーザーの id。質問と失敗のときにメンションし、Discord で話すときは、この人の書いたことだけを秘書に渡す | なし |  |  | serve、secretary |
 | `WARIFURI_DISCORD_CHAT` | Discord で秘書と話す。on にすると、チャンネルで本人が書いたことを秘書に渡し、秘書の返事と質問のボタンを Discord に返す。画面で書いたことも Discord に写す。同じボットで話すほかの仕組みがあれば、先に止める。WARIFURI_DISCORD_USER が要る | `off` |  |  | serve、secretary |
 | `WARIFURI_GOOGLE_CLIENT_ID` | Google カレンダーを warifuri が自分で読むための、ユーザーの Google Cloud の OAuth クライアントの ID。下の2つと一緒に設定すると、カレンダーの変更を AI なしで取り込む | なし |  |  | serve、secretary、google |
+| `WARIFURI_GOOGLE_ACCOUNT` | カレンダーを読む Google アカウントのメールアドレス。設定すると、warifuri google login でほかのアカウントで許可したときに断り、トークンを保存しない | なし |  |  | google |
 | `WARIFURI_GOOGLE_CLIENT_SECRET` | その OAuth クライアントのシークレット | なし |  | 秘密 | serve、secretary、google |
 | `WARIFURI_GOOGLE_REFRESH_TOKEN` | Google カレンダーを読む許可のトークン。warifuri google login が書く | なし |  | 秘密 | serve、secretary、google |
 | `WARIFURI_GOOGLE_CALENDAR_POLL` | Google カレンダーに変更がないかを聞く間隔(分)。1 から 60 | `1` |  |  | serve |
