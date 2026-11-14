@@ -11,8 +11,14 @@
 // An agent's request (ask_secretary) and the secretary's reply to it are kept in a thread of
 // their own (kind 'agent') that the notifier does not read; the secretary's questions (ask)
 // still come from the conversation as always.
-// Nothing goes in the night, but while the person is talking; what came then goes once the
-// night is over, oldest first.
+// warifuri's own notes go too: the tasks due soon and not done (data.deadline, from
+// src/secretary/deadlines.mjs) and the tasks the secretary closed without asking
+// (data.auto_closed), as does the secretary's reply when the calendar changed under the plan
+// (data.alert).
+// Nothing goes in the night, but while the person is talking, and the notes marked urgent (a
+// deadline within the night); what came then goes once the night is over, oldest first.
+// A question the secretary withdrew (state withdrawn) is rewritten in Discord: marked
+// 取り下げ済み, its buttons removed. The Discord messages of each question are kept for that.
 // A thread of the conversation opened in Discord (threads, src/notify/discord-threads.mjs)
 // is a talk of its own: everything said in it goes to its Discord thread, as with mirror,
 // at night too: the person started it. A thread opened on the screen gets a Discord thread
@@ -27,9 +33,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { inNight } from '../secretary/schedule.mjs';
 import { chunks, clip } from './discord.mjs';
-import { askMessages, replyComponents } from './discord-chat.mjs';
+import { askMessages, replyComponents, withdrawnMessages } from './discord-chat.mjs';
 
 const BODY_MAX = 1500;
+// How many questions' Discord messages are kept, to rewrite them when withdrawn.
+const ASKS_KEPT = 20;
 // The first line of a copy of what the person wrote on the screen.
 export const WEB_MARK = '(Web から)';
 // How long after the person last wrote from Discord the secretary's replies go there too.
@@ -52,6 +60,11 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
     return { text: `朝の報告です。\n${clip(m.body, BODY_MAX)}${tail}`, mention: false, components: replyComponents(m) };
   }
   if (m.role === 'system' && m.data?.failure) return { text: `${m.body}${tail}`, mention: true };
+  if (m.role === 'system' && m.data?.deadline) return { text: `${m.body}${tail}`, mention: true };
+  if (m.role === 'system' && m.data?.auto_closed) return { text: `${m.body}${tail}`, mention: false };
+  if (m.role === 'secretary' && m.data?.alert && m.body.trim()) {
+    return { text: `${clip(m.body, BODY_MAX)}${talking ? '' : tail}`, mention: true, components: replyComponents(m) };
+  }
   if (talking && m.role === 'secretary' && m.kind === 'text' && m.body.trim()) {
     return { text: m.body, mention: false, whole: true, components: replyComponents(m) };
   }
@@ -87,8 +100,9 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
   let running = false;
   // Posts a notice: its messages, or its text (cut when whole), the buttons and the picture
   // under the last part. channel: a thread of the channel, or the channel itself. Resolves to
-  // the id of the last Discord message, where the buttons are.
-  async function post(notice, png, channel) {
+  // the id of the last Discord message, where the buttons are; ids (when given) takes the id
+  // of each.
+  async function post(notice, png, channel, ids = null) {
     let last = null;
     const parts = notice.messages
       ?? (notice.whole ? chunks(notice.text) : [notice.text]).map((text, i, all) => ({ text, components: i === all.length - 1 ? notice.components ?? [] : [] }));
@@ -100,6 +114,7 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         components: part.components ?? [],
         ...(channel ? { channel } : {}),
       });
+      if (ids) ids.push({ id: last?.id ?? null, channel: channel ?? null });
     }
     return last?.id ?? null;
   }
@@ -169,6 +184,32 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
     return sent;
   }
 
+  // The questions withdrawn since they were sent, rewritten in Discord. asks: { ask id: [{ id,
+  // channel }] }. A question answered is let go; one that cannot be rewritten now is tried
+  // again at the next call.
+  async function syncAsks(state) {
+    for (const [id, posted] of Object.entries(state.asks ?? {})) {
+      const ask = ledger.getMessage(id);
+      if (!ask || ask.state === 'answered') {
+        delete state.asks[id];
+        continue;
+      }
+      if (ask.state !== 'withdrawn') continue;
+      try {
+        const words = withdrawnMessages(ask);
+        for (const [i, p] of posted.entries()) {
+          if (!p.id || !discord.edit) continue;
+          const w = words[Math.min(i, words.length - 1)];
+          await discord.edit(p.id, { content: w.text, components: [], ...(p.channel ? { channel: p.channel } : {}) });
+        }
+        delete state.asks[id];
+      } catch (err) {
+        log(`discord: a withdrawn question not rewritten, tried again later: ${err.message}`);
+        return;
+      }
+    }
+  }
+
   // Sends what came since the last call. Resolves to the number sent.
   async function tick() {
     if (!discord || running) return 0;
@@ -193,12 +234,38 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         write({ started: true, last: list.at(-1)?.id ?? null });
         return sent;
       }
+      state.asks ??= {};
+      state.urgent ??= [];
+      const save = () => write({
+        started: true, last: state.last, failure: state.failure ?? null, via: state.via ?? null, viaAt: state.viaAt ?? null,
+        asks: state.asks, urgent: state.urgent,
+      });
+      if (Object.keys(state.asks).length) {
+        await syncAsks(state);
+        save();
+      }
       // In the night, nothing goes unless the person is talking from Discord now (by what the
       // person wrote last); then all of it goes, in order.
       const newest = [...list].reverse().find((m) => viaOf(m));
       const now_ = newest ? { via: viaOf(newest), viaAt: newest.created_at } : state;
-      if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) return sent;
-      const save = () => write({ started: true, last: state.last, failure: state.failure ?? null, via: state.via ?? null, viaAt: state.viaAt ?? null });
+      if (night && !night.error && inNight(night, now()) && !talkingAt(now_)) {
+        // The urgent notes go now; the rest waits for the morning.
+        for (const m of list) {
+          if (!m.data?.urgent || state.urgent.includes(m.id)) continue;
+          const notice = noticeOf(m, link);
+          if (!notice) continue;
+          try {
+            await post(notice, null);
+            sent += 1;
+            state.urgent.push(m.id);
+            save();
+          } catch (err) {
+            log(`discord: not sent, tried again later: ${err.message}`);
+            break;
+          }
+        }
+        return sent;
+      }
       for (const m of list) {
         const via = viaOf(m);
         if (via) {
@@ -209,11 +276,20 @@ export function createNotifier({ ledger, discord, file, publicUrl = null, night 
         if (m.role === 'secretary') state.failure = null;
         const failure = m.role === 'system' ? m.data?.failure ?? null : null;
         const talking = Boolean(talkingAt(state));
-        const notice = failure && failure === state.failure ? null : noticeOf(m, talking ? null : link, { talking, mirror });
+        // An urgent note sent in the night is not sent again.
+        const early = state.urgent.includes(m.id);
+        if (early) state.urgent = state.urgent.filter((x) => x !== m.id);
+        const notice = early || (failure && failure === state.failure) ? null : noticeOf(m, talking ? null : link, { talking, mirror });
         if (notice) {
           try {
             const png = m.data?.calendar ? await picture(m).catch(() => null) : null;
-            const posted = await post(notice, png);
+            const ids = m.kind === 'ask' ? [] : null;
+            const posted = await post(notice, png, undefined, ids);
+            if (ids) {
+              state.asks[m.id] = ids;
+              const keys = Object.keys(state.asks);
+              for (const k of keys.slice(0, Math.max(0, keys.length - ASKS_KEPT))) delete state.asks[k];
+            }
             if (posted && threads) threads.setPosted(m.id, posted);
             sent += 1;
             if (failure) state.failure = failure;

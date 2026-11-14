@@ -453,3 +453,51 @@ test('every turn opens and closes with the rule to answer in Japanese: words, an
     assert.ok(p.trimEnd().endsWith(LANGUAGE_RULE), 'and it is the last thing claude reads');
   }
 });
+
+test('chat: a change landing on a task\'s booking wakes the secretary without wake; its reply is marked to go to Discord', async (t) => {
+  const w = world(t);
+  const task = w.ledger.createTask({ title: '資料づくり', mode: 'human', done_when: '出した' }, WEB);
+  const at = (h) => new Date(2026, 9, 26, h).toISOString();
+  const { booking } = w.ledger.book({ kind: 'task', task_id: task.id, starts_at: at(10), ends_at: at(12) }, WEB);
+  // Elsewhere in the day: only lines.
+  w.chat.calendarChanged([{ id: 'b_far', change: 'created', title: '歯医者', starts_at: at(15), ends_at: at(16) }]);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 0);
+  // Over the booking: one call, told what it landed on.
+  w.chat.calendarChanged([{ id: 'b_meet', change: 'created', title: '面談', starts_at: at(11), ends_at: at(13) }]);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 1);
+  assert.match(w.claude.calls[0].input, new RegExp(`次のタスクや習慣の予定に重なったと見ています: ${booking.id}`));
+  const reply = w.ledger.listMessages(w.thread().id).at(-1);
+  assert.deepEqual([reply.role, reply.data.scheduled, reply.data.alert], ['secretary', 'calendar', true]);
+  // A task already done does not count.
+  w.ledger.setState(task.id, 'done', { result: '出した' }, WEB);
+  w.chat.calendarChanged([{ id: 'b_meet2', change: 'moved', title: '面談', starts_at: at(10), ends_at: at(11) }]);
+  await w.chat.idle();
+  assert.equal(w.claude.calls.length, 1);
+});
+
+test('chat: the tasks the secretary closes in a call at a set time are told in one note; those closed in a talk are not', async (t) => {
+  const w = world(t);
+  const a = w.ledger.createTask({ title: '申込み', mode: 'human', done_when: '出した' }, WEB);
+  const b = w.ledger.createTask({ title: '下調べ', mode: 'human', done_when: 'まとめた' }, WEB);
+  const c = w.ledger.createTask({ title: '片づけ', mode: 'human', done_when: '済んだ' }, WEB);
+  w.claude.answerWith((call) => {
+    if (w.claude.calls.length === 1) {
+      w.ledger.setState(a.id, 'done', { result: '申し込んだ。秘書が閉じた。根拠: PR がマージされた' }, SECRETARY);
+      w.ledger.setState(b.id, 'done', { result: 'まとめた。秘書が閉じた。根拠: 後ろのタスクが完了' }, SECRETARY);
+    } else {
+      w.ledger.setState(c.id, 'done', { result: '本人に言われて閉じた' }, SECRETARY);
+    }
+    return { stdout: ok('2件を閉じました。', call.session) };
+  });
+  w.chat.trigger('weekly');
+  await w.chat.idle();
+  const notes = () => w.ledger.listMessages(w.thread().id).filter((m) => m.data?.auto_closed);
+  assert.equal(notes().length, 1);
+  assert.deepEqual(notes()[0].data.auto_closed, { job: 'weekly', tasks: [a.id, b.id] });
+  assert.match(notes()[0].body, /^週の完了確認で、終わっていたタスクを2件閉じました。\n- 申込み: .*\n- 下調べ: .*\n違っていたら「〇〇を戻して」と言ってください。$/);
+  w.chat.send('片づけは終わった', WEB);
+  await w.chat.idle();
+  assert.equal(notes().length, 1, 'what the person asked for is said in the reply');
+});

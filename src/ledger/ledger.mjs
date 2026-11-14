@@ -49,6 +49,7 @@ import {
   checkProposal,
   checkAsk,
   ASK_QUESTIONS_MAX,
+  WITHDRAW_REASON_MAX,
   checkReplyOptions,
   REPLY_CALENDAR_DAYS,
   REPLY_CALENDAR_MARKS,
@@ -1569,6 +1570,7 @@ export function openLedger(path, options = {}) {
     const before = messageRow(id);
     if (!before || before.kind !== 'ask') throw new LedgerError([`${id} という質問はありません`]);
     const { questions, answers } = before.data;
+    if (before.state === 'withdrawn') throw new LedgerError(['この質問は取り下げました。答えはもう要りません']);
     if (input.later === true) {
       if (before.state === 'answered') problems.push('この質問には、もう全部答えています');
       if (problems.length) throw new LedgerError(problems);
@@ -1630,6 +1632,31 @@ export function openLedger(path, options = {}) {
       }, w);
       for (const body of notes) insertMessage({ thread_id: before.thread_id, role: 'system', kind: 'text', body }, w);
       return { ask: messageRow(id), message, outcome, changed: Boolean(old) };
+    });
+  }
+
+  // 取り下げ: the secretary takes back a question that is no longer needed (open or later):
+  // its answer came another way, such as the person telling an agent, or the task being
+  // closed. The question is kept, with the reason (data.withdrawn), so the screen and Discord
+  // can show it greyed out. Returns the question.
+  function withdrawAsk(id, fields, opts) {
+    const w = requireWriter(opts);
+    const input = fields ?? {};
+    const problems = unknownFields(input, ['reason']);
+    const before = messageRow(id);
+    if (!before || before.kind !== 'ask') throw new LedgerError([`${id} という質問はありません`]);
+    if (before.state === 'answered') problems.push('この質問には、もう全部答えがあります');
+    if (before.state === 'withdrawn') problems.push('この質問は、もう取り下げています');
+    const reason = tidyText(input.reason) || '答えが出たため';
+    if (input.reason !== undefined && input.reason !== null && typeof input.reason !== 'string') problems.push('reason は文字で書きます');
+    else if (charLength(reason) > WITHDRAW_REASON_MAX) problems.push(`reason は${WITHDRAW_REASON_MAX}文字までです`);
+    if (problems.length) throw new LedgerError(problems);
+    return transaction(() => {
+      const t = nowIso();
+      const next = { ...before, state: 'withdrawn', answered_at: t, data: { ...before.data, withdrawn: { reason, at: t } } };
+      updateRow('messages', MESSAGE_COLUMNS, next);
+      record(w, 'message', id, 'withdraw', { state: [before.state, 'withdrawn'], reason });
+      return messageRow(id);
     });
   }
 
@@ -1814,6 +1841,19 @@ export function openLedger(path, options = {}) {
       }
     }
     return out;
+  }
+
+  // The tasks one device closed after a mark (recordMark) and that are still closed: [{ id,
+  // title, state, result, reason }], in the order they were closed.
+  function closedTasksSince(mark, device) {
+    const rows = all("SELECT entity_id, changes FROM records WHERE id > ? AND entity = 'task' AND action = 'state' AND device = ? ORDER BY id", mark, device);
+    const out = new Map();
+    for (const r of rows) {
+      const after = JSON.parse(r.changes).state?.after;
+      if (CLOSED_STATES.includes(after)) out.set(r.entity_id, true);
+    }
+    return [...out.keys()].map((id) => getTaskRow(id)).filter((t) => t && CLOSED_STATES.includes(t.state))
+      .map((t) => ({ id: t.id, title: t.title, state: t.state, result: t.result ?? null, reason: t.reason ?? null }));
   }
 
   function records(entityId) {
@@ -2225,6 +2265,7 @@ export function openLedger(path, options = {}) {
     records,
     recordMark,
     bookingChangesSince,
+    closedTasksSince,
     recordNote,
     recordKnowledge,
     writeReport,
@@ -2244,6 +2285,7 @@ export function openLedger(path, options = {}) {
     ask,
     openAsk,
     answerAsk,
+    withdrawAsk,
     getMessage,
     listMessages,
     propose,

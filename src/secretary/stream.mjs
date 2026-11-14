@@ -50,6 +50,7 @@ const TOOL_STEPS = {
   autonomy_outcome: ['write', '自律度に記録しました'],
   autonomy_set: ['write', '自律度を変えました'],
   ask: ['ask', '質問を出しました'],
+  withdraw_ask: ['write', '質問を取り下げました'],
 };
 // Tools whose step is not shown: the reply buttons belong to the reply itself.
 const QUIET = new Set(['reply_options']);

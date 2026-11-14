@@ -117,9 +117,27 @@ export function noticeLine(c, words = NOTICE_WORDS) {
   return `${words[c.change]}: ${[span, c.title].filter(Boolean).join(' ')}`;
 }
 
+// What each run of the secretary is called in the note of the tasks it closed.
+const CLOSED_BY = {
+  nightly: '毎晩の見張り', inbox: '受信箱の整理', sync: 'カレンダーの同期', morning: '朝の報告', weekly: '週の完了確認', calendar: 'カレンダーの確認',
+};
+export const CLOSED_LIST_MAX = 10;
+
+// The one note for the tasks a run of the secretary closed without asking (their grounds were
+// clear): what it closed, and how to undo it.
+export function closedNote(job, tasks) {
+  const head = `${CLOSED_BY[job] ?? '秘書'}で、終わっていたタスクを${tasks.length}件閉じました。`;
+  const lines = tasks.slice(0, CLOSED_LIST_MAX).map((t) => {
+    const why = t.state === 'done' ? t.result : t.reason;
+    return `- ${t.title}${t.state === 'discarded' ? '(やめた)' : ''}${why ? `: ${clip(why.replace(/\n+/g, ' '), 80)}` : ''}`;
+  });
+  if (tasks.length > CLOSED_LIST_MAX) lines.push(`- ほかに${tasks.length - CLOSED_LIST_MAX}件`);
+  return [head, ...lines, '違っていたら「〇〇を戻して」と言ってください。'].join('\n');
+}
+
 // Who writes the replies and the runner's own notes in the thread.
 const WHO = { user: '本人', secretary: '秘書', system: 'お知らせ' };
-const STATE_WORDS = { open: '答え待ち', approved: '了承', changed: '直して了承', refused: '断る', later: 'あとで', answered: '答えあり' };
+const STATE_WORDS = { open: '答え待ち', approved: '了承', changed: '直して了承', refused: '断る', later: 'あとで', answered: '答えあり', withdrawn: '取り下げ済み' };
 const REPORT_WORDS = { nightly: '毎晩の報告', morning: '朝の報告', inbox: '受信箱の報告' };
 
 const clip = (text, n) => (charLength(text) > n ? `${[...text].slice(0, n).join('')}…` : text);
@@ -193,6 +211,7 @@ export function buildChatPrompt({
     const job = tr.data?.job;
     out.push('', `# 決まった時刻の仕事(${at(tr.created_at)})`, '', `warifuri が「${tr.body}」と知らせました。本人はこの場にいないかもしれません。`);
     if (job && Object.hasOwn(TRIGGERS, job)) out.push('', readInstructions(`${job}.md`, instructionsDir));
+    if (tr.data?.broke?.length) out.push('', `warifuri は、変わった予定が次のタスクや習慣の予定に重なったと見ています: ${tr.data.broke.join('、')}。この回の返事は Discord にも送られます。`);
   }
   const requests = feed.filter(isRequest);
   if (requests.length) {
@@ -274,10 +293,32 @@ export function readUpload(dir, a) {
 }
 
 // Writes warifuri's call at a set time (job: morning or weekly) into the secretary's conversation.
-export function writeTrigger(ledger, job, writer) {
+// extra: more of data (broke: the calendar changed under the plan).
+export function writeTrigger(ledger, job, writer, extra = {}) {
   if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);
   const thread = ledger.ensureThread(SECRETARY_THREAD.kind, writer);
-  return ledger.addMessage(thread.id, { role: 'system', kind: 'trigger', body: TRIGGERS[job], data: { job } }, writer);
+  return ledger.addMessage(thread.id, { role: 'system', kind: 'trigger', body: TRIGGERS[job], data: { ...extra, job } }, writer);
+}
+
+// The task and habit bookings that changes of the calendar landed on: an event added or moved
+// over them, of a task still open. [{ id, title }].
+export function brokenBy(ledger, changes) {
+  const out = new Map();
+  for (const c of changes) {
+    if (!['created', 'moved'].includes(c.change) || !c.starts_at || !c.ends_at) continue;
+    let bookings;
+    try {
+      bookings = ledger.schedule({ from: c.starts_at, to: c.ends_at }).bookings;
+    } catch {
+      continue;
+    }
+    for (const b of bookings) {
+      if (b.id === c.id || !['task', 'habit'].includes(b.kind)) continue;
+      if (b.task && ['done', 'discarded'].includes(b.task.state)) continue;
+      out.set(b.id, { id: b.id, title: b.title ?? b.task?.title ?? b.habit?.title ?? '' });
+    }
+  }
+  return [...out.values()];
 }
 
 // The digest of one exchange in a thread, for the main session.
@@ -414,6 +455,19 @@ export function createChat(ledger, cfg, ctx = {}) {
 
   const note = (threadId, body, data) => ledger.addMessage(threadId, { role: 'system', body, ...(data ? { data } : {}) }, WRITER);
   const mainThread = () => ledger.getThread(SECRETARY_THREAD.kind);
+  // A note of warifuri's own in the secretary's conversation, shown and sent at once.
+  const notice = (body, data) => {
+    const thread = mainThread() ?? ledger.ensureThread(SECRETARY_THREAD.kind, WRITER);
+    const m = note(thread.id, body, data);
+    emit({ type: 'done', thread: thread.id, message: m.id, fed: [] });
+    return m;
+  };
+  // The tasks the secretary closed since mark (recordMark), in one note; null when none.
+  const tellClosed = (job, mark) => {
+    const tasks = ledger.closedTasksSince(mark, WRITER.device);
+    if (!tasks.length) return null;
+    return notice(closedNote(job, tasks), { auto_closed: { job, tasks: tasks.map((t) => t.id) } });
+  };
   const agentThread = () => ledger.getThread(AGENT_THREAD.kind);
 
   // The files of the person's messages in the feed: pictures and words, and the rest by name.
@@ -439,6 +493,8 @@ export function createChat(ledger, cfg, ctx = {}) {
     };
     const files = filesOf(feed);
     const mark = thread.kind === 'agent' ? ledger.recordMark() : null;
+    // A call at a set time: the tasks the secretary closes in it without asking are told in one note.
+    const closedMark = trigger ? ledger.recordMark() : null;
     const images = files.filter((f) => f.image).map((f) => ({ name: f.name, ...f.image }));
     // 最初の会話: in the secretary's conversation, when the person speaks and the settings are
     // still to be made with them (onboardingDue).
@@ -516,6 +572,8 @@ export function createChat(ledger, cfg, ctx = {}) {
       if (options?.length) data.options = options;
       if (calendar) data.calendar = calendar;
       if (trigger?.data?.job) data.scheduled = trigger.data.job;
+      // The calendar changed under the plan: the reply goes to Discord too.
+      if (feed.some((m) => m.kind === 'trigger' && m.data?.broke)) data.alert = true;
       reply = ledger.addMessage(thread.id, { role: 'secretary', body: text, data }, WRITER);
     } else if (ok) note(thread.id, '返事が空でした。もう一度送ってください。');
     else if (out.error) {
@@ -537,6 +595,7 @@ export function createChat(ledger, cfg, ctx = {}) {
       for (const c of changes.slice(0, 5)) note(main.id, noticeLine(c), { agent_notice: { booking: c.id, change: c.change, thread: thread.id } });
       if (changes.length > 5) note(main.id, `ほかに${changes.length - 5}件の予定を変えました`, { agent_notice: { thread: thread.id } });
     }
+    if (closedMark !== null && visible) tellClosed(trigger.data?.job ?? null, closedMark);
     // A session that answered is kept; one that failed to start is not. The buttons and the
     // calendar asked for in this turn went with its reply (or are dropped with it).
     ledger.updateThread(thread.id, {
@@ -705,28 +764,38 @@ export function createChat(ledger, cfg, ctx = {}) {
     },
     // warifuri's call into the conversation at a set time (job: morning or weekly). Not in the night,
     // unless force (the person asked for it). { sent: message } or { skipped: reason }.
-    trigger(job, { force = false } = {}) {
+    trigger(job, { force = false, data = {} } = {}) {
       if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);
       if (!on) return { skipped: 'the secretary is off' };
       const schedule = scheduleFrom(cfg.values);
       if (!force && !schedule.night.error && inNight(schedule.night, now())) return { skipped: 'it is the night' };
-      const message = writeTrigger(ledger, job, WRITER);
+      const message = writeTrigger(ledger, job, WRITER, data);
       kick(message.thread_id);
       return { sent: message };
     },
     // The person's calendar changed (the calendar watch): changes as bookingChangesSince gives
     // them. Each is one line in the secretary's conversation, which the secretary reads at its
-    // next turn; nothing wakes it unless wake is set. Then one call goes into the conversation
-    // (not in the night, and not while an earlier one still waits). Returns the lines written.
+    // next turn. One call goes into the conversation (not in the night, and not while an
+    // earlier one still waits) when wake is set, or when a change lands on the plan
+    // (brokenBy: an event added or moved over a task's or habit's booking); then the
+    // secretary looks at it with calendar.md, and its reply goes to Discord too. Returns the
+    // lines written.
     calendarChanged(changes, { wake = false } = {}) {
       if (!on || !changes?.length) return [];
       const thread = mainThread() ?? ledger.ensureThread(SECRETARY_THREAD.kind, WRITER);
       const out = changes.slice(0, CALENDAR_NOTES).map((c) => note(thread.id, calendarLine(c), { calendar_change: { booking: c.id, change: c.change } }));
       if (changes.length > CALENDAR_NOTES) out.push(note(thread.id, `ほかに${changes.length - CALENDAR_NOTES}件の予定が変わりました`, { calendar_change: {} }));
       for (const m of out) emit({ type: 'done', thread: thread.id, message: m.id, fed: [] });
-      if (wake && !unseen(ledger.getThread(thread.id)).some((m) => m.kind === 'trigger' && m.data?.job === 'calendar')) this.trigger('calendar');
+      const broke = brokenBy(ledger, changes);
+      if ((wake || broke.length) && !unseen(ledger.getThread(thread.id)).some((m) => m.kind === 'trigger' && m.data?.job === 'calendar')) {
+        this.trigger('calendar', broke.length ? { data: { broke: broke.map((b) => b.id) } } : {});
+      }
       return out;
     },
+    // A note of warifuri's own (the deadline watch's), shown and sent at once.
+    notice,
+    // The tasks a run of the clock (nightly, inbox, sync) closed since mark, in one note.
+    tellClosed,
     // { on, replying, waiting }: whether a reply is being made in the secretary's
     // conversation, and how many messages wait there.
     status() {

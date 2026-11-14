@@ -55,6 +55,7 @@ import { createScheduler } from './secretary/scheduler.mjs';
 import { createChat, writeTrigger, TRIGGERS } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
+import { createDeadlineWatch } from './secretary/deadlines.mjs';
 import { createGateway } from './notify/gateway.mjs';
 import { createDiscordChat } from './notify/discord-chat.mjs';
 import { createThreadMap } from './notify/discord-threads.mjs';
@@ -518,8 +519,15 @@ function startSecretary(cfg, chat, ledger) {
   // A run that failed is said in the conversation, once until a run goes well again.
   let failed = null;
   const runJob = async (job) => {
+    // The tasks the run closes without asking (their grounds were clear) are told in one note.
+    const mark = ledger.recordMark();
     const out = await secretary.runJob(job, cfg, { signal: abort.signal, scheduled: true });
     if (abort.signal.aborted || out?.busy || out?.skipped) return out;
+    try {
+      chat.tellClosed(job, mark);
+    } catch (err) {
+      log(`secretary: the note of closed tasks was not written: ${err.message}`);
+    }
     const f = secretary.failureOf(out, out?.logFile ? secretary.logTail(out.logFile) : '');
     if (!f) failed = null;
     else if (f.reason !== failed) {
@@ -554,11 +562,21 @@ function startSecretary(cfg, chat, ledger) {
       });
     }
   }
+  // Tasks due soon and not done are told without waking the AI (src/secretary/deadlines.mjs).
+  const deadlines = createDeadlineWatch({
+    ledger, tell: (body, data) => chat.notice(body, data), file: path.join(secretary.paths(cfg.home).dir, 'deadlines.json'),
+    night: ready.schedule.night.error ? null : ready.schedule.night, log,
+  });
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
     run: (job) => (CHAT_JOBS.includes(job) ? chat.trigger(job) : runJob(job)),
     onTick: () => {
+      try {
+        if (chat.on) deadlines.tick();
+      } catch (err) {
+        log(`deadlines: check failed: ${err.message}`);
+      }
       chat.kick();
       notifier.tick().catch((err) => log(`discord: ${err.message}`));
     },
