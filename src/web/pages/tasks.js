@@ -74,13 +74,19 @@ function flowchart(g, ctx) {
       type: 'button', class: ['wf-node', dim && 'wf-dim', small && 'wf-node-small'], 'aria-pressed': String(me), data: { key: `node-${t.id}` },
       'aria-label': `${t.title}(${STATE[shown(t)]})`,
       style: { left: `${x}px`, top: `${y}px`, width: `${SIZES.NW}px`, height: `${nh}px` },
-      onclick: () => { view.hl = me ? null : t.id; ctx.rerender(); },
+      onclick: () => {
+        view.hl = me ? null : t.id;
+        ctx.rerender();
+        // The detail is under the chart: bring it into sight.
+        if (!me) requestAnimationFrame(() => document.querySelector('.wf-tasklist > .wf-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+      },
     }, small ? h('span', { class: 'wf-node-title' }, h('span', { class: 'wf-node-check', 'aria-hidden': 'true', text: '✓ ' }), t.title) : [chip(shown(t)), h('span', { class: 'wf-node-title', text: t.title })]);
   });
   return h('div', { class: 'wf-flowbox', data: { scroll: `flow-${g.id}` } }, h('div', { class: 'wf-flow', style: { width: `${lay.width}px`, height: `${lay.height}px` } }, svg, ...nodes));
 }
 
-function taskRow(t, today) {
+// ctx: given in the lists, where a row opens its detail under it when clicked.
+function taskRow(t, today, ctx = null) {
   const w = WHO[t.mode] ?? WHO.ai_worker;
   const closed = t.state === 'done';
   const d = left(t, today);
@@ -93,7 +99,12 @@ function taskRow(t, today) {
   }
   else if (t.next && !closed) note = `次の一手: ${t.next}`;
   const before = t.open_before.length ? `${t.open_before.map((x) => `「${x.title}」`).join('')}の後` : null;
-  return h('div', { class: ['wf-task', closed && 'wf-closed', view.hl === t.id && 'wf-hl'] },
+  const row = h('div', { class: ['wf-task', closed && 'wf-closed', view.hl === t.id && 'wf-hl', ctx && 'wf-task-pick'],
+    ...(ctx ? {
+      role: 'button', tabindex: '0', 'aria-expanded': String(view.hl === t.id), data: { key: `row-${t.id}` },
+      onclick: () => { view.hl = view.hl === t.id ? null : t.id; ctx.rerender(); },
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } },
+    } : {}) },
     h('span', { class: ['wf-avatar', w[2] && 'wf-ai'], 'aria-hidden': 'true', text: w[1] }),
     h('span', { class: 'wf-task-main' },
       h('span', { class: 'wf-task-meta' }, h('b', { text: w[0] }), chip(shown(t)), t.hold ? h('span', { text: `@${t.hold.device}` }) : null),
@@ -103,24 +114,30 @@ function taskRow(t, today) {
     h('span', { class: 'wf-task-due' },
       h('span', { class: 'wf-left', style: { color: closed || d === null ? 'var(--off)' : dueColor(d) }, text: closed ? '完了' : leftText(d) }),
       h('small', { text: t.due ? `期限 ${md(dueDay(t.due))}${prov(t)}` : '期限なし' })));
+  return row;
 }
 
 // The task picked in the flowchart, in full: who, state, title, before it, note, due, what it
 // is (body), when it is done (done_when), and the result once closed.
-function detail(t, today) {
-  if (!t) return h('div', { class: 'wf-detail wf-detail-empty', text: '図のタスクを選ぶと、詳細が表示されます' });
-  return h('div', { class: 'wf-detail' },
-    taskRow(t, today),
+function more(t) {
+  const lines = [
     t.done_when ? h('p', { class: 'wf-detail-line' }, h('b', { text: '完了の条件' }), t.done_when) : null,
     t.result ? h('p', { class: 'wf-detail-line' }, h('b', { text: '成果' }), t.result) : null,
-    t.body ? h('p', { class: 'wf-detail-body', text: t.body }) : null);
+    t.body ? h('p', { class: 'wf-detail-body', text: t.body }) : null,
+  ].filter(Boolean);
+  return lines.length ? lines : [h('p', { class: 'wf-detail-line wf-muted', text: '説明はまだありません' })];
 }
 
-function group(title, profile, tasks, today, colors, { showMeta }) {
+function detail(t, today) {
+  if (!t) return h('div', { class: 'wf-detail wf-detail-empty', text: '図のタスクを選ぶと、詳細が表示されます' });
+  return h('div', { class: 'wf-detail', data: { key: `detail-${t.id}` } }, taskRow(t, today), ...more(t));
+}
+
+function group(title, profile, tasks, today, colors, { showMeta, ctx }) {
   const kept = tasks.filter((t) => KEEP[view.filter](t, today));
   return h('div', {},
     h('div', { class: 'wf-group-head' }, h('h2', { text: title }), showMeta && profile ? profileChip(profile, colors, 15) : null, h('span', { class: 'wf-group-count', text: `${kept.length}件` })),
-    ...kept.map((t) => taskRow(t, today)),
+    ...kept.flatMap((t) => (view.hl === t.id ? [taskRow(t, today, ctx), h('div', { class: 'wf-detail wf-detail-open' }, ...more(t))] : [taskRow(t, today, ctx)])),
     kept.length ? null : h('div', { class: 'wf-empty', text: `「${FILTERS[view.filter]}」に当てはまるタスクはありません` }));
 }
 
@@ -184,7 +201,7 @@ function render(data, ctx) {
       found.tasks.length ? flowchart(found, ctx) : h('span', { class: 'wf-muted', text: 'まだタスクがありません' })));
     right.push(detail(found.tasks.find((t) => t.id === view.hl), today));
   } else if (view.goal === 'none') {
-    right.push(group('ゴールなし', null, data.unassigned, today, colors, { showMeta: false }));
+    right.push(group('ゴールなし', null, data.unassigned, today, colors, { showMeta: false, ctx }));
   } else {
     right.push(overview(goals, openLoose, today, colors, pick));
   }
