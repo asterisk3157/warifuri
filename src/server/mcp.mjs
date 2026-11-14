@@ -316,15 +316,24 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
         'dates (the task\'s or its goal\'s). A task with only_at home goes only in free time at home. A band of the week type with a ' +
         "profile takes only that profile's tasks and is filled first. A block is block_min_minutes to " +
         'block_max_minutes long; a task gets one block a day, none on a day it is already booked, and the daily cap is ' +
-        'kept, so the day is not filled for its own sake. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
-        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes }], left: [{ task_id, ' +
-        'title, left_min, reason, misses_due? }] (tasks that got no block, and tasks with no estimate; misses_due: true ' +
-        'with due when its due date falls in the period, the case to ask the person about), habits_left (habits that ' +
-        'fit nowhere) }.',
-      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+        'kept, so the day is not filled for its own sake. Weekdays are filled first; Saturday and Sunday take what did not fit. ' +
+        'Travel (移動): when bookings at different places (location) follow one another in a day, the way between them ' +
+        '(places.travel) goes right before the booking it leads to, from home before the first and back home after the last; ' +
+        'a way of 0 minutes puts nothing. replan: true lets the task bookings warifuri made in the period (from now on, not ' +
+        'moved by the person in the calendar) move; fixed bookings never move; the oldest bookings are kept first and the ' +
+        'newest go first when a task would miss its due date. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
+        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes, booking_id? }] (booking_id: ' +
+        'move that booking here with book and its id; without it, a new booking), travel: [{ title, from, to, starts_at, ' +
+        'ends_at, minutes, short?, booking_id? }] (book as kind travel; short: the way does not fit before the booking), ' +
+        'unbook: [{ booking_id, kind, title, starts_at, ends_at }] (warifuri\'s bookings no longer needed), changes: [{ kind, ' +
+        'booking_id, task_id?, title, before, after, line }] (each booking put, moved or taken away, with a line to show ' +
+        'the person), left: [{ task_id, title, left_min, reason, misses_due? }] (tasks that got no block, and tasks with no ' +
+        'estimate; misses_due: true with due when its due date falls in the period, the case to ask the person about), ' +
+        'habits_left (habits that fit nowhere) }.',
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional(), replan: z.boolean().optional() },
       annotations: readOnly,
     },
-    guarded(async ({ from, to }) => result(timetableFor(ledger, { from, to }))),
+    guarded(async ({ from, to, replan }) => result(timetableFor(ledger, { from, to, replan }))),
   );
 
   server.registerTool(
@@ -1016,7 +1025,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   tool(
     'book',
     'Book time: kind task (task_id) or habit (habit_id) gives time to it, and its title defaults to theirs; kind ' +
-      'fixed is an appointment and needs a title. starts_at and ends_at: ISO datetimes with offset (Z or +09:00), ' +
+      'fixed is an appointment and needs a title; kind travel is the way between two places (timetable\'s travel), ' +
+      'with no location, and its title defaults to 移動. starts_at and ends_at: ISO datetimes with offset (Z or +09:00), ' +
       'stored in UTC; at most 24 hours. With id, changes that booking (only the fields given change). Bookings may ' +
       'overlap: overlaps lists the ones sharing time with this one, so you can move one if that was not meant. ' +
       'source (such as google-calendar) and external_id (the event id there) name the outside event the booking is: ' +

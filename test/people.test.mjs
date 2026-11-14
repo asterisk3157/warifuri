@@ -31,7 +31,7 @@ test('schema 12: a version 11 file gains the people tables and keeps its records
   raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '11')").run();
   raw.prepare("INSERT INTO records (at, actor, entity, entity_id, action, changes) VALUES ('2026-11-01T00:00:00Z', 'human', 'goal', 'g_1', 'create', '{}')").run();
   raw.close();
-  assert.equal(SCHEMA_VERSION, 16);
+  assert.equal(SCHEMA_VERSION, 17);
   const ledger = openLedger(file);
   const p = ledger.people.create({ name: '田中先生' }, LAB, W);
   assert.deepEqual(ledger.records('g_1').map((r) => r.action), ['create']);
@@ -356,7 +356,7 @@ test('schema 16: a version 15 file keeps its people as checked values and can ma
   assert.deepEqual(after.items.map((i) => [i.label, i.unverified ?? false]), [['好きなもの', false], ['苦手なもの', true]]);
   ledger.close();
   const check = new DatabaseSync(file);
-  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '16');
+  assert.equal(check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, '17');
   assert.throws(() => check.prepare("UPDATE person_items SET unverified = 2 WHERE person_id = 'n_1'").run(), /CHECK/);
   check.close();
   fs.rmSync(dir, { recursive: true, force: true });

@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -713,6 +713,39 @@ export const MIGRATIONS = [
   `
   ALTER TABLE people ADD COLUMN unverified TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE person_items ADD COLUMN unverified INTEGER NOT NULL DEFAULT 0 CHECK (unverified IN (0, 1));
+  `,
+  // 16 → 17: 移動. A booking may be of kind 'travel': the time on the way between two places,
+  // put in by warifuri (the secretary) before and after a booking somewhere else, and moved by
+  // it as the plan changes. The kind is in a CHECK, so bookings is rebuilt with its rows; no
+  // table points at it.
+  `
+  DROP INDEX IF EXISTS bookings_starts;
+  DROP INDEX IF EXISTS bookings_task;
+  DROP INDEX IF EXISTS bookings_external;
+  ALTER TABLE bookings RENAME TO bookings_v16;
+  CREATE TABLE bookings (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('task','habit','fixed','travel')),
+    task_id     TEXT REFERENCES tasks(id),
+    habit_id    TEXT REFERENCES habits(id),
+    starts_at   TEXT NOT NULL,
+    ends_at     TEXT NOT NULL,
+    note        TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    source      TEXT,
+    external_id TEXT,
+    location    TEXT,
+    organizer   TEXT,
+    CHECK (ends_at > starts_at)
+  );
+  INSERT INTO bookings (id, title, kind, task_id, habit_id, starts_at, ends_at, note, created_at, updated_at, source, external_id, location, organizer)
+    SELECT id, title, kind, task_id, habit_id, starts_at, ends_at, note, created_at, updated_at, source, external_id, location, organizer FROM bookings_v16;
+  DROP TABLE bookings_v16;
+  CREATE INDEX bookings_starts ON bookings(starts_at);
+  CREATE INDEX bookings_task ON bookings(task_id);
+  CREATE UNIQUE INDEX bookings_external ON bookings(source, external_id) WHERE external_id IS NOT NULL;
   `,
 ];
 

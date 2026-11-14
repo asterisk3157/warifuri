@@ -37,7 +37,9 @@ export const AUTONOMY_OUTCOMES = ['approved', 'changed', 'refused', 'revoked'];
 // Approvals in a row that raise a kind to act_then_tell: the default the person agreed to
 // when installing warifuri (原則13). It changes only on the person's word.
 export const AUTONOMY_STREAK = 3;
-export const BOOKING_KINDS = ['task', 'habit', 'fixed'];
+// travel: the time on the way between two places, put in by warifuri around a booking somewhere
+// else (timetable.mjs), and moved by it as the plan changes.
+export const BOOKING_KINDS = ['task', 'habit', 'fixed', 'travel'];
 export const BOOKING_MAX_MS = 24 * 60 * 60 * 1000;
 // 報告: the secretary's nightly check, morning summary and inbox tidy-up.
 export const REPORT_KINDS = ['nightly', 'morning', 'inbox'];

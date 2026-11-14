@@ -52,6 +52,7 @@ import { decideBrief } from './client/brief-hook.mjs';
 import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
+import { createReplanWatch } from './secretary/replan.mjs';
 import { createChat, writeTrigger, TRIGGERS } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
@@ -505,7 +506,8 @@ function startCalendarWatch(cfg, chat, ledger) {
 // line per run start and end is printed; claude's output goes to its log file. The morning
 // and the weekly check are not runs of their own: they are calls into the conversation
 // (chat.trigger), answered by the secretary of the conversation. Each check also looks for
-// calls written by `warifuri secretary run morning` (or weekly) from another process.
+// calls written by `warifuri secretary run morning` (or weekly) from another process, and for
+// tasks whose due date or estimate changed (replan.mjs: one call to plan again).
 function startSecretary(cfg, chat, ledger) {
   if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
   const ready = secretary.readyToSchedule(cfg);
@@ -554,12 +556,18 @@ function startSecretary(cfg, chat, ledger) {
       });
     }
   }
+  // Tasks with a due date that came or changed: one call to plan again, once things are quiet.
+  const replan = createReplanWatch({
+    ledger, night: ready.schedule.night, ignoreDevice: secretary.deviceOf(cfg.values), log,
+    trigger: (tasks) => chat.trigger('replan', { tasks }),
+  });
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
     run: (job) => (CHAT_JOBS.includes(job) ? chat.trigger(job) : runJob(job)),
     onTick: () => {
       chat.kick();
+      replan.tick();
       notifier.tick().catch((err) => log(`discord: ${err.message}`));
     },
   });

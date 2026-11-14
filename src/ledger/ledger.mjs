@@ -837,7 +837,7 @@ export function openLedger(path, options = {}) {
 
   // Creates a booking, or changes the one whose id is given (only the fields given change).
   // kind task needs an existing task_id, habit an existing habit_id, and their title defaults
-  // to the task's or habit's; fixed needs a title. Times take an offset and are stored in UTC.
+  // to the task's or habit's; fixed needs a title; travel's defaults to 移動. Times take an offset and are stored in UTC.
   // Overlaps are allowed: the result lists the bookings sharing time with this one.
   // source and external_id say which outside event the booking is (imported from it, or
   // copied to it). Without id, a pair already in the ledger changes that booking instead of
@@ -869,6 +869,7 @@ export function openLedger(path, options = {}) {
     const linked = task ?? habit;
     const relinked = !before || next.kind !== before.kind || next.task_id !== before.task_id || next.habit_id !== before.habit_id;
     if (linked && blank(given.title) && (given.title !== undefined || relinked)) next.title = linked.title;
+    if (next.kind === 'travel' && blank(next.title)) next.title = '移動';
     const holder = paired(next.source, next.external_id);
     const pairTakenBy = holder && holder.id !== next.id ? holder.id : null;
     problems.push(...checkBooking(next, { taskExists: !!task, habitExists: !!habit, pairTakenBy }));
@@ -1790,6 +1791,10 @@ export function openLedger(path, options = {}) {
   // The id of the newest record (0 when there is none): a mark to ask bookingChangesSince about.
   const recordMark = () => one('SELECT COALESCE(MAX(id), 0) AS n FROM records').n;
 
+  // The records of one kind of entity after a mark (recordMark), oldest first, with changes read.
+  const recordsSince = (mark, entity) =>
+    all('SELECT * FROM records WHERE id > ? AND entity = ? ORDER BY id', mark, entity).map((r) => ({ ...r, changes: JSON.parse(r.changes) }));
+
   // What one device did to bookings after a mark (recordMark): [{ id, change: 'created' |
   // 'moved' | 'deleted', title, starts_at, ends_at }], in the order the bookings were first
   // touched. A booking made and deleted since the mark is left out; a change that is not of
@@ -2224,6 +2229,7 @@ export function openLedger(path, options = {}) {
     stale,
     records,
     recordMark,
+    recordsSince,
     bookingChangesSince,
     recordNote,
     recordKnowledge,

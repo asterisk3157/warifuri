@@ -30,7 +30,7 @@ const SHORT = 40;
 
 // What a booking is, in words (none for an appointment: its title says it), and its colour.
 function category(b, colors) {
-  if (b.kind === 'fixed') return { label: null, color: FIXED };
+  if (b.kind === 'fixed' || b.kind === 'travel') return { label: null, color: FIXED };
   if (b.kind === 'habit') return { label: '習慣', color: HABIT };
   if (b.profile) return { label: b.profile, color: profileColor(b.profile, colors) };
   return { label: 'タスク', color: profileColor(null, colors) };
