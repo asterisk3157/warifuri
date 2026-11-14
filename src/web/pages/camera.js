@@ -13,12 +13,29 @@ let drawn = null;
 
 const sig = (data) => JSON.stringify(data?.cameras ?? []);
 
-function makeTile(cam) {
+// A click on a view makes it large (the whole width, as tall as the screen allows), and
+// another click puts it back; the change glides where the browser can (view transitions).
+// The click is taken by a clear layer over the frame, since a frame keeps its own clicks.
+function makeTile(cam, i) {
+  const el = h('section', { class: 'wf-surface wf-cam', style: { viewTransitionName: `wf-cam-${i}` } });
+  const hit = h('button', { type: 'button', class: 'wf-cam-hit', 'aria-label': '大きく表示', 'aria-pressed': 'false' });
+  hit.onclick = () => {
+    const big = !el.classList.contains('wf-cam-big');
+    const flip = () => {
+      el.classList.toggle('wf-cam-big', big);
+      hit.setAttribute('aria-pressed', String(big));
+      hit.setAttribute('aria-label', big ? '元の大きさに戻す' : '大きく表示');
+    };
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(flip);
+    else flip();
+    if (big) requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  };
   const box = h('div', { class: 'wf-cam-view' }, h('iframe', {
-    src: cam.stream, title: cam.name, loading: 'lazy', allow: 'autoplay; fullscreen', allowfullscreen: true,
+    src: cam.stream, title: cam.name, loading: 'lazy', allow: 'autoplay',
     referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin',
-  }));
-  return { cam, el: h('section', { class: 'wf-surface wf-cam' }, h('div', { class: 'wf-table-head' }, h('h2', { text: cam.name })), box) };
+  }), hit);
+  el.append(h('div', { class: 'wf-table-head' }, h('h2', { text: cam.name })), box);
+  return { cam, el };
 }
 
 async function load(api) {
@@ -30,8 +47,8 @@ function render(data, ctx) {
   const key = (c) => `${c.name}\n${c.stream}`;
   const keep = new Set(data.cameras.map(key));
   for (const k of [...tiles.keys()]) if (!keep.has(k)) tiles.delete(k);
-  const shown = data.cameras.map((c) => {
-    if (!tiles.has(key(c))) tiles.set(key(c), makeTile(c));
+  const shown = data.cameras.map((c, i) => {
+    if (!tiles.has(key(c))) tiles.set(key(c), makeTile(c, i));
     return tiles.get(key(c)).el;
   });
   drawn = sig(data);

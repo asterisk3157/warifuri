@@ -72,7 +72,10 @@ export function relayPage(html) {
       const mod = /\btype\s*=\s*["']?module/i.test(attrs) ? ' type="module"' : '';
       return `<script${mod} src="./inline-${scripts.length - 1}.js"></script>`;
     });
-  return { page, scripts };
+  // The player writes its way of playing (MSE, RTC) over the picture; that word is not for the
+  // person, so it is hidden. Its error line stays.
+  const hide = '<style>video-stream .mode { display: none !important; }</style>';
+  return { page: /<\/head>/i.test(page) ? page.replace(/<\/head>/i, `${hide}</head>`) : hide + page, scripts };
 }
 
 // What カメラ shows when the camera's server cannot be reached. It tries again by itself.
