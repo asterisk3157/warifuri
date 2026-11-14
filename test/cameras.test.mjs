@@ -98,8 +98,9 @@ test('with cameras, カメラ is shown with its origins let in', async (t) => {
   assert.equal(csp, pageCsp(['https://camera.example.ts.net', 'https://door.example.ts.net']));
   assert.match(csp, /frame-src https:\/\/camera\.example\.ts\.net https:\/\/door\.example\.ts\.net;/);
   assert.equal(page.headers.get('x-frame-options'), 'DENY');
-  // Only the camera page lets them in.
-  assert.doesNotMatch((await fetch(`${base}/tasks`)).headers.get('content-security-policy'), /ts\.net/);
+  // Every page lets them in: moving to カメラ from another tab keeps that page's policy.
+  assert.equal((await fetch(`${base}/tasks`)).headers.get('content-security-policy'), csp);
+  // The API does not.
   assert.doesNotMatch((await fetch(`${base}/web/api/cameras`)).headers.get('content-security-policy'), /ts\.net/);
 });
 

@@ -265,7 +265,7 @@ function readCookie(req, name) {
   return '';
 }
 
-// The pages' policy. The camera page also lets in the cameras' origins: their pictures (img) and
+// The pages' policy. With cameras, the pages also let in the cameras' origins: their pictures (img) and
 // their live view (frame), and nothing else of them.
 export function pageCsp(origins = []) {
   const extra = origins.length ? ` ${origins.join(' ')}` : '';
@@ -470,7 +470,8 @@ export function createWeb({
   router.get('/privacy', limited, (req, res) => publicPage(res, 'プライバシーポリシー', privacyHtml(operatorContact)));
 
   // Pages: the same shell for each; the script reads the path. カメラ is there only when cameras
-  // are set, with a policy that lets in their origins.
+  // are set. Every page lets in the cameras' origins, since moving between the tabs does not load
+  // a new page: a page opened at カレンダー keeps its policy when the person opens カメラ.
   const cameraCsp = pageCsp(cameraOrigins(cameras));
   for (const p of cameras.length ? [...PAGES, 'camera'] : PAGES) {
     router.get(`/${p}`, limited, (req, res) => {
@@ -479,7 +480,7 @@ export function createWeb({
         else notice(res, 401, 'warifuri へようこそ', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
         return;
       }
-      guard(res, p === 'camera' ? cameraCsp : PAGE_CSP);
+      guard(res, cameraCsp);
       res.sendFile(path.join(assetsDir, 'app.html'));
     });
   }
