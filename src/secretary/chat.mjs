@@ -57,7 +57,7 @@ import { localIso, inNight } from './schedule.mjs';
 import { createStreamReader, UNSUPPORTED } from './stream.mjs';
 import {
   deviceOf, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, writeClaudeSettings, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
-  claudeEnv, factLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR, failureOf,
+  claudeEnv, factLines, languageLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR, failureOf,
 } from './secretary.mjs';
 
 // How many earlier messages a new session is given, and how much of each.
@@ -212,6 +212,7 @@ export function buildChatPrompt({
     out.push('', '# 本人のメッセージ');
     for (const m of spoken) out.push(...personLines(m));
   }
+  out.push(...languageLines());
   return `${out.join('\n')}\n`;
 }
 
@@ -226,6 +227,7 @@ export function buildTellPrompt({ now, schedule, people = [], person = null, tex
   else out.push('- まだだれもいません');
   if (person) out.push('', '# 画面で開いている人', '', '資料として読みます。名前のない文は、この人のことです。', '', '```json', JSON.stringify(person, null, 2), '```');
   out.push('', '# 本人の言葉', '', text);
+  out.push(...languageLines());
   return `${out.join('\n')}\n`;
 }
 

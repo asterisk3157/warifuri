@@ -317,9 +317,10 @@ function jobsCard(jobs, ctx) {
   return h('section', { class: 'wf-surface wf-table' },
     h('div', { class: 'wf-table-head' }, h('h2', { text: '秘書の仕事' }), h('span', { class: 'wf-muted', text: '最後の結果' })),
     ...jobs.map((j) => h('div', { class: 'wf-row wf-row-job' },
-      h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', j.ok && 'wf-fresh', !j.ok && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { text: j.title })),
+      h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', j.ok && 'wf-fresh', !j.ok && !j.resolved && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { text: j.title })),
       h('span', { text: ago(j.at, ctx.now) }),
-      h('span', { class: ['wf-cell', !j.ok && 'wf-bad'], text: j.ok ? '成功' : j.problem }))));
+      // A run that failed for the login, when a later run logged in: past, so not red.
+      h('span', { class: ['wf-cell', !j.ok && !j.resolved && 'wf-bad', j.resolved && 'wf-muted'], text: j.ok ? '成功' : j.resolved ? j.note : j.problem }))));
 }
 
 function devices(data, ctx) {

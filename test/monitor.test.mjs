@@ -41,6 +41,40 @@ test('localMachine and secretaryJobs: this machine, and the last run of each job
   assert.match(jobs[0].problem, /ログインが切れています/);
 });
 
+test('secretaryJobs: a run that failed for the login is past once a later run logged in; still red until then', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-mon-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const logs = path.join(home, 'secretary', 'logs');
+  fs.mkdirSync(logs, { recursive: true });
+  const write = (name, text, when) => {
+    const file = path.join(logs, name);
+    fs.writeFileSync(file, text);
+    fs.utimesSync(file, when, when);
+  };
+  // The weekly inbox failed on a Sunday night; the login was made again on Monday.
+  write('inbox.log', 'Failed to authenticate: OAuth session expired and could not be refreshed\n', new Date(2026, 10, 8, 23));
+  write('sync.log', '同期しました。取り込み 0 件\n', new Date(2026, 10, 8, 22));
+  let jobs = secretaryJobs(home);
+  let inbox = jobs.find((j) => j.job === 'inbox');
+  assert.deepEqual([inbox.ok, inbox.resolved], [false, false]);
+  assert.match(inbox.problem, /ログインが切れています/);
+
+  write('nightly.log', '見張りを終えました\n', new Date(2026, 10, 9, 23));
+  jobs = secretaryJobs(home);
+  inbox = jobs.find((j) => j.job === 'inbox');
+  assert.deepEqual([inbox.ok, inbox.resolved, inbox.problem], [false, true, null]);
+  assert.match(inbox.note, /ログインし直せている/);
+  assert.equal(jobs.find((j) => j.job === 'nightly').ok, true);
+
+  // A later run that also failed for the login does not clear it.
+  write('nightly.log', 'Not logged in\n', new Date(2026, 10, 9, 23));
+  write('sync.log', 'Not logged in\n', new Date(2026, 10, 10, 12));
+  assert.ok(secretaryJobs(home).every((j) => !j.ok && !j.resolved && j.problem));
+  // A thread's turn counts as a run that logged in.
+  write('thread-c_1.log', '{"type":"result","result":"了解"}\n', new Date(2026, 10, 11, 12));
+  assert.ok(secretaryJobs(home).every((j) => j.resolved));
+});
+
 test('a guest has the GPU use only when it reports the GPU itself', () => {
   const guest = (id, name) => row({ host: 'node-a', id, name }, 1);
   const data = detailData({
