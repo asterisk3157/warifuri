@@ -4,7 +4,9 @@
 //
 // Under /web/camera/<n>/ (n: the camera's place in WARIFURI_CAMERAS, from 0), and only there:
 // - GET stream.html, video-stream.js, video-rtc.js and api/frame.jpeg: the same paths of the
-//   camera's server. stream.html opens api/ws relative to itself, so it works from here.
+//   camera's server. stream.html opens api/ws relative to itself, so it works from here. Its
+//   inline scripts are served as files of their own (inline-<i>.js), so the page needs no
+//   inline script: a proxy in front may change inline code, and hashes would then not match.
 // - api/ws: the WebSocket of the live view, joined to the camera's server's and passed through
 //   both ways, untouched.
 // Every other path is 404: the server's config, editor and other streams are not reachable.
@@ -19,7 +21,6 @@
 
 import http from 'node:http';
 import https from 'node:https';
-import { createHash } from 'node:crypto';
 
 export const CAMERA_FILES = {
   'stream.html': 'text/html; charset=utf-8',
@@ -28,6 +29,7 @@ export const CAMERA_FILES = {
   'api/frame.jpeg': 'image/jpeg',
 };
 const PATH = /^\/web\/camera\/(0|[1-9]\d{0,2})\/(.*)$/;
+const INLINE = /^inline-([0-9])\.js$/;
 const PAGE_MAX = 256 * 1024;
 const TIMEOUT_MS = 10_000;
 // The live view of a camera, as カメラ frames it. The stream page reads src and mode from its
@@ -36,12 +38,11 @@ const TIMEOUT_MS = 10_000;
 // whose media would go straight to the camera's server and not reach it from outside.
 export const cameraView = (n, cam) => `/web/camera/${n}/stream.html?src=${encodeURIComponent(cam.src)}&mode=${encodeURIComponent('mse,mjpeg')}`;
 
-// The policy of a relayed answer. hashes: of the stream page's inline scripts. Its styles are
-// inline too (and the player writes a <style> of its own), so styles may be inline. The player
-// plays from a blob: (MSE) and shows JPEG frames as data: pictures.
-export function relayCsp(hashes = []) {
-  const h = hashes.map((x) => ` '${x}'`).join('');
-  return `default-src 'none'; script-src 'self'${h}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; ` +
+// The policy of a relayed answer. Scripts come only from this server (the page's inline ones
+// are files here). Its styles are inline (and the player writes a <style> of its own), so
+// styles may be inline. The player plays from a blob: (MSE) and shows JPEG frames as data:.
+export function relayCsp() {
+  return `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; ` +
     "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 }
 
@@ -58,15 +59,20 @@ function relayGuard(res, csp = relayCsp()) {
 }
 
 // The stream page made safe to serve here: its links to the internet (icons, a manifest) are
-// dropped, and its inline scripts are let in by their hashes.
+// dropped, and each inline script becomes a script file of this relay (inline-<i>.js), kept
+// in scripts (at most 10).
 export function relayPage(html) {
-  const page = html.replace(/<link\b[^>]*\bhref\s*=\s*["']?(?:https?:)?\/\/[^>]*>\s*/gi, '');
-  const hashes = [];
-  for (const m of page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
-    if (/\bsrc\s*=/i.test(m[1])) continue;
-    hashes.push(`sha256-${createHash('sha256').update(m[2], 'utf8').digest('base64')}`);
-  }
-  return { page, hashes };
+  const scripts = [];
+  const page = html
+    .replace(/<link\b[^>]*\bhref\s*=\s*["']?(?:https?:)?\/\/[^>]*>\s*/gi, '')
+    .replace(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi, (all, attrs, body) => {
+      if (/\bsrc\s*=/i.test(attrs)) return all;
+      if (scripts.length >= 10) return '';
+      scripts.push(body);
+      const mod = /\btype\s*=\s*["']?module/i.test(attrs) ? ' type="module"' : '';
+      return `<script${mod} src="./inline-${scripts.length - 1}.js"></script>`;
+    });
+  return { page, scripts };
 }
 
 // What カメラ shows when the camera's server cannot be reached. It tries again by itself.
@@ -110,23 +116,25 @@ export function createCameraRelay({ cameras, auth = null, allowed, publicOrigin 
       return;
     }
     const r = route(`/web/camera${req.path}`);
-    const type = r && Object.hasOwn(CAMERA_FILES, r.file) ? CAMERA_FILES[r.file] : null;
+    const inline = r ? INLINE.exec(r.file) : null;
+    const type = r && (Object.hasOwn(CAMERA_FILES, r.file) ? CAMERA_FILES[r.file] : inline ? CAMERA_FILES['video-stream.js'] : null);
     if (!type || (req.method !== 'GET' && req.method !== 'HEAD')) {
       relayGuard(res);
       res.status(404).type('text').send('not found');
       return;
     }
-    const isPage = r.file === 'stream.html';
+    // An inline script of the page is taken from the page.
+    const isPage = r.file === 'stream.html' || Boolean(inline);
     const failed = () => {
       if (res.headersSent) {
         res.destroy();
         return;
       }
       relayGuard(res);
-      if (isPage) res.status(502).type('html').send(OFF_PAGE);
+      if (isPage && !inline) res.status(502).type('html').send(OFF_PAGE);
       else res.status(502).type('text').send('camera unreachable');
     };
-    const up = send(target(r.cam, r.file), { accept: req.headers.accept ?? '*/*', 'accept-encoding': 'identity' });
+    const up = send(target(r.cam, inline ? 'stream.html' : r.file), { accept: req.headers.accept ?? '*/*', 'accept-encoding': 'identity' });
     res.on('close', () => up.destroy());
     up.on('timeout', () => up.destroy(new Error('timed out')));
     up.on('error', failed);
@@ -146,9 +154,12 @@ export function createCameraRelay({ cameras, auth = null, allowed, publicOrigin 
         });
         ans.on('error', failed);
         ans.on('end', () => {
-          const { page, hashes } = relayPage(Buffer.concat(parts).toString('utf8'));
-          relayGuard(res, relayCsp(hashes));
-          res.status(200).type(type).send(page);
+          const { page, scripts } = relayPage(Buffer.concat(parts).toString('utf8'));
+          relayGuard(res, relayCsp());
+          if (!inline) return void res.status(200).type(type).send(page);
+          const body = scripts[Number(inline[1])];
+          if (body === undefined) return void res.status(404).type('text').send('not found');
+          res.status(200).set('Content-Type', type).send(body);
         });
         return;
       }

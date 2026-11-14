@@ -74,15 +74,17 @@ test('pageCsp frames only this origin, and only with cameras', () => {
   assert.match(cam, /frame-ancestors 'none'/);
 });
 
-test('relayPage drops links to the internet and lets in the inline scripts by hash', () => {
-  const { page, hashes } = relayPage(STREAM_HTML);
+test('relayPage drops links to the internet and serves the inline scripts as files', () => {
+  const { page, scripts } = relayPage(STREAM_HTML);
   assert.doesNotMatch(page, /camera\.example\.org/);
   assert.match(page, /video-stream\.js/);
-  assert.deepEqual(hashes, [`sha256-${createHash('sha256').update(INLINE).digest('base64')}`]);
-  const csp = relayCsp(hashes);
-  assert.match(csp, new RegExp(`script-src 'self' '${hashes[0].replace(/[+/=]/g, '\\$&')}';`));
+  assert.deepEqual(scripts, [INLINE]);
+  assert.match(page, /<script type="module" src="\.\/inline-0\.js"><\/script>/);
+  assert.ok(!page.includes(INLINE));
+  const csp = relayCsp();
+  assert.match(csp, /script-src 'self';/);
   assert.match(csp, /frame-ancestors 'self'/);
-  assert.doesNotMatch(csp, /unsafe-eval/);
+  assert.doesNotMatch(csp, /unsafe-eval|sha256/);
 });
 
 // A fake camera server: Basic auth, the files, and a WebSocket at api/ws that greets and echoes.
@@ -226,7 +228,13 @@ test('the relay needs the login, adds the camera login, fixes the stream and kee
   assert.match(html, /video-stream\.js/);
   assert.doesNotMatch(html, /camera\.example\.org/);
   const csp = page.headers.get('content-security-policy');
-  assert.equal(csp, relayCsp(relayPage(STREAM_HTML).hashes));
+  assert.equal(csp, relayCsp());
+  const inl = await fetch(`${base}/web/camera/0/inline-0.js`, { headers: { cookie } });
+  assert.equal(inl.status, 200);
+  assert.equal(inl.headers.get('content-type'), 'text/javascript; charset=utf-8');
+  assert.equal(await inl.text(), INLINE);
+  assert.equal((await fetch(`${base}/web/camera/0/inline-5.js`, { headers: { cookie } })).status, 404);
+  assert.equal((await fetch(`${base}/web/camera/0/inline-0.js`)).status, 401);
   assert.match(csp, /frame-ancestors 'self'/);
   assert.equal(page.headers.get('x-frame-options'), 'SAMEORIGIN');
   assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
