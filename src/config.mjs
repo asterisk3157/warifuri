@@ -308,6 +308,13 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_PREP_DAILY',
+    about: '1台のデバイスが1日に書く下調べの数の目安。prep_candidates が今日の残りを返し、超えたら「今日はここまで」と伝える。止めはしない',
+    def: '8',
+    commands: ['serve'],
+    check: (v) => (/^\d+$/.test(v) && Number(v) <= 100 ? null : 'must be a whole number from 0 to 100'),
+  },
+  {
     name: 'WARIFURI_MONITOR_URL',
     about: '自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない',
     commands: ['serve'],

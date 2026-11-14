@@ -80,7 +80,7 @@ const GOAL_COLUMNS = [
 const TASK_COLUMNS = [
   'id', 'title', 'body', 'done_when', 'goal_id', 'state', 'mode', 'load', 'estimate_min', 'due', 'due_provisional',
   'place_id', 'waiting_on', 'waiting_for', 'result', 'reason', 'defer_until', 'next', 'delegated', 'review',
-  'created_at', 'updated_at', 'closed_at', 'only_at', 'priority',
+  'created_at', 'updated_at', 'closed_at', 'only_at', 'priority', 'prep_wanted_at',
 ];
 const HABIT_COLUMNS = ['id', 'title', 'rule', 'duration_min', 'goal_id', 'active', 'created_at', 'updated_at'];
 const PLACE_COLUMNS = ['id', 'name', 'profile', 'created_at', 'updated_at'];
@@ -129,6 +129,41 @@ const SEEN_MS = 60 * 1000;
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 // Words that make a task read like something to look into ahead (下調べの候補).
 const PREP_WORDS = /調べ|調査|検証|比較|試作|試す|試し|選定|リサーチ|見積|洗い出|PoC|research|investigat|prototype|survey|evaluat|compare/i;
+// What the person made of a 下調べ: useful (役に立った), duplicate (二度手間: it was already
+// known), off (的外れ: not what was wanted).
+export const PREP_RATINGS = ['useful', 'duplicate', 'off'];
+const RATING_WORDS = { useful: '役に立った', duplicate: '二度手間', off: '的外れ' };
+// How prepCandidates scores a task (下調べの候補の点). Change the weights here.
+export const PREP_SCORE = {
+  wanted: 100, // someone asked for a 下調べ (prep_wanted), not yet answered by one
+  perBlocked: 8, // each open task it holds up
+  blockedMax: 5, // counted up to this many
+  overdue: 30, // its due date has passed
+  duePerDay: 2, // per day nearer than dueDays
+  dueDays: 14,
+  provisional: 0.5, // a provisional due date counts this much
+  humanResearch: 15, // takes the person's time (human, human_with_ai) and reads like research
+  humanWithAi: 5, // human_with_ai, whatever its words
+  words: 5, // reads like research
+  goalPerDay: 0.5, // per day nearer than goalDays, for its goal's due date
+  goalDays: 30,
+  noPrep: 10, // no 下調べ yet
+  badPerNet: 6, // per rating of duplicate or off beyond useful, in its goal or profile
+  badMax: 24,
+};
+// How prepCandidates reads the past: a 下調べ newer than this sends a task last; a write by
+// someone (not a guest, not the secretary) newer than this marks it recently_touched; ratings
+// newer than this count. And how much of what is known it shows.
+export const PREP_RECENT_DAYS = 3;
+export const PREP_TOUCHED_DAYS = 2;
+export const PREP_RATING_DAYS = 30;
+export const PREP_DAILY = 8;
+export const PREP_LIMIT = 5;
+const KNOWN_BODY = 400;
+const KNOWN_RECENT = 5;
+const KNOWN_PREPS = 3;
+const KNOWN_SUMMARY = 300;
+const FEEDBACK_ITEMS = 5;
 const blank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
 // A task with the profile it belongs to: its goal's if it has a goal, else its place's (原則20).
@@ -369,7 +404,9 @@ export function openLedger(path, options = {}) {
     );
   }
 
-  const taskView = (row, holds) => ({ ...present(row), hold: holds ? (holds.get(row.id) ?? null) : holdView(row.id) });
+  const taskView = (row, holds) => ({
+    ...present(row), prep_wanted: Boolean(row.prep_wanted_at), hold: holds ? (holds.get(row.id) ?? null) : holdView(row.id),
+  });
 
   function createGoal(fields, opts) {
     const w = requireWriter(opts);
@@ -457,10 +494,17 @@ export function openLedger(path, options = {}) {
     const w = requireWriter(opts);
     const item = findItem(id);
     if (!item) throw new LedgerError([`${id} というゴールもタスクもありません`]);
-    const input = normalizeFlags(fields ?? {});
+    // prep_wanted (a task's 下調べを頼む印): true keeps when it was first asked, false clears it.
+    const { prep_wanted: wanted, ...rest } = fields ?? {};
+    const input = normalizeFlags(rest);
     const problems = unknownFields(input, item.kind === 'goal' ? GOAL_EDITABLE : TASK_EDITABLE);
     const next = { ...item.row };
     for (const [k, v] of Object.entries(input)) next[k] = v === undefined ? next[k] : v;
+    if (wanted !== undefined) {
+      if (item.kind !== 'task') problems.push('下調べを頼む印(prep_wanted)は、タスクにだけ付けられます');
+      else if (typeof wanted !== 'boolean') problems.push('下調べを頼む印(prep_wanted)は true か false です');
+      else next.prep_wanted_at = wanted ? (item.row.prep_wanted_at ?? nowIso()) : null;
+    }
     problems.push(...validate(item.kind, next, { content: true }));
     if (problems.length) throw new LedgerError(problems);
     next.review = null; // the row now passes the rules
@@ -1228,6 +1272,7 @@ export function openLedger(path, options = {}) {
   const prepView = (r) => ({
     id: r.id, task_id: r.task_id, device: r.device, actor: r.actor, summary: r.summary,
     artifacts: JSON.parse(r.artifacts), unknowns: JSON.parse(r.unknowns), next: r.next, created_at: r.created_at,
+    rating: r.rating ?? null, rating_note: r.rating_note ?? null, rated_by: r.rated_by ?? null, rated_at: r.rated_at ?? null,
   });
 
   // Writes a 下調べ to an open task: summary (required), artifacts ([{ label, url }]), unknowns
@@ -1275,18 +1320,120 @@ export function openLedger(path, options = {}) {
     return all('SELECT * FROM preps WHERE task_id = ? ORDER BY created_at DESC, id DESC', taskId).map(prepView);
   }
 
+  // Rates a 下調べ (rating: useful, duplicate or off; null takes the rating back). note: why,
+  // in 1–2 lines (what could be used, or why not), kept with it. Who rated it is kept too (the
+  // device, or the actor for the Web screen). The task is not changed; the rating is in the
+  // task's records.
+  function ratePrep(prepId, rating, { note } = {}, opts) {
+    const w = requireWriter(opts);
+    const row = Number.isInteger(prepId) ? one('SELECT * FROM preps WHERE id = ?', prepId) : null;
+    if (!row) throw new LedgerError([`${prepId} という下調べはありません`]);
+    const problems = [];
+    if (rating !== null && !PREP_RATINGS.includes(rating)) problems.push(`評価(rating)は ${PREP_RATINGS.join(', ')} のどれか、取り消すなら null です`);
+    const line = blank(note) ? null : String(note).replace(/\r\n?/g, '\n').trim();
+    if (line !== null && (typeof note !== 'string' || line.split('\n').length > 2 || line.length > 300)) problems.push('理由(note)は2行、300文字までです');
+    if (rating === null && line !== null) problems.push('取り消すときは理由(note)を書きません');
+    if (problems.length) throw new LedgerError(problems);
+    return transaction(() => {
+      const t = nowIso();
+      db.prepare('UPDATE preps SET rating = ?, rating_note = ?, rated_by = ?, rated_at = ? WHERE id = ?').run(
+        rating, line, rating === null ? null : (w.device ?? w.actor), rating === null ? null : t, prepId,
+      );
+      record(w, 'task', row.task_id, 'prep_rating', { prep_id: prepId, rating: { before: row.rating ?? null, after: rating }, ...(line ? { note: line } : {}) });
+      return prepView(one('SELECT * FROM preps WHERE id = ?', prepId));
+    });
+  }
+
+  // How many 下調べ device wrote since local midnight (all devices when none is named).
+  function prepsToday(device) {
+    const d = now();
+    const since = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const rows = device === undefined
+      ? all('SELECT created_at FROM preps')
+      : all('SELECT created_at FROM preps WHERE device = ?', device);
+    return rows.filter((r) => Date.parse(r.created_at) >= since).length;
+  }
+
+  // One line of what moved on a task, for known.recent: null for what is not worth saying
+  // (made, 下調べ and their ratings, which are shown on their own).
+  const FIELD_WORDS = {
+    title: '題', body: '説明', done_when: '完了の条件', due: '期限', due_provisional: '期限の仮', mode: 'やる人', load: '重さ',
+    goal_id: 'ゴール', estimate_min: '見積もり', place_id: '作業フォルダ', delegated: '任せる印', only_at: '場所', priority: '優先順',
+  };
+  function recordLine(r) {
+    const c = r.changes ?? {};
+    const after = (f) => c[f]?.after ?? null;
+    if (r.action === 'start') return '着手した';
+    if (r.action === 'release') return after('next') ? `手放した。次: ${after('next')}` : '手放した';
+    if (r.action === 'reopen') return '開き直した';
+    if (r.action === 'state') {
+      const s = after('state');
+      if (s === 'waiting') return `待ちにした: ${[after('waiting_on'), after('waiting_for')].filter(Boolean).join(' の ')}`;
+      if (s === 'deferred') return `先送りした: ${after('defer_until') ?? ''}`.trim();
+      if (s === 'ready') return '再開した';
+      if (s === 'done') return `完了: ${after('result') ?? ''}`.trim();
+      if (s === 'discarded') return `やめた: ${after('reason') ?? ''}`.trim();
+      return s ? `状態を ${s} にした` : null;
+    }
+    if (r.action === 'update') {
+      const parts = [];
+      if ('next' in c) parts.push(after('next') ? `次の一手: ${after('next')}` : '次の一手を消した');
+      if ('prep_wanted_at' in c) parts.push(after('prep_wanted_at') ? '下調べを頼んだ' : '下調べを頼むのをやめた');
+      const rest = Object.keys(c).filter((k) => k !== 'next' && k !== 'prep_wanted_at' && k !== 'review').map((k) => FIELD_WORDS[k] ?? k);
+      if (rest.length) parts.push(`${rest.join('、')}を直した`);
+      return parts.length ? parts.join('。') : null;
+    }
+    return null;
+  }
+
+  // Whether a record on a task counts as someone working on it (for recently_touched): not
+  // made, not a 下調べ or its rating, not the 下調べを頼む印 alone, and not by a device in quiet.
+  const touches = (r, quiet) => {
+    if (quiet.has(r.device ?? r.actor)) return false;
+    if (['create', 'prep', 'prep_rating'].includes(r.action)) return false;
+    if (r.action === 'update') return Object.keys(r.changes ?? {}).some((k) => k !== 'prep_wanted_at' && k !== 'review');
+    return true;
+  };
+
   // Tasks worth looking into ahead of the person (下調べの候補): open and not yet started by
   // anyone (ready, waiting or deferred, and held by no device), whose mode is ai_worker or
-  // human_with_ai, or whose title or body reads like something to look into (PREP_WORDS).
-  // Those holding up the most open tasks come first, then the nearest due date. A task with a
-  // 下調べ written in the last recentDays goes to the end, marked recent_prep. keep: a filter
-  // (a guest's scope) applied before limit. more: how many were cut.
-  function prepCandidates({ profile, recentDays = 3, limit = 20, keep = () => true } = {}) {
+  // human_with_ai, whose title or body reads like something to look into (PREP_WORDS), or that
+  // someone asked a 下調べ of (prep_wanted). Each comes with:
+  // - known: what is already known, so it is not looked into again (the body's start, next,
+  //   done_when, what it waits for, the last lines of its records, its 下調べ, the last move).
+  // - score and why: how much it is worth now (PREP_SCORE), and the reasons in short Japanese.
+  // Highest score first. Last, whatever their score: a task with a 下調べ in the last
+  // recentDays (recent_prep), and one someone worked on in the last touchedDays
+  // (recently_touched; a guest's writes, the secretary's (quiet) and the 印 alone do not count),
+  // unless a 下調べ was asked of it. keep: a filter (a guest's scope) applied before limit.
+  // Also: more (how many were cut), today ({ daily, written: by device since midnight, left }),
+  // suggest (how many to look into this time), notice when the day's are done, and feedback (the
+  // ratings of the last PREP_RATING_DAYS that keep lets through).
+  function prepCandidates({
+    profile, recentDays = PREP_RECENT_DAYS, touchedDays = PREP_TOUCHED_DAYS, limit = PREP_LIMIT, keep = () => true,
+    device, quiet = [], daily = PREP_DAILY,
+  } = {}) {
     const problems = [];
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) problems.push('limit は 1〜100 の整数です');
     if (!(typeof recentDays === 'number' && Number.isFinite(recentDays) && recentDays >= 0)) problems.push('recent_days は0以上の数です');
+    if (!(typeof touchedDays === 'number' && Number.isFinite(touchedDays) && touchedDays >= 0)) problems.push('touched_days は0以上の数です');
+    if (!Number.isInteger(daily) || daily < 0) problems.push('1日の目安は0以上の整数です');
     if (problems.length) throw new LedgerError(problems);
-    const nowMs = now().getTime();
+    const W = PREP_SCORE;
+    const d0 = now();
+    const nowMs = d0.getTime();
+    const todayMs = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate()).getTime();
+    // Days from today to a due date (a day, or a moment); null when there is none.
+    const daysLeft = (v) => {
+      if (!v) return null;
+      if (DATE_ONLY.test(v)) {
+        const [y, m, d] = v.split('-').map(Number);
+        return Math.round((new Date(y, m - 1, d).getTime() - todayMs) / DAY_MS);
+      }
+      const ms = Date.parse(v);
+      return Number.isNaN(ms) ? null : Math.floor((ms - nowMs) / DAY_MS);
+    };
+    const quietSet = new Set([...quiet.filter(Boolean), ...all('SELECT name FROM devices WHERE scope IS NOT NULL').map((r) => r.name)]);
     const closed = CLOSED_STATES.map(() => '?').join(', ');
     const holding = new Map(all(
       `SELECT b.before_id AS id, count(*) AS n FROM blocks b JOIN tasks a ON a.id = b.after_id WHERE a.state NOT IN (${closed}) GROUP BY b.before_id`,
@@ -1298,31 +1445,126 @@ export function openLedger(path, options = {}) {
       if (!id) return null;
       if (!goals.has(id)) {
         const g = getGoalRow(id);
-        goals.set(id, g ? { id: g.id, title: g.title } : null);
+        goals.set(id, g ? { id: g.id, title: g.title, due: g.due ?? null } : null);
       }
       return goals.get(id);
     };
-    const dueMs = (v) => (!v ? Infinity : DATE_ONLY.test(v) ? Date.parse(`${v}T00:00:00`) : Date.parse(v));
+
+    // The ratings of the last PREP_RATING_DAYS, with their task; net bad (duplicate or off
+    // beyond useful) per goal and per profile.
+    const sinceRated = nowMs - PREP_RATING_DAYS * DAY_MS;
+    const rated = all('SELECT * FROM preps WHERE rating IS NOT NULL ORDER BY rated_at DESC, id DESC')
+      .filter((r) => Date.parse(r.rated_at) >= sinceRated)
+      .map((r) => ({ r, t: getTaskRow(r.task_id) }))
+      .filter((x) => x.t);
+    const net = new Map();
+    const bump = (key, n) => net.set(key, (net.get(key) ?? 0) + n);
+    for (const { r, t } of rated) {
+      const n = r.rating === 'useful' ? -1 : 1;
+      if (t.goal_id) bump(`g:${t.goal_id}`, n);
+      bump(`p:${t.profile ?? ''}`, n);
+    }
+
     const rows = all(
       `${TASK_SELECT} WHERE t.state IN ('ready', 'waiting', 'deferred') AND t.id NOT IN (SELECT task_id FROM holds) ORDER BY t.created_at, t.id`,
     );
     const out = [];
     for (const t of rows) {
       if (profile !== undefined && (t.profile ?? null) !== profile) continue;
+      const words = PREP_WORDS.test(`${t.title}\n${t.body ?? ''}`);
       const byMode = t.mode === 'ai_worker' || t.mode === 'human_with_ai';
-      if (!byMode && !PREP_WORDS.test(`${t.title}\n${t.body ?? ''}`)) continue;
+      if (!byMode && !words && !t.prep_wanted_at) continue;
       if (!keep(t)) continue;
       const p = last.get(t.id);
+      const goal = goalOf(t.goal_id);
+      const recs = records(t.id);
+      const touched = recs.filter((r) => touches(r, quietSet)).at(-1) ?? null;
+      const recentlyTouched = Boolean(touched && nowMs - Date.parse(touched.at) < touchedDays * DAY_MS);
+      const wantedOpen = Boolean(t.prep_wanted_at && !(p && Date.parse(p.at) >= Date.parse(t.prep_wanted_at)));
+
+      let score = 0;
+      const why = [];
+      const add = (n, line) => {
+        if (!n) return;
+        score += n;
+        why.push(line);
+      };
+      if (wantedOpen) add(W.wanted, '下調べを頼まれている');
+      else if (t.prep_wanted_at) why.push('頼まれた下調べはもう書いてある');
+      const blocks = holding.get(t.id) ?? 0;
+      add(Math.min(blocks, W.blockedMax) * W.perBlocked, `ほかの${blocks}件を待たせている`);
+      const left = daysLeft(t.due);
+      const rate = t.due_provisional === 1 ? W.provisional : 1;
+      if (left !== null && left < 0) add(W.overdue * rate, `期限を${-left}日過ぎている`);
+      else if (left !== null && left < W.dueDays) add((W.dueDays - left) * W.duePerDay * rate, left === 0 ? '期限が今日' : `期限まで残り${left}日`);
+      const human = t.mode === 'human' || t.mode === 'human_with_ai';
+      if (human && words) add(W.humanResearch, '本人が手を動かす前に調べものがありそう');
+      else if (words) add(W.words, '題や説明が調べものらしい');
+      if (t.mode === 'human_with_ai') add(W.humanWithAi, '本人と AI で進める');
+      const gLeft = goal ? daysLeft(goal.due) : null;
+      if (gLeft !== null && gLeft < W.goalDays) {
+        add(Math.round((W.goalDays - Math.max(gLeft, 0)) * W.goalPerDay), gLeft < 0 ? `ゴールの期限を${-gLeft}日過ぎている` : `ゴールの期限まで残り${gLeft}日`);
+      }
+      if (!p) add(W.noPrep, 'まだ下調べがない');
+      const bad = Math.max(t.goal_id ? (net.get(`g:${t.goal_id}`) ?? 0) : 0, net.get(`p:${t.profile ?? ''}`) ?? 0);
+      if (bad > 0) add(-Math.min(bad * W.badPerNet, W.badMax), 'このゴールやプロフィールの下調べに、二度手間や的外れの評価が多い');
+      const recentPrep = Boolean(p && nowMs - Date.parse(p.at) < recentDays * DAY_MS);
+      if (recentPrep) why.push('最近下調べを書いた');
+      if (recentlyTouched) why.push(wantedOpen ? '最近だれかが手を付けたが、頼まれているので前に置く' : '最近だれかが手を付けた');
+
+      const body = t.body ?? null;
+      const lines = recs.map((r) => ({ at: r.at, by: r.device ?? r.actor, what: recordLine(r) })).filter((x) => x.what);
+      const lastMove = recs.filter((r) => r.action !== 'prep' && r.action !== 'prep_rating').at(-1) ?? null;
+      const cut = (v, n) => (v.length > n ? `${v.slice(0, n)}…` : v);
+      const known = {
+        body: body === null ? null : cut(body, KNOWN_BODY),
+        body_cut: body !== null && body.length > KNOWN_BODY,
+        next: t.next ?? null,
+        done_when: t.done_when ?? null,
+        waiting: t.state === 'waiting' ? { on: t.waiting_on ?? null, for: t.waiting_for ?? null } : null,
+        defer_until: t.state === 'deferred' ? (t.defer_until ?? null) : null,
+        recent: lines.slice(-KNOWN_RECENT).reverse(),
+        preps: preps(t.id).slice(0, KNOWN_PREPS).map((x) => ({
+          id: x.id, at: x.created_at, by: x.device ?? x.actor, summary: cut(x.summary, KNOWN_SUMMARY), unknowns: x.unknowns, next: x.next,
+          rating: x.rating, rating_note: x.rating_note,
+        })),
+        last_moved: lastMove ? { at: lastMove.at, by: lastMove.device ?? lastMove.actor, what: recordLine(lastMove) ?? (lastMove.action === 'create' ? '作った' : lastMove.action) } : null,
+      };
       out.push({
         id: t.id, title: t.title, state: t.state, mode: t.mode, due: t.due, due_provisional: t.due_provisional === 1,
-        goal: goalOf(t.goal_id), profile: t.profile ?? null, blocks: holding.get(t.id) ?? 0,
-        preps: p?.n ?? 0, last_prep_at: p?.at ?? null,
-        recent_prep: Boolean(p && nowMs - Date.parse(p.at) < recentDays * DAY_MS),
-        why: byMode ? 'mode' : 'words',
+        goal, profile: t.profile ?? null, blocks,
+        preps: p?.n ?? 0, last_prep_at: p?.at ?? null, recent_prep: recentPrep,
+        recently_touched: recentlyTouched, prep_wanted: Boolean(t.prep_wanted_at),
+        score: Math.round(score), why, known,
+        demoted: recentPrep || (recentlyTouched && !wantedOpen),
       });
     }
-    out.sort((a, b) => Number(a.recent_prep) - Number(b.recent_prep) || b.blocks - a.blocks || dueMs(a.due) - dueMs(b.due));
-    return { candidates: out.slice(0, limit), more: Math.max(0, out.length - limit) };
+    const dueMs = (v) => (!v ? Infinity : DATE_ONLY.test(v) ? Date.parse(`${v}T00:00:00`) : Date.parse(v));
+    out.sort((a, b) => Number(a.demoted) - Number(b.demoted) || b.score - a.score || dueMs(a.due) - dueMs(b.due));
+    const candidates = out.slice(0, limit).map(({ demoted: _d, ...c }) => c);
+
+    const written = prepsToday(device);
+    const left = Math.max(0, daily - written);
+    const seen = rated.filter((x) => (profile === undefined || (x.t.profile ?? null) === profile) && keep(x.t));
+    const count = (k) => seen.filter((x) => x.r.rating === k).length;
+    const feedback = {
+      days: PREP_RATING_DAYS,
+      useful: count('useful'), duplicate: count('duplicate'), off: count('off'),
+      // Who rated them: a device's name (an agent that used the 下調べ), or web (the person).
+      by: Object.fromEntries([...new Set(seen.map((x) => x.r.rated_by))].map((b) => [b, seen.filter((x) => x.r.rated_by === b).length])),
+      bad: seen.filter((x) => x.r.rating !== 'useful').slice(0, FEEDBACK_ITEMS).map(({ r, t }) => ({
+        prep_id: r.id, task_id: t.id, task_title: t.title, profile: t.profile ?? null, by: r.device ?? r.actor,
+        summary: r.summary.length > 120 ? `${r.summary.slice(0, 120)}…` : r.summary,
+        rating: r.rating, rating_word: RATING_WORDS[r.rating], note: r.rating_note ?? null, rated_by: r.rated_by, at: r.rated_at,
+      })),
+    };
+    return {
+      candidates, more: Math.max(0, out.length - limit),
+      suggest: Math.min(left, candidates.length),
+      today: { daily, written, left },
+      ...(left === 0 ? { notice: `今日の目安の${daily}件に達しました。今日はここまでです` } : {}),
+      feedback,
+    };
   }
 
   // Reports, newest first. kind: only that kind. limit: how many (REPORTS_DEFAULT, at most
@@ -2414,6 +2656,8 @@ export function openLedger(path, options = {}) {
     listReports,
     writePrep,
     preps,
+    ratePrep,
+    prepsToday,
     prepCandidates,
     getThread,
     ensureThread,

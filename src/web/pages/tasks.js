@@ -20,6 +20,8 @@ const view = {
   open: new Set(), // folded parts that are open
   moreNow: false,
   showAi: false,
+  busy: null, // the data key of the button whose write is on its way
+  problem: null, // { key, text } when a write was refused
 };
 
 const load = (api) => api('/tasks');
@@ -243,8 +245,56 @@ function goalsCard(goals, loose, today, ctx, colors) {
       h('span', { class: 'wf-tk-gline-top' }, h('span', { class: 'wf-tk-gline-title', text: 'ゴールのないタスク' }), h('span', { class: 'wf-muted', text: `${looseOpen}件` }))) : null);
 }
 
+// A write from the panel (下調べを頼む, a rating): the button is off while it goes, and what
+// went wrong is shown under it.
+async function send(key, path, body) {
+  if (view.busy) return;
+  view.busy = key;
+  view.problem = null;
+  ctxNow.rerender();
+  try {
+    await ctxNow.api(path, { method: 'POST', body });
+    view.busy = null;
+    await ctxNow.refresh();
+  } catch (err) {
+    view.busy = null;
+    view.problem = { key, text: err.body?.problems?.join(' ') ?? '保存できませんでした' };
+    ctxNow.rerender();
+  }
+  document.querySelector(`[data-key="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+}
+const problemFor = (keys) => (view.problem && keys.includes(view.problem.key) ? h('p', { class: 'wf-tk-problem', role: 'alert', text: view.problem.text }) : null);
+
+// What the person made of a 下調べ. Pressing the one already on takes it back.
+const RATINGS = [['useful', '役に立った'], ['duplicate', '二度手間'], ['off', '的外れ']];
+function rating(p) {
+  const keys = RATINGS.map(([k]) => `rate-${p.id}-${k}`);
+  return h('div', { class: 'wf-tk-rate-wrap' },
+    h('div', { class: 'wf-tk-rate', role: 'group', 'aria-label': 'この下調べの評価' },
+      ...RATINGS.map(([k, label], i) => h('button', {
+        type: 'button', class: 'wf-tk-rate-btn', 'aria-pressed': String(p.rating === k), disabled: Boolean(view.busy), data: { key: keys[i] },
+        onclick: () => send(keys[i], `/preps/${p.id}/rating`, { rating: p.rating === k ? null : k }), text: label,
+      })),
+      p.rating && p.rated_by && p.rated_by !== 'web' ? h('span', { class: 'wf-muted', text: `${name(p.rated_by)} が評価` }) : null),
+    problemFor(keys));
+}
+
+// 下調べを頼む: a 印 that sends the task to the front of the 下調べの候補.
+function askPrep(t) {
+  const key = 'prep-wanted';
+  return h('div', { class: 'wf-tk-ask' },
+    t.prep_wanted ? h('span', { class: 'wf-prep-tag', text: '下調べを頼んでいます' }) : null,
+    h('button', {
+      type: 'button', class: 'wf-btn-line wf-btn-small', disabled: Boolean(view.busy), data: { key },
+      onclick: () => send(key, `/tasks/${encodeURIComponent(t.id)}/prep-wanted`, { wanted: !t.prep_wanted }),
+      text: t.prep_wanted ? '頼むのをやめる' : '下調べを頼む',
+    }),
+    problemFor([key]));
+}
+
 // 下調べ, as what someone said: who (with their mark), when, the summary, the artifacts, what
-// is still unknown and the next step. Newest first; one written in the last day is marked.
+// is still unknown, the next step and its rating. Newest first; one written in the last day is
+// marked.
 function artifact(a) {
   if (/^https?:\/\//i.test(a.url)) return h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer', text: a.label ?? a.url });
   return [a.label ? `${a.label}: ` : null, h('code', { text: a.url })];
@@ -264,7 +314,8 @@ function preps(list, now) {
             h('p', { class: 'wf-tk-say-text', text: p.summary }),
             p.artifacts.length ? h('div', { class: 'wf-tk-part' }, h('b', { text: '成果物' }), h('ul', {}, ...p.artifacts.map((a) => h('li', {}, artifact(a))))) : null,
             p.unknowns.length ? h('div', { class: 'wf-tk-part' }, h('b', { text: 'まだ分からないこと' }), h('ul', {}, ...p.unknowns.map((u) => h('li', { text: u })))) : null,
-            p.next ? h('div', { class: 'wf-tk-part' }, h('b', { text: '次の一手' }), h('span', { text: p.next })) : null)));
+            p.next ? h('div', { class: 'wf-tk-part' }, h('b', { text: '次の一手' }), h('span', { text: p.next })) : null),
+          p.id === undefined ? null : rating(p)));
     }));
 }
 
@@ -296,6 +347,7 @@ function taskDetail({ t, g }, today, ctx, colors) {
       note,
       t.done_when ? ['完了の条件', t.done_when] : null,
       t.result ? ['成果', t.result] : null),
+    isOpen(t) ? askPrep(t) : null,
     t.body ? h('section', { class: 'wf-tk-sec', 'aria-label': '説明' }, h('h3', { text: '説明' }), h('p', { class: 'wf-tk-text', text: t.body })) : null,
     preps(t.preps, ctx.now),
     t.log?.length ? h('section', { class: 'wf-tk-sec', 'aria-label': '記録' }, h('h3', { text: '記録' }),

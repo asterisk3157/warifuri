@@ -24,7 +24,7 @@ import {
   STATES, MODES, LOADS, ONLY_AT, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
   ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION, REPLY_CALENDAR_DAYS, REPLY_CALENDAR_MARKS,
 } from '../ledger/rules.mjs';
-import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX, PREP_DAILY, PREP_RATINGS } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
 import { scopedRegistrar, prepAllowed } from './scope.mjs';
@@ -108,7 +108,8 @@ const clearable = z.string().nullable().optional();
 // conversation. secretaryDevice: the device the secretary calls from, null when the secretary
 // is off, or undefined to let any device call the secretary's tools. chat: the conversation
 // with the secretary (for ask_secretary), or null.
-function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined, chat = null) {
+// prepDaily: how many 下調べ a device should write in a day (WARIFURI_PREP_DAILY).
+function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined, chat = null, { prepDaily } = {}) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -169,11 +170,16 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     'prep_candidates',
     {
       description:
-        'List tasks worth looking into before the person starts them (下調べ): open, not held by anyone, mode ai_worker or ' +
-        'human_with_ai, or titled like research. Those holding up the most other tasks come first (blocks), then the ' +
-        'nearest due date. One with a 下調べ in the last recent_days (default 3) goes last, marked recent_prep. ' +
-        'Write what you find with prep. profile or place (the place id or the directory you work in) narrows to that profile. ' +
-        'limit: default 20, at most 100.',
+        'List tasks worth looking into before the person starts them (下調べ), best first. Before you look into one, read ' +
+        'its known and the records from get; do not look again into what is already known, only into what is missing. ' +
+        'Each candidate: score and why (the reasons), known (the body\'s start, next, done_when, what it waits for, recent ' +
+        'records, earlier 下調べ with their ratings, the last move and who made it), prep_wanted (someone asked for a 下調べ), ' +
+        'recently_touched (someone worked on it lately: it goes last, unless a 下調べ was asked). Tasks held by anyone are ' +
+        'left out. suggest: how many to look into this time; today: this device\'s 下調べ written today against the daily ' +
+        'aim; notice when the day\'s are done: stop there for today. feedback: recent ratings of 下調べ (useful, duplicate: ' +
+        'already known, off: not what was wanted), with the bad ones and why, and who rated them; change how you look into ' +
+        'things by them. Write what you find with prep. profile or place (the place id or the directory you work in) narrows ' +
+        'to that profile. limit: default 5, at most 100.',
       inputSchema: {
         profile: z.string().optional(),
         place: z.string().min(1).optional(),
@@ -186,7 +192,9 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       const p = profile ?? (place === undefined ? undefined : resolvePlace(ledger, device.name, place, 'prep_candidates').profile ?? null);
       // A guest is offered only the tasks it may write a 下調べ to.
       const keep = device.scope ? (t) => prepAllowed(device.scope, t.profile ?? null) : undefined;
-      return result(ledger.prepCandidates({ profile: p, limit, recentDays, keep }));
+      // The secretary's writes do not count as someone working on a task.
+      const quiet = typeof secretaryDevice === 'string' ? [secretaryDevice] : [];
+      return result(ledger.prepCandidates({ profile: p, limit, recentDays, keep, device: device.name, quiet, daily: prepDaily }));
     }),
   );
 
@@ -414,7 +422,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       })),
   );
 
-  registerWriteTools(tools, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat });
+  registerWriteTools(tools, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat, prepDaily });
   return server;
 }
 
@@ -470,7 +478,7 @@ function resolvePlace(ledger, device, value, tool = 'start') {
   throw new LedgerError([`place には作業フォルダの id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
-function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat }) {
+function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat, prepDaily }) {
   const tool = (name, description, inputSchema, fn, annotations = write) =>
     server.registerTool(name, { description, inputSchema, annotations }, guarded(onlyFor(name, fn)));
   // Whether the secretary runs: a secretary device is set and, when the conversation is
@@ -561,7 +569,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'Change fields of a goal or task. Only the fields given change; null clears one. Goals take title, outcome, due, ' +
       'due_provisional, mode, human_led, profile; tasks take title, body, done_when, due, due_provisional, mode, load, ' +
       'goal_id, estimate_min, place_id, next, delegated, only_at ("home": only at home; null: anywhere), priority ' +
-      '(the order the person gave, 1 first; null: none). State changes go through close, defer, wait, start and release.',
+      '(the order the person gave, 1 first; null: none), prep_wanted (true: ask for a 下調べ of the task, so it is looked ' +
+      'into first; false: take the ask back). State changes go through close, defer, wait, start and release.',
     {
       id: z.string().min(1),
       title: z.string().optional(),
@@ -581,6 +590,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       only_at: z.enum(ONLY_AT).nullable().optional(),
       priority: z.number().int().nullable().optional(),
       profile: clearable,
+      prep_wanted: z.boolean().optional(),
     },
     async ({ id, ...fields }) => result(ledger.update(id, given(fields), writer)),
   );
@@ -630,16 +640,18 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     const [latest] = list;
     return {
       prep: {
-        notice: `下調べがあります(${list.length}件)。読んでから始めてください`,
+        notice: `下調べがあります(${list.length}件)。読んでから始めてください。読んで使ったら、rate_prep で使えたかどうかを返してください`,
         count: list.length,
-        latest: { by: latest.device ?? latest.actor, at: latest.created_at, summary: latest.summary, artifacts: latest.artifacts, unknowns: latest.unknowns, next: latest.next },
+        latest: { id: latest.id, by: latest.device ?? latest.actor, at: latest.created_at, summary: latest.summary, artifacts: latest.artifacts, unknowns: latest.unknowns, next: latest.next, rating: latest.rating },
       },
     };
   }
 
   tool(
     'prep',
-    'Write a 下調べ to a task the person has not started: what you looked into ahead of them. summary: what you found ' +
+    'Write a 下調べ to a task the person has not started: what you looked into ahead of them. Before you look into it, ' +
+      'read its known (prep_candidates) and its records (get); do not look again into what is already known, only into ' +
+      'what is missing, and say only what is new. summary: what you found ' +
       '(required). artifacts: where the results are, each { label, url } (url: a URL, or a path such as one in a repository). ' +
       'unknowns: what is still unknown, one line each. next: one line on what to do next. It only adds; the task\'s state ' +
       'does not change and it is not closed (closing is the person\'s call). A closed task is refused. The person and ' +
@@ -651,7 +663,38 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       unknowns: z.array(z.string()).optional(),
       next: z.string().optional(),
     },
-    async ({ task_id: taskId, ...fields }) => result(ledger.writePrep(taskId, given(fields), writer)),
+    async ({ task_id: taskId, ...fields }) => {
+      const prep = ledger.writePrep(taskId, given(fields), writer);
+      const written = ledger.prepsToday(device.name);
+      const daily = prepDaily ?? PREP_DAILY;
+      const today = { daily, written, left: Math.max(0, daily - written) };
+      return result({ ...prep, today, ...(today.left === 0 ? { notice: `今日の目安の${daily}件に達しました。今日はここまでです` } : {}) });
+    },
+  );
+
+  tool(
+    'rate_prep',
+    'Say whether a 下調べ could be used, after you read it and worked with it (start shows it). rating: useful, ' +
+      'duplicate (it was already known), off (not what was needed), or null to take a rating back. Name it by prep_id ' +
+      '(from start, get) or by task_id (its newest 下調べ). note: in 1–2 lines, what could be used, or why it could not. ' +
+      'Who rated it is kept, and the AI that writes 下調べ reads it in prep_candidates to look into things better.',
+    {
+      prep_id: z.number().int().optional(),
+      task_id: z.string().min(1).optional(),
+      rating: z.enum(PREP_RATINGS).nullable(),
+      note: z.string().optional(),
+    },
+    async ({ prep_id: prepId, task_id: taskId, rating, note }) => {
+      if ((prepId === undefined) === (taskId === undefined)) return refusal(['prep_id か task_id のどちらか1つを渡します']);
+      let id = prepId;
+      if (taskId !== undefined) {
+        if (ledger.get(taskId)?.kind !== 'task') return refusal([`${taskId} というタスクはありません`]);
+        const [latest] = ledger.preps(taskId);
+        if (!latest) return refusal([`タスク ${taskId} には下調べがありません`]);
+        id = latest.id;
+      }
+      return result(ledger.ratePrep(id, rating, { note }, writer));
+    },
   );
 
   tool(
@@ -686,6 +729,11 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     async ({ id, state, learned_people: learnedPeople, ...extra }) => {
       const closed = ledger.setState(id, state, given(extra), writer);
       const out = { ...closed };
+      // A 下調べ that was there but is not rated: ask for one, without stopping the close.
+      const unrated = ledger.preps(id).filter((p) => p.rating === null);
+      if (unrated.length) {
+        out.prep_unrated = { ids: unrated.map((p) => p.id), notice: `評価のない下調べが${unrated.length}件あります。使えたかどうかを rate_prep で返してください` };
+      }
       if (extra.learned !== undefined) out.noted = noteLearned(id, extra.learned);
       if (learnedPeople !== undefined && learnedPeople.trim() !== '') out.noted_people = notePeople(id, learnedPeople);
       return result(out);
@@ -1463,9 +1511,9 @@ function threadOf(ledger, req) {
   return ledger.getThread(id) ? id : null;
 }
 
-async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat) {
+async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat, extra = {}) {
   const name = req.auth.extra.device;
-  const server = buildServer(ledger, { name, actor: actorFor(req.auth), scope: ledger.deviceScope(name) }, knowledge, threadOf(ledger, req), secretaryDevice, chat);
+  const server = buildServer(ledger, { name, actor: actorFor(req.auth), scope: ledger.deviceScope(name) }, knowledge, threadOf(ledger, req), secretaryDevice, chat, extra);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -1573,6 +1621,7 @@ export function createApp({
   operatorContact = null,
   cameras = [],
   cameraAuth = null,
+  prepDaily,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1589,7 +1638,7 @@ export function createApp({
   }
   const knowledge = home ? { home, secretary } : null;
   const mcp = (req, res) =>
-    handleMcp(ledger, knowledge, req, res, secretaryDevice, chat).catch((err) => {
+    handleMcp(ledger, knowledge, req, res, secretaryDevice, chat, { prepDaily }).catch((err) => {
       log(`warifuri: /mcp failed: ${err.message}`);
       if (!res.headersSent) {
         res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });

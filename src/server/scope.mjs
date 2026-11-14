@@ -139,7 +139,11 @@ const GUARDS = {
   },
   prep_candidates: {
     before: (ledger, scope, args) => needProfile(scope, args, 'prep_candidates'),
-    after: (ledger, scope, out) => ({ ...out, candidates: out.candidates.filter((c) => prepAllowed(scope, c.profile)) }),
+    after: (ledger, scope, out) => ({
+      ...out,
+      candidates: out.candidates.filter((c) => prepAllowed(scope, c.profile)),
+      feedback: { ...out.feedback, bad: out.feedback.bad.filter((b) => prepAllowed(scope, b.profile)) },
+    }),
   },
   note: {
     before: (ledger, scope, args) => {

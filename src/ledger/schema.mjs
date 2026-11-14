@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -842,6 +842,17 @@ export const MIGRATIONS = [
     created_at TEXT NOT NULL
   );
   CREATE INDEX preps_task ON preps(task_id, created_at);
+  `,
+  // 20 → 21: 下調べ を頼む印と、下調べへの評価. tasks.prep_wanted_at: when someone asked for a
+  // 下調べ of the task (NULL: not asked). preps.rating: what the person made of it (useful,
+  // duplicate: it was already known, off: not what was wanted), with a line why (rating_note),
+  // who and when. NULL: not rated.
+  `
+  ALTER TABLE tasks ADD COLUMN prep_wanted_at TEXT;
+  ALTER TABLE preps ADD COLUMN rating TEXT CHECK (rating IS NULL OR rating IN ('useful','duplicate','off'));
+  ALTER TABLE preps ADD COLUMN rating_note TEXT;
+  ALTER TABLE preps ADD COLUMN rated_by TEXT;
+  ALTER TABLE preps ADD COLUMN rated_at TEXT;
   `,
 ];
 

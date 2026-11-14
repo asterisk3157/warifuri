@@ -46,6 +46,7 @@ const TOOL_STEPS = {
   habit: ['write', '習慣を直しました'],
   note: ['write', 'ナレッジに書きました'],
   prep: ['write', '下調べを書きました'],
+  rate_prep: ['write', '下調べを評価しました'],
   report: ['write', '報告を書きました'],
   propose: ['write', '案を残しました'],
   proposal_done: ['write', '案に済みの印を付けました'],

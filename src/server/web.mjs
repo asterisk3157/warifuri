@@ -29,7 +29,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
-import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX, activityKind } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX, activityKind, PREP_RATINGS } from '../ledger/ledger.mjs';
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
@@ -657,7 +657,9 @@ export function createWeb({
       open_before: open.map((x) => ({ id: x.id, title: x.title })),
       blocked: t.state === 'ready' && open.length > 0,
       // 下調べ, newest first (who wrote it, when, the summary, artifacts and what is unknown).
-      preps: ledger.preps(t.id).map(({ device, actor, summary, artifacts, unknowns, next, created_at }) => ({ by: device ?? actor, summary, artifacts, unknowns, next, created_at })),
+      // rating: what someone made of it (useful, duplicate, off), and who (rated_by).
+      preps: ledger.preps(t.id).map(({ id, device, actor, summary, artifacts, unknowns, next, created_at, rating, rated_by }) => ({ id, by: device ?? actor, summary, artifacts, unknowns, next, created_at, rating, rated_by })),
+      prep_wanted: Boolean(t.prep_wanted_at),
       priority: t.priority ?? null,
       log: taskLog(t.id),
     };
@@ -1046,6 +1048,38 @@ export function createWeb({
   };
   const WEB = { actor: 'web', device: null };
   api.get('/rules', (req, res) => res.json(rulesOut()));
+
+  // 下調べを頼む印 on a task: { wanted: true | false }.
+  api.post('/tasks/:id/prep-wanted', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, ['wanted']) || typeof req.body.wanted !== 'boolean') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "wanted": true か false } です'] });
+      return;
+    }
+    if (ledger.get(req.params.id)?.kind !== 'task') {
+      res.status(404).json({ error: 'not found', problems: [`${req.params.id} というタスクはありません`] });
+      return;
+    }
+    try {
+      const t = ledger.update(req.params.id, { prep_wanted: req.body.wanted }, WEB);
+      res.json({ id: t.id, prep_wanted: t.prep_wanted });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  // A 下調べ rated by the person: { rating: useful | duplicate | off | null (taken back) }.
+  api.post('/preps/:id/rating', sameOrigin, smallJson, (req, res) => {
+    const id = /^\d+$/.test(req.params.id) ? Number(req.params.id) : null;
+    if (!exact(req.body, ['rating']) || !(req.body.rating === null || PREP_RATINGS.includes(req.body.rating))) {
+      res.status(400).json({ error: 'refused', problems: [`送る形は { "rating": ${PREP_RATINGS.join(', ')} か null } です`] });
+      return;
+    }
+    try {
+      const p = ledger.ratePrep(id, req.body.rating, {}, WEB);
+      res.json({ id: p.id, rating: p.rating, rated_by: p.rated_by });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
 
   // { life?, places?, week?, github? }, each as writeSettings takes it.
   api.post('/rules/settings', sameOrigin, rulesJson, (req, res) => {
