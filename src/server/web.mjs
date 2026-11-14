@@ -643,6 +643,7 @@ export function createWeb({
         type: 'ask', id: m.id, state: m.state, created_at: m.created_at,
         questions: (m.data?.questions ?? []).map((q) => ({ header: q.header, question: q.question, multiSelect: q.multiSelect, options: q.options.map((o) => ({ label: o.label, description: o.description })) })),
         answers: (m.data?.answers ?? []).map((a) => (a ? { picked: a.picked, other: a.other, at: a.at } : null)),
+        ...(m.state === 'withdrawn' ? { withdrawn: { reason: m.data?.withdrawn?.reason ?? null, at: m.data?.withdrawn?.at ?? null } } : {}),
       };
     }
     const d = m.data ?? {};

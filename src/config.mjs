@@ -365,7 +365,7 @@ export const SETTINGS = [
   },
   {
     name: 'WARIFURI_GOOGLE_CALENDAR_WAKE',
-    about: 'Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く',
+    about: 'Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く。off でも、タスクや習慣の予定に重なる変更があれば、秘書を1回起こして知らせる',
     def: 'off',
     commands: ['serve'],
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),

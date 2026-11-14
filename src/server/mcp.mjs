@@ -76,7 +76,7 @@ const guarded = (fn) => async (args) => {
 // What reply_options says back: the buttons are attached, the question is not written yet.
 const REPLY_OPTIONS_NEXT = 'ボタンを付けました。返事の本文に、ボタンで答える問いをそのまま書いてください。ボタンのことは書きません。';
 const SECRETARY_TOOLS = new Set([
-  'report', 'propose', 'proposal_done', 'ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set',
+  'report', 'propose', 'proposal_done', 'ask', 'withdraw_ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set',
   // Tidying the knowledge: moving the inbox in, splitting, marking stale (原則22). Agents' notes
   // reach the knowledge only through the secretary, so only it rewrites those files.
   'sort_inbox', 'split_knowledge', 'mark_stale',
@@ -1167,6 +1167,17 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       '(left out: the one you are talking in). Returns the stored question.',
     { questions: z.array(question), thread: z.string().min(1).optional() },
     async ({ questions, thread: t }) => result(ledger.ask(given({ questions, thread: threadArg(t) }), writer)),
+  );
+
+  tool(
+    'withdraw_ask',
+    'Withdraw a question you asked with ask (open, or answered あとで) that is no longer needed: its answer came ' +
+      'another way, such as the person telling an agent, the task being closed or the answer written in the ' +
+      'ledger. The question is kept and shown greyed out as 取り下げ済み, on the screen and in Discord (its buttons ' +
+      'removed); the person cannot answer it any more. reason: a few words of why (left out: 答えが出たため). ' +
+      'Returns the question.',
+    { id: z.string().min(1), reason: z.string().optional() },
+    async ({ id, reason }) => result(ledger.withdrawAsk(id, given({ reason }), writer)),
   );
 
   tool(

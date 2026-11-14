@@ -33,7 +33,8 @@ export function chunks(text, max = DISCORD_MAX) {
   return out;
 }
 
-// { post(content, { mention, files, components, channel }), respond(interaction, body),
+// { post(content, { mention, files, components, channel }), edit(message, { content,
+// components, channel }), respond(interaction, body),
 // typing(channel), startThread(message, name) }, or null when the token or the channel is not
 // set. channel: a thread of the channel to post in instead of the channel itself.
 export function createDiscord({ token, channel, user = null, fetch = globalThis.fetch }) {
@@ -64,6 +65,11 @@ export function createDiscord({ token, channel, user = null, fetch = globalThis.
     }
     return call(`${API}/channels/${encodeURIComponent(to)}/messages`, init);
   }
+  // Rewrites a message the bot posted: its words and its buttons (components: [] removes them).
+  async function edit(message, { content, components = [], channel: to = channel } = {}) {
+    const body = { content: clip(content, DISCORD_MAX), components, allowed_mentions: { parse: [], users: [] } };
+    return call(`${API}/channels/${encodeURIComponent(to)}/messages/${encodeURIComponent(message)}`, { ...json(body), method: 'PATCH' });
+  }
   // The answer to a button pressed or a choice made (an interaction): body is Discord's
   // interaction response ({ type, data }). It needs no bot token: the interaction's own
   // token says who may answer it.
@@ -82,5 +88,5 @@ export function createDiscord({ token, channel, user = null, fetch = globalThis.
     if (!message) return call(`${API}/channels/${encodeURIComponent(channel)}/threads`, json({ ...body, type: 11 }));
     return call(`${API}/channels/${encodeURIComponent(channel)}/messages/${encodeURIComponent(message)}/threads`, json(body));
   }
-  return { post, respond, typing, startThread, channel: String(channel), user: user ? String(user) : null };
+  return { post, edit, respond, typing, startThread, channel: String(channel), user: user ? String(user) : null };
 }

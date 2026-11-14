@@ -496,6 +496,14 @@ function askCard(a, where) {
       h('button', { type: 'button', class: 'wf-btn-answer', disabled: view.busy, onclick: () => answer(a, i), text: '答える' })));
 }
 
+// A question the secretary withdrew (its answer came another way): greyed out where it was
+// asked, with why. It can no longer be answered.
+function withdrawnCard(a) {
+  return h('section', { class: 'wf-ask wf-ask-gone', 'aria-label': '取り下げた質問' },
+    h('div', { class: 'wf-ask-head' }, h('span', { class: 'wf-ask-label', text: '取り下げ済み' }), h('span', { text: `(${a.withdrawn?.reason ?? '答えが出たため'})` })),
+    ...a.questions.map((q) => h('p', { class: 'wf-ask-q', text: `【${q.header}】${q.question}` })));
+}
+
 // The items of a conversation with the lines of the days, then the reply being written and
 // the open questions at the end.
 function timeline(items, where, { threads, liveId, replying }) {
@@ -506,19 +514,20 @@ function timeline(items, where, { threads, liveId, replying }) {
   const lastPerson = items.findLastIndex((x) => x.type === 'message' && x.role === 'user');
   const lastReply = items.findLastIndex((x) => x.type === 'message' && x.role === 'secretary');
   items.forEach((it, n) => {
-    if (it.type === 'ask') return;
+    if (it.type === 'ask' && it.state !== 'withdrawn') return;
     if (dayKey(it.created_at) !== day) {
       day = dayKey(it.created_at);
       out.push(h('div', { class: 'wf-day', role: 'separator', 'aria-label': dayLabel(it.created_at) }, h('span'), dayLabel(it.created_at), h('span')));
     }
-    out.push(message(it, { where, last: n === lastReply && lastPerson < n && !view.live.has(liveId), threads }));
+    if (it.type === 'ask') out.push(withdrawnCard(it));
+    else out.push(message(it, { where, last: n === lastReply && lastPerson < n && !view.live.has(liveId), threads }));
   });
   const l = view.live.get(liveId);
   if (l) out.push(liveMessage(l));
   else if (replying) out.push(liveMessage({ thread: liveId, phase: 'thinking', text: '', steps: [] }));
   // One card at a time: an answer being changed first, else the oldest open question.
   const asks = items.filter((x) => x.type === 'ask');
-  const a = asks.find((x) => view.reopened.has(x.id)) ?? asks.find((x) => x.state === 'open');
+  const a = asks.find((x) => view.reopened.has(x.id) && x.state !== 'withdrawn') ?? asks.find((x) => x.state === 'open');
   if (a) {
     a.where = where;
     out.push(askCard(a, where));

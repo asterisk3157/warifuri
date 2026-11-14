@@ -673,6 +673,10 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-btn-answer:hover { background: var(--accent-hover); }
 .wf-ask button:disabled { opacity: .6; cursor: default; }
 .wf-ask-small { padding: 12px; gap: 10px; }
+/* A withdrawn question: greyed out, kept where it was asked. */
+.wf-ask-gone { opacity: .6; background: var(--bg, transparent); box-shadow: none; padding: 12px 16px; gap: 6px; }
+.wf-ask-gone .wf-ask-label { color: var(--sub); background: var(--line); }
+.wf-ask-gone .wf-ask-q { font-size: 14px; font-weight: 400; color: var(--sub); }
 .wf-ask-small .wf-ask-q { font-size: 15px; }
 .wf-ask-small .wf-opt { gap: 10px; padding: 8px 10px; }
 .wf-ask-small .wf-mark { margin-top: 3px; }

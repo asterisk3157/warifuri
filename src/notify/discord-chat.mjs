@@ -87,6 +87,16 @@ export function replyComponents(m) {
   return [row(...options.map((o, i) => ({ type: BUTTON, custom_id: `wf:r:${m.id}:${i}`, label: clip(o, LABEL_MAX), style: i === 0 ? STYLE.primary : STYLE.secondary })))];
 }
 
+// The words that mark a question withdrawn (取り下げ).
+export const WITHDRAWN_MARK = '取り下げ済み';
+export const withdrawnHead = (ask) => `【${WITHDRAWN_MARK}】${ask.data?.withdrawn?.reason ?? '答えが出たため'}、この質問は取り下げました。`;
+
+// The messages of a withdrawn question, as they are rewritten in Discord: the same words as
+// askMessages, marked withdrawn, with no buttons.
+export function withdrawnMessages(ask) {
+  return askMessages(ask).map((m) => ({ text: `${withdrawnHead(ask)}\n~~${m.text.replace(/~/g, '')}~~`, components: [] }));
+}
+
 // The question as words, for the message the buttons hang under.
 export function askText(ask) {
   const lines = (ask.data?.questions ?? []).map((q) => `【${q.header}】${q.question}`);
@@ -179,6 +189,12 @@ export function createDiscordChat({ chat, ledger, discord, threads = null, log =
         }
         chat.send(option, WRITER, m.thread_id !== main ? { thread: m.thread_id } : undefined);
         await discord.respond(d, { type: UPDATE, data: { content: clip(`${d.message?.content ?? ''}\n→ ${option}`, 2000), components: [] } });
+        return;
+      }
+      // A question the secretary withdrew: the message loses its buttons and says so.
+      const withdrawn = ['l', 'a'].includes(kind) ? ledger.getMessage(id) : null;
+      if (withdrawn?.kind === 'ask' && withdrawn.state === 'withdrawn') {
+        await discord.respond(d, { type: UPDATE, data: { content: clip(`${withdrawnHead(withdrawn)}\n${d.message?.content ?? ''}`, 2000), components: [] } });
         return;
       }
       if (kind === 'l') {

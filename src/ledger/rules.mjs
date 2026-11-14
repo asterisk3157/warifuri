@@ -24,6 +24,9 @@ export const AUTONOMY_KINDS = [
   // the events warifuri wrote there (told apart by source and external_id). The person's own
   // events, which have no pair in warifuri, are never edited or deleted: that is stage 4.
   { kind: 'write_calendar', label: '予定をカレンダーに書き出す', stage: 2 },
+  // A task whose end is clear (its PR merged, the task after it done, a record of what came
+  // of it, the person's word) is closed without asking whatever the level, and told in one
+  // note after the run (harness/secretary/common.md); the level decides the rest.
   { kind: 'close_forgotten', label: '閉じ忘れたタスクを閉じる', stage: 3 },
   { kind: 'move_task', label: 'タスクをほかのゴールへ移す', stage: 3 },
   { kind: 'bundle_loose_tasks', label: 'ゴールにつながっていないタスクを束ねる', stage: 3 },
@@ -56,8 +59,10 @@ export const PROPOSAL_STATES = ['open', 'approved', 'changed', 'refused'];
 // (the small label over it, such as タスク整理), the question, 2–4 options (label and
 // description; the recommended one first) and multiSelect. The person may always write
 // something else (その他) instead. A question may name the autonomy kind it falls under, the
-// goal or task it is about, and the proposal it asks about.
-export const ASK_STATES = ['open', 'later', 'answered'];
+// goal or task it is about, and the proposal it asks about. A question no longer needed (its
+// answer came another way) is withdrawn by the secretary: kept, shown greyed out.
+export const ASK_STATES = ['open', 'later', 'answered', 'withdrawn'];
+export const WITHDRAW_REASON_MAX = 200;
 export const ASK_QUESTIONS_MAX = 4;
 export const ASK_HEADER_MAX = 12;
 export const ASK_QUESTION_MAX = 300;

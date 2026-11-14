@@ -98,7 +98,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_GOOGLE_REFRESH_TOKEN` | Google カレンダーを読む許可のトークン。warifuri google login が書く | なし |  | 秘密 | serve、secretary、google |
 | `WARIFURI_GOOGLE_CALENDAR_POLL` | Google カレンダーに変更がないかを聞く間隔(分)。1 から 60 | `1` |  |  | serve |
 | `WARIFURI_GOOGLE_CALENDAR_PUSH` | Google カレンダーの変更を、Google からの知らせでも受け取る。on にすると、WARIFURI_PUBLIC_URL の /api/google/calendar/notify に知らせが届き、数秒で取り込む。WARIFURI_PUBLIC_URL が https で、Google から届く必要がある | `off` |  |  | serve |
-| `WARIFURI_GOOGLE_CALENDAR_WAKE` | Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く | `off` |  |  | serve |
+| `WARIFURI_GOOGLE_CALENDAR_WAKE` | Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く。off でも、タスクや習慣の予定に重なる変更があれば、秘書を1回起こして知らせる | `off` |  |  | serve |
 <!-- settings:end -->
 
 一覧はコードの中の1つの表から作っています。項目を足したり変えたりしたら、`node scripts/settings-table.mjs --write` でこの表を書き直します。食い違ったままだとテストが落ちます。

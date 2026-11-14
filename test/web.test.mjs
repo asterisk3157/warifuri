@@ -234,6 +234,10 @@ test('秘書: the conversation only, oldest first, with questions; reports, prop
   assert.equal(out.thread, thread.id);
   assert.equal(out.threads[m.id].count, 0);
   assert.ok(!JSON.stringify(out).includes('close_forgotten'), 'the autonomy kind of a question is the secretary\'s business');
+  // A withdrawn question stays, with why.
+  ledger.withdrawAsk(a.id, {}, S);
+  const gone = (await (await get(base, '/web/api/secretary')).json()).items.find((x) => x.id === a.id);
+  assert.deepEqual([gone.state, gone.withdrawn.reason], ['withdrawn', '答えが出たため']);
 
   const bare = openLedger(':memory:');
   const server = createServer({ ledger: bare });

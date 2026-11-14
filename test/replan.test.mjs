@@ -312,6 +312,12 @@ test('schema: a version 16 file keeps its bookings and takes travel ones', () =>
     )
     .run();
   assert.throws(() => raw.exec("INSERT INTO bookings (id, title, kind, starts_at, ends_at, created_at, updated_at) VALUES ('b2', '移動', 'travel', 'a', 'b', 'x', 'x')"), /CHECK/);
+  // The step 16 → 17 alone takes travel and keeps the row.
+  raw.exec('BEGIN');
+  raw.exec(MIGRATIONS[16]);
+  raw.exec("INSERT INTO bookings (id, title, kind, starts_at, ends_at, created_at, updated_at) VALUES ('b2', '移動', 'travel', 'a', 'b', 'x', 'x')");
+  assert.equal(raw.prepare("SELECT title FROM bookings WHERE id = 'b_20261001000000_aaaaaa'").get().title, 'ゼミ');
+  raw.exec('ROLLBACK');
   raw.close();
   const L = openLedger(file);
   const old = L.getBooking('b_20261001000000_aaaaaa');
