@@ -41,7 +41,7 @@ import { cleanClientName } from './oauth.mjs';
 
 // Pictures a sent message shows in its bubble; other files show only their name.
 // How long the numbers of the home lab's monitoring are kept before asking again.
-const HOMELAB_TTL_MS = 15_000;
+const HOMELAB_TTL_MS = 2_000;
 const PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -607,15 +607,18 @@ export function createWeb({
       }));
   }
 
-  // The home lab as the server screen shows it (src/monitor/detail.mjs): the last hour, asked
-  // at most every HOMELAB_TTL_MS, whoever looks.
+  // The home lab as the server screen shows it (src/monitor/detail.mjs): the last minute, asked
+  // at most every HOMELAB_TTL_MS, whoever looks, and never twice at once.
   let detail = null;
   let detailAt = 0;
+  let detailAsk = null;
   api.get('/server/monitor', async (req, res) => {
     if (!monitor?.url) return res.json({ configured: false });
     if (!detail || now() - detailAt > HOMELAB_TTL_MS) {
-      detailAt = now();
-      detail = await fetchDetail(monitor.url, { aliases: monitor.aliases ?? {}, now });
+      detailAsk ??= fetchDetail(monitor.url, { aliases: monitor.aliases ?? {}, step: monitor.step ?? null, now })
+        .then((d) => { detail = d; detailAt = now(); })
+        .finally(() => { detailAsk = null; });
+      await detailAsk;
     }
     return res.json({ configured: true, detail });
   });

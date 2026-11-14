@@ -411,7 +411,7 @@ function runServe(args) {
       // Only the secretary's device may use the secretary's tools; nobody while it is off.
       secretaryDevice: secretary.readSecretaryKey(cfg.home) ? secretary.deviceOf(values) : null,
       serverDevices: (values.WARIFURI_SERVER_DEVICES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-      monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES) } : null,
+      monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES), step: Number(values.WARIFURI_MONITOR_STEP) } : null,
       githubWebhookSecret: values.WARIFURI_GITHUB_WEBHOOK_SECRET ?? null,
       calendarWatch: watch,
     });

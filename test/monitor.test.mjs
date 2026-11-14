@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { localMachine, secretaryJobs } from '../src/monitor/local.mjs';
-import { detailData, fetchDetail, parseAliases, DETAIL_QUERIES } from '../src/monitor/detail.mjs';
+import { detailData, fetchDetail, parseAliases, scrapeSeconds, DETAIL_QUERIES } from '../src/monitor/detail.mjs';
 
 const row = (labels, value) => ({ labels, value: String(value) });
 
@@ -14,12 +14,13 @@ test('fetchDetail: every query asked, and an error said in words when the monito
     asked.push(new URL(url).pathname.split('/').at(-1));
     return { status: 200, json: async () => ({ status: 'success', data: { result: [] } }) };
   };
-  const out = await fetchDetail('http://mon.example:9090/', { fetchFn, now: () => Date.parse('2026-11-09T00:00:00Z') });
+  const out = await fetchDetail('http://mon-a.example:9090/', { fetchFn, now: () => Date.parse('2026-11-09T00:00:00Z') });
   assert.equal(asked.filter((p) => p === 'query').length, Object.keys(DETAIL_QUERIES.instant).length);
   assert.equal(asked.filter((p) => p === 'query_range').length, Object.keys(DETAIL_QUERIES.range).length);
   assert.equal(out.at, '2026-11-09T00:00:00.000Z');
+  assert.equal(out.seconds, 60);
   assert.deepEqual([out.machines, out.guests, out.power], [[], [], null]);
-  const down = await fetchDetail('http://mon.example:9090', { fetchFn: async () => { throw new Error('connect refused'); } });
+  const down = await fetchDetail('http://mon-b.example:9090', { fetchFn: async () => { throw new Error('connect refused'); } });
   assert.equal(down.error, '監視サーバーに接続できません');
   assert.equal(down.reason, 'connect refused');
   assert.deepEqual(parseAliases('nas=nas-01, a = b,bad'), { nas: 'nas-01', a: 'b' });
@@ -63,4 +64,50 @@ test('a guest that reports its own numbers is a guest, not a machine', () => {
     window: { start: 0, end: 60, step: 60 },
   });
   assert.deepEqual(data.machines.map((m) => m.host), ['node-a']);
+});
+
+test('scrapeSeconds: the shortest scrape interval of the configuration, in whole seconds', () => {
+  assert.equal(scrapeSeconds('global:\n  scrape_interval: 15s\nscrape_configs:\n- job_name: n\n  scrape_interval: 5s\n'), 5);
+  assert.equal(scrapeSeconds('global:\n  scrape_interval: 1m'), 60);
+  assert.equal(scrapeSeconds('global:\n  scrape_interval: 500ms'), 1);
+  assert.equal(scrapeSeconds('global: {}'), null);
+  assert.equal(scrapeSeconds(undefined), null);
+});
+
+test('fetchDetail: the last minute, one point per scrape, ending on a multiple of the step', async () => {
+  const ranges = [];
+  const queries = [];
+  const fetchFn = async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/status/config')) return { status: 200, json: async () => ({ status: 'success', data: { yaml: 'global:\n  scrape_interval: 10s\n' } }) };
+    (u.pathname.endsWith('/query_range') ? ranges : queries).push(Object.fromEntries(u.searchParams));
+    return { status: 200, json: async () => ({ status: 'success', data: { result: [] } }) };
+  };
+  const at = new Date(2026, 10, 9, 12, 0, 7);
+  const out = await fetchDetail('http://mon-c.example:9090', { fetchFn, step: 5, now: () => +at });
+  const end = Math.floor(+at / 1000 / 10) * 10;
+  assert.equal(out.step, 10);
+  assert.equal(out.end, end);
+  assert.ok(ranges.length > 0);
+  for (const r of ranges) assert.deepEqual([Number(r.start), Number(r.end), r.step], [end - 60, end, '10']);
+  // A rate looks back four scrapes, so a point is never empty for want of samples.
+  assert.ok(ranges.some((r) => r.query.includes('[40s]')));
+  assert.ok(queries.some((q) => q.query.includes('[40s]')));
+  assert.ok(![...ranges, ...queries].some((q) => q.query.includes('[2m]')));
+});
+
+test('fetchDetail: without an answer about the scrape interval, the setting is the step (5 seconds when none)', async () => {
+  const steps = [];
+  const fetchFn = async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/status/config')) return { status: 403, json: async () => ({ status: 'error', error: 'forbidden' }) };
+    if (u.pathname.endsWith('/query_range')) steps.push(u.searchParams.get('step'));
+    return { status: 200, json: async () => ({ status: 'success', data: { result: [] } }) };
+  };
+  const now = () => +new Date(2026, 10, 9, 12);
+  await fetchDetail('http://mon-d.example:9090', { fetchFn, step: 3, now });
+  assert.ok(steps.length && steps.every((x) => x === '3'));
+  steps.length = 0;
+  await fetchDetail('http://mon-e.example:9090', { fetchFn, now });
+  assert.ok(steps.length && steps.every((x) => x === '5'));
 });

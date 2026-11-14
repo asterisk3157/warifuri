@@ -284,6 +284,13 @@ export const SETTINGS = [
     check: (v) => (/^https?:\/\/[^/\s]+\/?$/.test(v) ? null : 'must be an http(s) URL with no path'),
   },
   {
+    name: 'WARIFURI_MONITOR_STEP',
+    about: 'サーバーの画面のグラフの点の間隔(秒)。監視(Prometheus)が自分のスクレイプ間隔を答えるときは、そちらを使う。答えないときだけ、この値を使う',
+    def: '5',
+    commands: ['serve'],
+    check: (v) => (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 60 ? null : 'must be a whole number of seconds from 1 to 60'),
+  },
+  {
     name: 'WARIFURI_MONITOR_ALIASES',
     about: '監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01)',
     commands: ['serve'],
