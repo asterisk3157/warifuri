@@ -84,12 +84,16 @@ function settle(detail) {
 // slides in by one point each time it is drawn, so it seems to move left as time goes by.
 function graph(series, color, { max = 100, cls = 'wf-tm-graph' } = {}) {
   const data = series && series.length > 1 ? series : [0, 0];
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - (Math.min(max, Math.max(0, v)) / max) * 30}`);
+  const step = 100 / (data.length - 1);
+  const y = (v) => 30 - (Math.min(max, Math.max(0, v)) / max) * 30;
+  // The line also reaches one point beyond the left edge, at the oldest value: the slide starts
+  // one point to the right, and without it the left edge is empty until the slide ends.
+  const pts = [`${-step},${y(data[0])}`, ...data.map((v, i) => `${i * step},${y(v)}`)];
   const svg = s('svg', { class: cls, viewBox: '0 0 100 30', preserveAspectRatio: 'none', 'aria-hidden': 'true', style: { color } },
     s('g', { class: slide.on ? 'wf-tm-slide' : null },
-      s('polygon', { points: `0,30 ${pts.join(' ')} 100,30`, fill: 'currentColor', 'fill-opacity': '0.1' }),
+      s('polygon', { points: `${-step},30 ${pts.join(' ')} 100,30`, fill: 'currentColor', 'fill-opacity': '0.1' }),
       s('polyline', { points: pts.join(' '), fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'vector-effect': 'non-scaling-stroke' })));
-  svg.style.setProperty('--slide', `${(100 / (data.length - 1)).toFixed(2)}px`);
+  svg.style.setProperty('--slide', `${step.toFixed(2)}px`);
   svg.style.setProperty('--slide-s', `${slide.secs}s`);
   return svg;
 }
