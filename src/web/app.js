@@ -92,7 +92,8 @@ function renderNav() {
     return;
   }
   nav.className = '';
-  nav.replaceChildren(
+  // An item that is not shown is null: left out, so that it is not written as text.
+  nav.replaceChildren(...[
     h('div', { class: 'wf-nav-gap' }),
     navItem('calendar', 'カレンダー', 'calendar'),
     navItem('tasks', 'タスク', 'tasks'),
@@ -104,7 +105,7 @@ function renderNav() {
     soonItem('デスク', 'desk'),
     h('a', { class: 'wf-nav-item wf-nav-bottom', href: '/settings' }, icon('gear'), h('span', { text: '設定' })),
     card(),
-  );
+  ].filter(Boolean));
 }
 
 // What a screen gets to draw with.
