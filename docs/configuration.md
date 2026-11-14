@@ -42,7 +42,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 `WARIFURI_SECRETARY` で始まる項目は、秘書の定時の仕事の設定です。`warifuri serve` と `warifuri secretary` が読みます。`WARIFURI_SECRETARY` は `warifuri secretary enable` と `disable` が書くので、手で書く必要はありません。時刻はサーバーの機械の時刻で読みます。変えたら `warifuri serve` を動かし直します。
 
-秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` と `WARIFURI_SECRETARY_TOOLS` に書いたツールだけです。メールや Notion などを渡すときは、`WARIFURI_SECRETARY_TOOLS` に `mcp__claude_ai_Gmail=read` のように、道具と範囲(`read`、`own`、`write`)を書きます。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` と `WARIFURI_SECRETARY_TOOLS` に書いたツールだけです。秘書がカレンダーに書く先は、ユーザーのメインのカレンダーだけです。書く先のカレンダーを選ぶ設定はありません([連携の例](integrations.md)の「書き出す先」)。メールや Notion などを渡すときは、`WARIFURI_SECRETARY_TOOLS` に `mcp__claude_ai_Gmail=read` のように、道具と範囲(`read`、`own`、`write`)を書きます。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
 
 ## Google カレンダーの設定
 
