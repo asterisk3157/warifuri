@@ -253,6 +253,22 @@ export const SETTINGS = [
     check: (v) => parseNight(v).error ?? null,
   },
   {
+    name: 'WARIFURI_BIRTHDAY_NOTICE_DAYS',
+    section: 'secretary',
+    about: '誕生日の何日前に、秘書の会話と Discord に知らせるか。好きなもの、苦手なもの、前にあげた誕プレを添える。0 で知らせない',
+    def: '14',
+    commands: SECRETARY,
+    check: (v) => (/^\d+$/.test(v) && Number(v) <= 60 ? null : 'must be a number of days from 0 to 60'),
+  },
+  {
+    name: 'WARIFURI_BIRTHDAY_NOTICE_PROFILES',
+    section: 'secretary',
+    about: '誕生日を知らせる人のプロフィール(カンマ区切り)。all にすると、すべての人',
+    def: '友人',
+    commands: SECRETARY,
+    check: (v) => (v.split(',').every((t) => t.trim() !== '') ? null : 'must be profile names, comma-separated, or all'),
+  },
+  {
     name: 'WARIFURI_SECRETARY_TIMEOUT',
     section: 'secretary',
     about: '秘書の1回の仕事の上限(分)。超えたら止める',

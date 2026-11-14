@@ -57,6 +57,7 @@ import { createChat, writeTrigger, TRIGGERS } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
 import { createDeadlineWatch } from './secretary/deadlines.mjs';
+import { createBirthdayWatch, parseProfiles } from './secretary/birthdays.mjs';
 import { createGateway } from './notify/gateway.mjs';
 import { createDiscordChat } from './notify/discord-chat.mjs';
 import { createThreadMap } from './notify/discord-threads.mjs';
@@ -575,6 +576,12 @@ function startSecretary(cfg, chat, ledger) {
     ledger, tell: (body, data) => chat.notice(body, data), file: path.join(secretary.paths(cfg.home).dir, 'deadlines.json'),
     night: ready.schedule.night.error ? null : ready.schedule.night, log,
   });
+  // Friends' birthdays near, with what they like and the presents before (src/secretary/birthdays.mjs).
+  const birthdays = createBirthdayWatch({
+    ledger, tell: (body, data) => chat.notice(body, data), file: path.join(secretary.paths(cfg.home).dir, 'birthdays.json'),
+    days: Number(cfg.values.WARIFURI_BIRTHDAY_NOTICE_DAYS ?? 14), profiles: parseProfiles(cfg.values.WARIFURI_BIRTHDAY_NOTICE_PROFILES),
+    night: ready.schedule.night.error ? null : ready.schedule.night, log,
+  });
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
@@ -584,6 +591,11 @@ function startSecretary(cfg, chat, ledger) {
         if (chat.on) deadlines.tick();
       } catch (err) {
         log(`deadlines: check failed: ${err.message}`);
+      }
+      try {
+        if (chat.on) birthdays.tick();
+      } catch (err) {
+        log(`birthdays: check failed: ${err.message}`);
       }
       chat.kick();
       replan.tick();

@@ -14,7 +14,8 @@
 // still come from the conversation as always.
 // warifuri's own notes go too: the tasks due soon and not done (data.deadline, from
 // src/secretary/deadlines.mjs) and the tasks the secretary closed without asking
-// (data.auto_closed), as does the secretary's reply when the calendar changed under the plan
+// (data.auto_closed), and the friends' birthdays near (data.birthday, from
+// src/secretary/birthdays.mjs, with no mention), as does the secretary's reply when the calendar changed under the plan
 // (data.alert).
 // Nothing goes in the night, but while the person is talking, and the notes marked urgent (a
 // deadline within the night); what came then goes once the night is over, oldest first.
@@ -67,6 +68,7 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   if (m.role === 'system' && m.data?.failure) return { text: `${m.body}${tail}`, mention: true };
   if (m.role === 'system' && m.data?.deadline) return { text: `${m.body}${tail}`, mention: true };
   if (m.role === 'system' && m.data?.auto_closed) return { text: `${m.body}${tail}`, mention: false };
+  if (m.role === 'system' && m.data?.birthday) return { text: `${m.body}${tail}`, mention: false };
   if (m.role === 'secretary' && m.data?.alert && m.body.trim()) {
     return { text: `${clip(m.body, BODY_MAX)}${talking ? '' : tail}`, mention: true, components: replyComponents(m) };
   }

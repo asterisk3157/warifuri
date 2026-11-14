@@ -82,6 +82,8 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SECRETARY_WEEKLY` | 週の完了確認の時刻。秘書との会話に「週の完了確認の時間です」を送り、会話の秘書が、開いたタスクのうち終わっていそうなものを根拠つきで本人に確かめる。書き方は WARIFURI_SECRETARY_NIGHTLY と同じ。夜の時間帯には送らない | `sun 10:00` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_SYNC` | カレンダーの同期の間隔。every 60m のように書く(15m から 24h、0時から数える)。書き方は WARIFURI_SECRETARY_NIGHTLY の時刻でもよい。秘書にカレンダーを渡していないときは動かない。夜の時間帯には動かない | `every 60m` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_NIGHT` | 夜の時間帯(HH:MM-HH:MM)。秘書はこのあいだ人を呼び出さず、報告に書く | `23:00-07:00` |  |  | serve、secretary |
+| `WARIFURI_BIRTHDAY_NOTICE_DAYS` | 誕生日の何日前に、秘書の会話と Discord に知らせるか。好きなもの、苦手なもの、前にあげた誕プレを添える。0 で知らせない | `14` |  |  | serve、secretary |
+| `WARIFURI_BIRTHDAY_NOTICE_PROFILES` | 誕生日を知らせる人のプロフィール(カンマ区切り)。all にすると、すべての人 | `友人` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_TIMEOUT` | 秘書の1回の仕事の上限(分)。超えたら止める | `20` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_CALENDAR_TOOLS` | 秘書に渡すカレンダーの MCP のツール(mcp__<サーバーの名前> の形、カンマ区切り)。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる。空なら warifuri だけ | なし |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_TOOLS` | 秘書に渡す外の道具と、その範囲(mcp__<サーバーの名前>=範囲 の形、カンマ区切り)。範囲は read(読むツールだけ。書くツールはフックで止める)、own(warifuri が作ったものだけ書く)、write(書ける。外に出すときは毎回聞く)。own と write の違いは手引きで守る。書くと、この機械の claude に登録したほかの MCP サーバーも読み込み、そのうちここに書いたものだけを使わせる | なし |  |  | serve、secretary |
