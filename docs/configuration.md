@@ -92,7 +92,8 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_MONITOR_URL` | 自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない | なし |  |  | serve |
 | `WARIFURI_MONITOR_STEP` | サーバーの画面のグラフの点の間隔(秒)。監視(Prometheus)が自分のスクレイプ間隔を答えるときは、そちらを使う。答えないときだけ、この値を使う | `5` |  |  | serve |
 | `WARIFURI_MONITOR_ALIASES` | 監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01) | なし |  |  | serve |
-| `WARIFURI_CAMERAS` | 部屋に置いたカメラ。表示名=URL#ストリームの名前 を、カンマ区切りで書く(部屋=https://camera.example.ts.net#room)。URL は go2rtc の場所。ブラウザがそこから直接映像を読み、warifuri は中継も保存もしない。設定すると、Web 画面にカメラのタブが出る | なし |  |  | serve |
+| `WARIFURI_CAMERAS` | 部屋に置いたカメラ。表示名=URL#ストリームの名前 を、カンマ区切りで書く(部屋=http://192.0.2.10:1984#room)。URL は go2rtc の場所で、warifuri のサーバーから届く番地にする。映像は warifuri が中継し、ログインした人だけが Web 画面のカメラのタブで見られる。保存はしない | なし |  |  | serve |
+| `WARIFURI_CAMERA_AUTH` | カメラ(go2rtc)の Basic 認証。user:password の形で、すべてのカメラに使う。warifuri が中継するときだけ送り、ブラウザには渡さない | なし |  | 秘密 | serve |
 | `WARIFURI_DISCORD_TOKEN` | 秘書の質問、朝の報告、失敗を Discord に送るボットのトークン。ファイル(_FILE)なら、トークンだけか DISCORD_BOT_TOKEN= の1行を置く。WARIFURI_DISCORD_CHANNEL と一緒に設定すると送る | なし |  | 秘密 | serve、secretary |
 | `WARIFURI_DISCORD_CHANNEL` | 送る先の Discord のチャンネルの id。本人だけが見るチャンネルにする | なし |  |  | serve、secretary |
 | `WARIFURI_DISCORD_USER` | 本人の Discord のユーザーの id。質問と失敗のときにメンションし、Discord で話すときは、この人の書いたことだけを秘書に渡す | なし |  |  | serve、secretary |

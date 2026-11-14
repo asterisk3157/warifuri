@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { parseWhen, parseNight } from './secretary/schedule.mjs';
-import { parseCameras } from './server/cameras.mjs';
+import { parseCameras, checkCameraAuth } from './server/cameras.mjs';
 
 export const SETTINGS_FILE = 'warifuri.env';
 export const SECRETS_FILE = 'secrets.env';
@@ -327,9 +327,16 @@ export const SETTINGS = [
   },
   {
     name: 'WARIFURI_CAMERAS',
-    about: '部屋に置いたカメラ。表示名=URL#ストリームの名前 を、カンマ区切りで書く(部屋=https://camera.example.ts.net#room)。URL は go2rtc の場所。ブラウザがそこから直接映像を読み、warifuri は中継も保存もしない。設定すると、Web 画面にカメラのタブが出る',
+    about: '部屋に置いたカメラ。表示名=URL#ストリームの名前 を、カンマ区切りで書く(部屋=http://192.0.2.10:1984#room)。URL は go2rtc の場所で、warifuri のサーバーから届く番地にする。映像は warifuri が中継し、ログインした人だけが Web 画面のカメラのタブで見られる。保存はしない',
     commands: ['serve'],
     check: (v) => parseCameras(v).error,
+  },
+  {
+    name: 'WARIFURI_CAMERA_AUTH',
+    about: 'カメラ(go2rtc)の Basic 認証。user:password の形で、すべてのカメラに使う。warifuri が中継するときだけ送り、ブラウザには渡さない',
+    secret: true,
+    commands: ['serve'],
+    check: checkCameraAuth,
   },
   {
     name: 'WARIFURI_DISCORD_TOKEN',

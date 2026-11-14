@@ -1,11 +1,12 @@
 // カメラ: the fixed cameras of WARIFURI_CAMERAS, shown live on the Web screen. Each is
-// "name=URL#stream", comma-separated: the URL is where the camera's streaming server answers
-// (its origin, with a path when it sits under one), and the stream is its name there. The
-// browser reads the pictures straight from that server; warifuri neither relays nor keeps them.
+// "name=URL#stream", comma-separated: the URL is where the camera's streaming server (go2rtc)
+// answers, as this server reaches it (its origin, with a path when it sits under one; often a
+// plain http address on the home network), and the stream is its name there. The browser never
+// opens that server: warifuri relays the few files of the live view (camera-relay.mjs).
 
 const NAME_MAX = 40;
 
-// One camera: { name, origin, stream, frame }, or { error }.
+// One camera: { name, url, src } (url: the server's base, with no trailing slash), or { error }.
 function parseOne(part) {
   const i = part.indexOf('=');
   if (i < 0) return { error: 'must be name=URL#stream' };
@@ -18,8 +19,9 @@ function parseOne(part) {
   } catch {
     return { error: `${name}: is not a URL` };
   }
+  // http is fine: the browser does not read it, this server does.
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: `${name}: must start with http:// or https://` };
-  if (u.search || u.username || u.password) return { error: `${name}: must be a plain URL, with no query or login` };
+  if (u.search || u.username || u.password) return { error: `${name}: must be a plain URL, with no query or login (the login is WARIFURI_CAMERA_AUTH)` };
   let src;
   try {
     src = decodeURIComponent(u.hash.slice(1)).trim();
@@ -27,9 +29,7 @@ function parseOne(part) {
     src = '';
   }
   if (!src) return { error: `${name}: must end with #stream, the name of the stream` };
-  const base = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
-  const q = `src=${encodeURIComponent(src)}`;
-  return { name, origin: u.origin, stream: `${base}/stream.html?${q}`, frame: `${base}/api/frame.jpeg?${q}` };
+  return { name, url: `${u.origin}${u.pathname.replace(/\/+$/, '')}`, src };
 }
 
 // The cameras of a WARIFURI_CAMERAS value: { cameras, error }. An empty value is no cameras.
@@ -45,5 +45,8 @@ export function parseCameras(text) {
   return { cameras, error: null };
 }
 
-// The origins the camera page may load frames and pictures from.
-export const cameraOrigins = (cameras) => [...new Set((cameras ?? []).map((c) => c.origin))];
+// What is wrong with a WARIFURI_CAMERA_AUTH value (user:password), or null.
+export function checkCameraAuth(v) {
+  if (v.indexOf(':') <= 0) return 'must be user:password';
+  return /[\u0000-\u001f\u007f]/.test(v) ? 'must have no control characters' : null;
+}

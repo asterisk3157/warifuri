@@ -40,7 +40,7 @@ import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, readProfileDefaults, profileFolders, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
-import { cameraOrigins } from './cameras.mjs';
+import { createCameraRelay, cameraView } from './camera-relay.mjs';
 
 // Pictures a sent message shows in its bubble; other files show only their name.
 // How long the numbers of the home lab's monitoring are kept before asking again.
@@ -265,13 +265,11 @@ function readCookie(req, name) {
   return '';
 }
 
-// The pages' policy. With cameras, the pages also let in the cameras' origins: their pictures
-// (img), their live view (frame), and the request that asks Chrome for the permission to reach
-// a local network (connect), and nothing else of them.
-export function pageCsp(origins = []) {
-  const extra = origins.length ? ` ${origins.join(' ')}` : '';
-  return `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:${extra}; connect-src 'self'${extra}; ` +
-    `font-src 'self'; ${origins.length ? `frame-src${extra}; ` : ''}base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+// The pages' policy. With cameras, the pages may also frame this origin: カメラ shows the
+// relayed live views (camera-relay.mjs), which come from here.
+export function pageCsp(frames = false) {
+  return "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
+    `font-src 'self'; ${frames ? "frame-src 'self'; " : ''}base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
 }
 const PAGE_CSP = pageCsp();
 
@@ -359,8 +357,9 @@ export function privacyHtml(contact) {
 // public URL, or null. trustProxy: express's trust proxy value, when one is set. githubUser:
 // the GitHub login of the person, when the GitHub login is on. limit: the rate limit per
 // address. githubLogin: whether the login page offers GitHub (the router of oauth.mjs then
-// calls finishLogin). operatorContact: how to reach the operator, for /privacy, or null. cameras: the cameras (cameras.mjs) for カメラ, or none. chat: the conversation runner (src/secretary/chat.mjs), or null when the
-// secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
+// calls finishLogin). operatorContact: how to reach the operator, for /privacy, or null. cameras: the cameras (cameras.mjs) for カメラ, or none. cameraAuth: their login (user:password), or null. chat: the conversation runner (src/secretary/chat.mjs), or null when the
+// secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin, upgrade, closeUpgrades }
+// (upgrade: the server's 'upgrade' listener, for the cameras' WebSockets).
 export function createWeb({
   ledger,
   home = null,
@@ -375,6 +374,7 @@ export function createWeb({
   serverDevices = [],
   monitor = null,
   cameras = [],
+  cameraAuth = null,
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
@@ -471,9 +471,9 @@ export function createWeb({
   router.get('/privacy', limited, (req, res) => publicPage(res, 'プライバシーポリシー', privacyHtml(operatorContact)));
 
   // Pages: the same shell for each; the script reads the path. カメラ is there only when cameras
-  // are set. Every page lets in the cameras' origins, since moving between the tabs does not load
+  // are set. Every page then may frame this origin, since moving between the tabs does not load
   // a new page: a page opened at カレンダー keeps its policy when the person opens カメラ.
-  const cameraCsp = pageCsp(cameraOrigins(cameras));
+  const cameraCsp = pageCsp(cameras.length > 0);
   for (const p of cameras.length ? [...PAGES, 'camera'] : PAGES) {
     router.get(`/${p}`, limited, (req, res) => {
       if (!allowed(req)) {
@@ -485,6 +485,10 @@ export function createWeb({
       res.sendFile(path.join(assetsDir, 'app.html'));
     });
   }
+
+  // The cameras' live views, relayed (camera-relay.mjs), with the login.
+  const relay = createCameraRelay({ cameras, auth: cameraAuth, allowed, publicOrigin });
+  if (cameras.length) router.use('/web/camera', relay.handle);
 
   // The scripts and stylesheet: public code, served to anyone.
   router.use(
@@ -521,14 +525,13 @@ export function createWeb({
     });
   });
 
-  // カメラ: each camera's name and the two addresses the browser opens itself (the live view and
-  // a still picture, to tell whether this browser reaches the camera). Nothing is relayed.
+  // カメラ: each camera's name and the address of its relayed live view on this server.
   api.get('/cameras', (req, res) => {
     if (!cameras.length) {
       res.status(404).json({ error: 'no cameras' });
       return;
     }
-    res.json({ cameras: cameras.map(({ name, stream, frame }) => ({ name, stream, frame })) });
+    res.json({ cameras: cameras.map((c, n) => ({ name: c.name, stream: cameraView(n, c) })) });
   });
 
   // ナレッジ: the profiles (those with a folder, those named by places and goals, and those with
@@ -1175,5 +1178,5 @@ export function createWeb({
     notice(res, 200, 'ログインしました', '', { href: '/calendar', text: 'カレンダーを開く', refresh: true });
   };
 
-  return { router, mode, issueLogin: () => store.issueLogin(), finishLogin };
+  return { router, mode, issueLogin: () => store.issueLogin(), finishLogin, upgrade: relay.upgrade, closeUpgrades: relay.close };
 }
