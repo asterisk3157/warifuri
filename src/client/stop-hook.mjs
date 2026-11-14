@@ -12,12 +12,16 @@
 // (stop_hook_active) is never sent back again, so the agent can always end its turn. An agent
 // still working with the person may leave the task held; it is not asked again.
 //
+// It also asks, once per message, to write down dates and decisions the person spoke of
+// (capture.mjs): WARIFURI_CAPTURE=off turns that off.
+//
 // Fail-open, like the start gate: no settings, no key, a payload it cannot read, the server
 // unreachable, slow or answering anything but 200, all let the stop through.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { askHeld, TIMEOUT_MS } from './gate.mjs';
+import { CAPTURE_REASON, unrecorded } from './capture.mjs';
 
 export const STATE_FILE = 'stop-reminded.json';
 // Reminders older than this are forgotten, and at most this many are kept.
@@ -70,16 +74,27 @@ export function remindOnce(file, session, taskId, now = new Date()) {
 }
 
 // The decision for one payload: the block JSON text, or null to let the stop through.
-// settings: { url, key, stop ('off' never reminds), stateFile }.
-export async function decideStop(payload, { url, key, stop = 'on', stateFile = null }, { fetchImpl = fetch, timeoutMs = TIMEOUT_MS, now } = {}) {
-  if (stop === 'off' || !url || !key) return null;
+// settings: { url, key, stop ('off' never reminds of the held task), capture ('off' never asks
+// to write down dates), stateFile }. When both have something to say, they go in one reason.
+export async function decideStop(
+  payload,
+  { url, key, stop = 'on', capture = 'on', stateFile = null },
+  { fetchImpl = fetch, timeoutMs = TIMEOUT_MS, now } = {},
+) {
+  if (!url || !key) return null;
   if (!payload || typeof payload !== 'object' || payload.stop_hook_active === true) return null;
-  const cwd = typeof payload.cwd === 'string' && path.isAbsolute(payload.cwd) ? payload.cwd : null;
-  if (!cwd) return null;
-  const a = await askHeld({ url, key, dir: cwd, fetchImpl, signal: AbortSignal.timeout(timeoutMs) });
-  const task = a?.task;
-  if (!task || typeof task.id !== 'string') return null;
   const session = typeof payload.session_id === 'string' && payload.session_id !== '' ? payload.session_id : null;
-  if (!remindOnce(stateFile, session, task.id, now)) return null;
-  return stopOutput(stopReason(task, a.place));
+  const reasons = [];
+  const cwd = typeof payload.cwd === 'string' && path.isAbsolute(payload.cwd) ? payload.cwd : null;
+  if (stop !== 'off' && cwd) {
+    const a = await askHeld({ url, key, dir: cwd, fetchImpl, signal: AbortSignal.timeout(timeoutMs) });
+    const task = a?.task;
+    if (task && typeof task.id === 'string' && remindOnce(stateFile, session, task.id, now)) reasons.push(stopReason(task, a.place));
+  }
+  if (capture !== 'off') {
+    // The key is the message, so the same message is not asked about twice.
+    const say = unrecorded(payload.transcript_path);
+    if (say && remindOnce(stateFile, session, `say:${say.id}`, now)) reasons.push(CAPTURE_REASON);
+  }
+  return reasons.length ? stopOutput(reasons.join('\n')) : null;
 }

@@ -160,6 +160,14 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_CAPTURE',
+    section: 'client',
+    about: '書き漏れの確認。ユーザーの最後の発言に日付や締切の言葉があり、そのあと warifuri に何も書いていなければ、エージェントが返事を終えるときに、発言ごとに一度だけ、台帳に書くよう伝える。Claude Code だけで動く。off にすると伝えない',
+    def: 'on',
+    commands: ['hook'],
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
     name: 'WARIFURI_BRIEF',
     section: 'client',
     about: '会話の始めの要点。エージェントとの会話が作業フォルダで始まるとき、持っているタスク、ナレッジの目次、人の一覧を渡す。off にすると渡さない',

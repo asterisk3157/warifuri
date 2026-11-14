@@ -36,7 +36,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 ## 使う機械の設定
 
-`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_STOP`、`WARIFURI_BRIEF`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認、作業の終わりの確認、会話の始めの要点、カレンダーのフック(`warifuri hook gate`、`warifuri hook stop`、`warifuri hook brief`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使わず、warifuri を通して予定を読み書きします。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
+`WARIFURI_SERVER_URL`、`WARIFURI_DEVICE_KEY_FILE`、`WARIFURI_GATE`、`WARIFURI_STOP`、`WARIFURI_CAPTURE`、`WARIFURI_BRIEF`、`WARIFURI_CALENDAR_CLAUDE`、`WARIFURI_CALENDAR_CODEX` は、サーバーではなく、サーバーを使う機械の設定です。`warifuri connect` と、タスク確認、作業の終わりの確認、書き漏れの確認、会話の始めの要点、カレンダーのフック(`warifuri hook gate`、`warifuri hook stop`、`warifuri hook brief`、`warifuri hook calendar`)が読みます。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うとき(会社のアカウントでログインした Codex など)は、そのハーネスの `WARIFURI_CALENDAR_…` を `gcp` にします。そのハーネスは、カレンダーのコネクタを使わず、warifuri を通して予定を読み書きします。同じ `warifuri.env` に書き、サーバーと同じ機械なら、サーバーの設定と並べて置きます。`WARIFURI_SERVER_URL` は `connect` が書くので、ふつうは手で書く必要はありません。シークレットは設定ファイルに書かず、`WARIFURI_DEVICE_KEY_FILE` のファイルに1行で置きます。
 
 ## 秘書の設定
 
@@ -70,6 +70,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SERVER_DEVICES` | サーバーの機械で動くほかのプログラムのデバイスの名前(カンマ区切り)。Web 画面のデバイスの一覧に出さない。秘書のデバイスは書かなくても出ない | なし |  |  | serve |
 | `WARIFURI_GATE` | タスク確認。off にすると、作業中のタスクがなくても編集を止めない | `on` |  |  | hook |
 | `WARIFURI_STOP` | 作業の終わりの確認。エージェントが作業を終えるとき、持ったままのタスクがあれば、会話ごとに一度だけ、閉じるか手放すよう伝える。off にすると伝えない | `on` |  |  | hook |
+| `WARIFURI_CAPTURE` | 書き漏れの確認。ユーザーの最後の発言に日付や締切の言葉があり、そのあと warifuri に何も書いていなければ、エージェントが返事を終えるときに、発言ごとに一度だけ、台帳に書くよう伝える。Claude Code だけで動く。off にすると伝えない | `on` |  |  | hook |
 | `WARIFURI_BRIEF` | 会話の始めの要点。エージェントとの会話が作業フォルダで始まるとき、持っているタスク、ナレッジの目次、人の一覧を渡す。off にすると渡さない | `on` |  |  | hook |
 | `WARIFURI_CALENDAR_CLAUDE` | この機械の Claude Code がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |
 | `WARIFURI_CALENDAR_CODEX` | この機械の Codex がカレンダーを触る道。connector はハーネスのカレンダーのコネクタや MCP を使う。gcp はそれらを使わず(カレンダーのツールはフックで止める)、warifuri を通して予定を読み書きする。warifuri が自分の Google の資格情報で触る道は次の版で作る。ハーネスのアカウントが、カレンダーを使う Google のアカウントと違うときに使う | `connector` |  |  | connect、hook |

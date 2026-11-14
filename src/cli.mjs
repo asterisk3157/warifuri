@@ -736,7 +736,7 @@ async function runHook(args) {
         url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE,
         ...(setting ? { route: v[setting], setting } : {}),
         ...(args[0] === 'brief' ? { brief: v.WARIFURI_BRIEF } : {}),
-        ...(args[0] === 'stop' ? { stop: v.WARIFURI_STOP, stateFile: path.join(cfg.home, STOP_STATE_FILE) } : {}),
+        ...(args[0] === 'stop' ? { stop: v.WARIFURI_STOP, capture: v.WARIFURI_CAPTURE, stateFile: path.join(cfg.home, STOP_STATE_FILE) } : {}),
       });
     }
   } catch {
