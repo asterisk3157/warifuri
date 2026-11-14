@@ -1,19 +1,30 @@
 // The numbers of the home lab for the server screen, as a task manager shows them: for each
-// machine its CPU (per thread, over the last hour), memory, disks, and GPU; the power of the
+// machine its CPU (per thread, over the last minute), memory, disks, and GPU; the power of the
 // whole lab; and the list of guests with what each was given and uses. Out of the monitoring
 // (Prometheus with node_exporter, the Proxmox collector, and, where there are, the NVIDIA and
 // smart plug exporters). No machine or disk is named in the code: they are what the
 // monitoring reports. detailData is pure; fetchDetail asks the monitoring.
+//
+// The graphs show the last minute, as the task manager does: one point per scrape of the
+// monitoring (its scrape interval, asked of it, or WARIFURI_MONITOR_STEP when it cannot say).
+// A rate needs several scrapes inside its window, so it looks back four steps.
 
 const GUEST = 'id=~"(qemu|lxc)/.*"';
 const DISKS = 'device!~"dm-.*|loop.*|zd.*|sr.*|nbd.*|md.*"';
 
-export const DETAIL_QUERIES = Object.freeze({
+export const WINDOW_SECONDS = 60;
+export const DEFAULT_STEP = 5;
+// How far back a rate looks: at least four scrapes, so a short window still has values.
+export const rateSeconds = (step) => Math.max(10, 4 * step);
+
+export const detailQueries = (step = DEFAULT_STEP) => {
+  const rate = `${rateSeconds(step)}s`;
+  return {
   instant: {
     memTotal: 'node_memory_MemTotal_bytes',
     memAvailable: 'node_memory_MemAvailable_bytes',
-    read: `max by (host, device) (rate(node_disk_read_bytes_total{${DISKS}}[2m]))`,
-    write: `max by (host, device) (rate(node_disk_written_bytes_total{${DISKS}}[2m]))`,
+    read: `max by (host, device) (rate(node_disk_read_bytes_total{${DISKS}}[${rate}]))`,
+    write: `max by (host, device) (rate(node_disk_written_bytes_total{${DISKS}}[${rate}]))`,
     diskInfo: `node_disk_info{${DISKS}}`,
     cpuInfo: 'count by (host, model_name) (max by (host, model_name, cpu) (node_cpu_info))',
     temp: 'max by (host) (node_hwmon_temp_celsius{chip=~"platform_coretemp.*"})',
@@ -38,16 +49,19 @@ export const DETAIL_QUERIES = Object.freeze({
     rootFull: '100 - 100 * node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}',
   },
   range: {
-    cores: 'max by (host, cpu) (100 * (1 - rate(node_cpu_seconds_total{mode="idle"}[2m])))',
+    cores: `max by (host, cpu) (100 * (1 - rate(node_cpu_seconds_total{mode="idle"}[${rate}])))`,
     memory: 'max by (host) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))',
-    busy: `max by (host, device) (100 * rate(node_disk_io_time_seconds_total{${DISKS}}[2m]))`,
+    busy: `max by (host, device) (100 * rate(node_disk_io_time_seconds_total{${DISKS}}[${rate}]))`,
     gpuUtil: 'max by (host) (nvidia_gpu_utilization_percent)',
     gpuTemp: 'max by (host) (nvidia_gpu_temperature_celsius)',
     gpuMemory: 'max by (host) (100 * nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes)',
     gpuPower: 'max by (host) (nvidia_gpu_power_watts)',
     power: 'tapo_power_watts',
   },
-});
+  };
+};
+
+export const DETAIL_QUERIES = Object.freeze(detailQueries());
 
 function num(value) {
   const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
@@ -170,7 +184,7 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
     const gpuRow = list(instant.gpuInfo).find((r) => r?.labels?.host === host);
     const gpuMatch = (l) => l.host === host;
     // The GPU as the task manager shows it: how busy, how hot, how much of its memory is used,
-    // and what it draws, each over the last hour.
+    // and what it draws, each over the last minute.
     const gpuOf = (row, match) => {
       const series = (key, keep) => seriesOf(range[key], window, match, keep);
       const util = series('gpuUtil', within100);
@@ -211,28 +225,52 @@ export function detailData({ instant = {}, range = {}, window = {}, aliases = {}
 
   const watts = seriesOf(range.power, window, any);
   return {
-    at: now, minutes: (window.end - window.start) / 60, step: window.step, machines,
+    at: now, end: window.end, seconds: window.end - window.start, step: window.step, machines,
     power: list(range.power).length ? { watts: lastOf(watts), todayWh: whole(pick('energyToday')), monthWh: whole(pick('energyMonth')), series: watts } : null,
     guests,
   };
 }
 
-// Asks the monitoring for the last `minutes` (one point a minute) and shapes the answer.
-export async function fetchDetail(url, { fetchFn = globalThis.fetch, aliases = {}, now = () => Date.now(), minutes = 60, timeoutMs = 10000 } = {}) {
+// The shortest scrape interval in the monitoring's configuration (the YAML its status/config
+// answers with), in seconds; null when there is none to be read.
+export function scrapeSeconds(yaml) {
+  const units = { ms: 0.001, s: 1, m: 60, h: 3600 };
+  const found = [...String(yaml ?? '').matchAll(/scrape_interval:\s*["']?(\d+)(ms|s|m|h)\b/g)].map((m) => Number(m[1]) * units[m[2]]);
+  const least = found.length ? Math.min(...found) : null;
+  return least && least > 0 ? Math.max(1, Math.ceil(least)) : null;
+}
+
+// What the monitoring said its scrape interval is, kept for a while: it hardly ever changes.
+const SCRAPE_KEEP_MS = 10 * 60 * 1000;
+const scrapeKept = new Map();
+
+// Asks the monitoring for the last minute (one point per scrape) and shapes the answer. The step
+// is the monitoring's own scrape interval when it will say; else `step`; else DEFAULT_STEP.
+export async function fetchDetail(url, { fetchFn = globalThis.fetch, aliases = {}, now = () => Date.now(), step = null, timeoutMs = 10000 } = {}) {
   const base = String(url).replace(/\/$/, '');
-  const end = Math.floor(now() / 1000);
-  const window = { start: end - minutes * 60, end, step: 60 };
   const call = async (path, params) => {
-    const res = await fetchFn(`${base}/api/v1/${path}?${new URLSearchParams(params)}`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetchFn(`${base}/api/v1/${path}${params ? `?${new URLSearchParams(params)}` : ''}`, { signal: AbortSignal.timeout(timeoutMs) });
     const body = await res.json().catch(() => ({}));
     if (body.status !== 'success') throw new Error(body.error || `HTTP ${res.status}`);
-    return list(body.data?.result);
+    return body.data;
   };
+  const rows = async (path, params) => list((await call(path, params))?.result);
   try {
-    const [inames, rnames] = [Object.keys(DETAIL_QUERIES.instant), Object.keys(DETAIL_QUERIES.range)];
+    let scraped = scrapeKept.get(base);
+    if (!scraped || now() - scraped.at > SCRAPE_KEEP_MS) {
+      scraped = { at: now(), seconds: scrapeSeconds((await call('status/config').catch(() => null))?.yaml) };
+      scrapeKept.set(base, scraped);
+    }
+    const every = Math.min(60, Math.max(1, Math.round(scraped.seconds ?? step ?? DEFAULT_STEP)));
+    const queries = detailQueries(every);
+    // The window ends on a multiple of the step, so each new point comes in at the right edge and
+    // the others keep their places.
+    const end = Math.floor(now() / 1000 / every) * every;
+    const window = { start: end - WINDOW_SECONDS, end, step: every };
+    const [inames, rnames] = [Object.keys(queries.instant), Object.keys(queries.range)];
     const [ianswers, ranswers] = await Promise.all([
-      Promise.all(inames.map((n) => call('query', { query: DETAIL_QUERIES.instant[n] }))),
-      Promise.all(rnames.map((n) => call('query_range', { query: DETAIL_QUERIES.range[n], start: window.start, end: window.end, step: window.step }))),
+      Promise.all(inames.map((n) => rows('query', { query: queries.instant[n] }))),
+      Promise.all(rnames.map((n) => rows('query_range', { query: queries.range[n], start: window.start, end: window.end, step: window.step }))),
     ]);
     const instant = Object.fromEntries(inames.map((n, i) => [n, ianswers[i].map((r) => ({ labels: r.metric ?? {}, value: r.value?.[1] }))]));
     const range = Object.fromEntries(rnames.map((n, i) => [n, ranswers[i]]));

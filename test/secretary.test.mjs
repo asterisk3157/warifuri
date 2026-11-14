@@ -17,7 +17,7 @@ import { openLedger } from '../src/ledger/ledger.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { parseWhen, parseNight, inNight, latestSlot, nextSlot, countSlots, localIso, showWhen, JOBS, CHAT_JOBS } from '../src/secretary/schedule.mjs';
 import { createScheduler } from '../src/secretary/scheduler.mjs';
-import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, writeClaudeSettings, readSecretaryKey, paths, openLog, LOG_KEEP } from '../src/secretary/secretary.mjs';
+import { runJob, claudeArgs, scheduleFrom, buildPrompt, writeMcpConfig, writeClaudeSettings, readSecretaryKey, paths, openLog, LOG_KEEP, LANGUAGE_RULE } from '../src/secretary/secretary.mjs';
 import { decideTools, isReadTool } from '../src/secretary/tool-hook.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'warifuri-secretary-'));
@@ -258,6 +258,7 @@ test('run starts claude with only warifuri tools, the connectors off, the key on
     '--strict-mcp-config',
     '--allowedTools', 'mcp__warifuri',
     '--disallowedTools', call.args[7],
+    '--append-system-prompt', LANGUAGE_RULE,
   ]);
   assert.match(call.args[7], /(^|,)Bash(,|$)/);
   assert.match(call.args[7], /(^|,)Write(,|$)/);
@@ -297,6 +298,11 @@ test('a calendar is given only on purpose: its tools, and the connectors when tu
   const cal = scheduleFrom({ WARIFURI_SECRETARY_CALENDAR_TOOLS: 'mcp__calendar, mcp__claude_ai_Google_Calendar', WARIFURI_SECRETARY_CONNECTORS: 'on' });
   const args = claudeArgs({ mcpFile: '/x/mcp.json', schedule: cal });
   assert.ok(!args.includes('--strict-mcp-config'));
+  assert.equal(args[args.indexOf('--append-system-prompt') + 1], LANGUAGE_RULE);
+  for (const job of ['nightly', 'inbox', 'sync']) {
+    const p = buildPrompt(job, { schedule: base });
+    assert.ok(p.indexOf(LANGUAGE_RULE) < 200 && p.trimEnd().endsWith(LANGUAGE_RULE), job);
+  }
   assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__warifuri,mcp__calendar,mcp__claude_ai_Google_Calendar');
   assert.match(buildPrompt('nightly', { schedule: cal }), /`mcp__calendar`/);
   assert.match(buildPrompt('nightly', { schedule: base }), /カレンダーの MCP はつながっていません/);

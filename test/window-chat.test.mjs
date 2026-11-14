@@ -261,7 +261,7 @@ test('answers: an answer starts a turn and comes in the prompt; a changed answer
   const a = w.ledger.ask({ questions: [{ header: 'タスク整理', question: '「調べもの」はどうしますか？', options: [{ label: '残す' }, { label: '閉じる' }], kind: 'close_forgotten' }] }, SECRETARY);
   w.chat.answer(a.id, { index: 0, picked: ['残す'] }, WEB);
   await w.chat.idle();
-  assert.match(w.claude.calls[0].input, /質問「タスク整理」\(「調べもの」はどうしますか？\)への答え: 残す\n$/);
+  assert.match(w.claude.calls[0].input, /質問「タスク整理」\(「調べもの」はどうしますか？\)への答え: 残す\n\n# 返事の言葉\n/);
   w.chat.answer(a.id, { index: 0, picked: ['閉じる'] }, WEB);
   await w.chat.idle();
   const input = w.claude.calls[1].input;

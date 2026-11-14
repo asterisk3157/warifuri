@@ -42,7 +42,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 
 `WARIFURI_SECRETARY` で始まる項目は、秘書の定時の仕事の設定です。`warifuri serve` と `warifuri secretary` が読みます。`WARIFURI_SECRETARY` は `warifuri secretary enable` と `disable` が書くので、手で書く必要はありません。時刻はサーバーの機械の時刻で読みます。変えたら `warifuri serve` を動かし直します。
 
-秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` と `WARIFURI_SECRETARY_TOOLS` に書いたツールだけです。メールや Notion などを渡すときは、`WARIFURI_SECRETARY_TOOLS` に `mcp__claude_ai_Gmail=read` のように、道具と範囲(`read`、`own`、`write`)を書きます。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
+秘書が使えるのは、既定では warifuri のツールだけです。カレンダーを渡すのは、本人が考えて決めることです。この機械の claude に登録したカレンダーの MCP を渡すときは、`WARIFURI_SECRETARY_CALENDAR_TOOLS` にそのツールを書きます。claude.ai のコネクタのカレンダーを渡すときは、あわせて `WARIFURI_SECRETARY_CONNECTORS=on` にします。コネクタを on にしても、秘書が使えるのは `WARIFURI_SECRETARY_CALENDAR_TOOLS` と `WARIFURI_SECRETARY_TOOLS` に書いたツールだけです。秘書がカレンダーに書く先は、ユーザーのメインのカレンダーだけです。書く先のカレンダーを選ぶ設定はありません([連携の例](integrations.md)の「書き出す先」)。メールや Notion などを渡すときは、`WARIFURI_SECRETARY_TOOLS` に `mcp__claude_ai_Gmail=read` のように、道具と範囲(`read`、`own`、`write`)を書きます。くわしくは[構成](architecture.md)の「秘書のプラグイン」の節にあります。
 
 ## Google カレンダーの設定
 
@@ -86,6 +86,7 @@ warifuri の設定とデータベースは、データのフォルダにまと�
 | `WARIFURI_SECRETARY_DEVICE` | 秘書が書くときのデバイスの名前。同じ名前のデバイスがほかで使われているときに変える | `secretary` |  |  | serve、secretary |
 | `WARIFURI_SECRETARY_CONNECTORS` | claude.ai のコネクタ(Gmail、カレンダーなど)を秘書にも使わせるか。既定の off では、claude を ENABLE_CLAUDEAI_MCP_SERVERS=false で起こす。カレンダーを渡すときだけ、考えたうえで on にする | `off` |  |  | serve、secretary |
 | `WARIFURI_MONITOR_URL` | 自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない | なし |  |  | serve |
+| `WARIFURI_MONITOR_STEP` | サーバーの画面のグラフの点の間隔(秒)。監視(Prometheus)が自分のスクレイプ間隔を答えるときは、そちらを使う。答えないときだけ、この値を使う | `5` |  |  | serve |
 | `WARIFURI_MONITOR_ALIASES` | 監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01) | なし |  |  | serve |
 | `WARIFURI_DISCORD_TOKEN` | 秘書の質問、朝の報告、失敗を Discord に送るボットのトークン。ファイル(_FILE)なら、トークンだけか DISCORD_BOT_TOKEN= の1行を置く。WARIFURI_DISCORD_CHANNEL と一緒に設定すると送る | なし |  | 秘密 | serve、secretary |
 | `WARIFURI_DISCORD_CHANNEL` | 送る先の Discord のチャンネルの id。本人だけが見るチャンネルにする | なし |  |  | serve、secretary |

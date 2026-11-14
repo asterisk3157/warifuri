@@ -1,11 +1,34 @@
 // サーバー: the home lab as a task manager shows it (パフォーマンス: each machine's CPU per
-// thread, memory, disks, GPU and the power of the lab over the last hour; 一覧: the VMs and
+// thread, memory, disks, GPU and the power of the lab over the last minute; 一覧: the VMs and
 // containers), when a monitoring URL is set; and warifuri itself (the server, its machine,
 // how the secretary's runs last went, and the devices that use it with the tasks they hold).
 
 import { h, s, skel, ago, profileChip, dayStart, hhmm, md } from '../ui.js';
 
-const view = { tab: null, sel: null };
+// The machines whose guests are folded away in 一覧, kept in this browser.
+const CLOSED_KEY = 'wf.server.closed';
+const view = { tab: null, sel: null, closed: readClosed() };
+function readClosed() {
+  try {
+    const list = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? '[]');
+    return new Set(Array.isArray(list) ? list.filter((x) => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+function toggleClosed(host) {
+  if (!view.closed.delete(host)) view.closed.add(host);
+  try {
+    localStorage.setItem(CLOSED_KEY, JSON.stringify([...view.closed]));
+  } catch {
+    // Without storage the fold lasts until the page is closed.
+  }
+}
+
+// The numbers move every few seconds under パフォーマンス and 一覧; warifuri's own tab is read as
+// slowly as the other screens.
+const LIVE_MS = 3000;
+const refreshMs = () => (view.tab === 'warifuri' || view.tab === null ? undefined : LIVE_MS);
 
 async function load(api) {
   const [server, monitor] = await Promise.all([api('/server'), api('/server/monitor').catch(() => null)]);
@@ -49,13 +72,26 @@ const kwh = (wh) => (wh === null || wh === undefined ? '—' : `${(wh / 1000).to
 // dark (app.css).
 const COLOR = { cpu: 'var(--g-cpu)', memory: 'var(--g-memory)', disk: 'var(--g-disk)', gpu: 'var(--g-cpu)', power: 'var(--g-power)' };
 
-// A line over the last hour, filled below it, scaled to max (100 for percentages).
+// Whether the lines slide in this time (only when a new point has come), and how long a point lasts.
+const slide = { on: false, secs: 5, end: null };
+function settle(detail) {
+  slide.on = detail.end !== slide.end;
+  slide.end = detail.end;
+  slide.secs = detail.step ?? 5;
+}
+
+// A line over the last minute, filled below it, scaled to max (100 for percentages). The line
+// slides in by one point each time it is drawn, so it seems to move left as time goes by.
 function graph(series, color, { max = 100, cls = 'wf-tm-graph' } = {}) {
   const data = series && series.length > 1 ? series : [0, 0];
   const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - (Math.min(max, Math.max(0, v)) / max) * 30}`);
-  return s('svg', { class: cls, viewBox: '0 0 100 30', preserveAspectRatio: 'none', 'aria-hidden': 'true', style: { color } },
-    s('polygon', { points: `0,30 ${pts.join(' ')} 100,30`, fill: 'currentColor', 'fill-opacity': '0.1' }),
-    s('polyline', { points: pts.join(' '), fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'vector-effect': 'non-scaling-stroke' }));
+  const svg = s('svg', { class: cls, viewBox: '0 0 100 30', preserveAspectRatio: 'none', 'aria-hidden': 'true', style: { color } },
+    s('g', { class: slide.on ? 'wf-tm-slide' : null },
+      s('polygon', { points: `0,30 ${pts.join(' ')} 100,30`, fill: 'currentColor', 'fill-opacity': '0.1' }),
+      s('polyline', { points: pts.join(' '), fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'vector-effect': 'non-scaling-stroke' })));
+  svg.style.setProperty('--slide', `${(100 / (data.length - 1)).toFixed(2)}px`);
+  svg.style.setProperty('--slide-s', `${slide.secs}s`);
+  return svg;
 }
 
 // A bar with its number, coloured when it comes near the limit.
@@ -160,9 +196,9 @@ function fitCores(grid, n) {
   return grid;
 }
 
-function mainPanel(it, minutes) {
+function mainPanel(it, seconds) {
   if (!it) return h('section', { class: 'wf-tm-main' }, h('p', { class: 'wf-empty', text: '監視から機械が見つかりませんでした' }));
-  const axis = h('div', { class: 'wf-tm-axis' }, h('span', { text: `${minutes}分前` }), h('span', { text: '今' }));
+  const axis = h('div', { class: 'wf-tm-axis' }, h('span', { text: `${seconds}秒前` }), h('span', { text: '今' }));
   let body;
   if (it.kind === 'cpu' && it.cores.length) {
     const cols = it.cores.length > 16 ? 8 : 4;
@@ -193,10 +229,11 @@ function mainPanel(it, minutes) {
 }
 
 function performance(detail, ctx) {
+  settle(detail);
   const groups = itemsOf(detail);
   const items = groups.flatMap((g) => g.items);
   if (!items.some((it) => it.id === view.sel)) view.sel = items[0]?.id ?? null;
-  return h('div', { class: 'wf-surface wf-tm' }, sideList(groups, ctx), mainPanel(items.find((it) => it.id === view.sel), detail.minutes));
+  return h('div', { class: 'wf-surface wf-tm' }, sideList(groups, ctx), mainPanel(items.find((it) => it.id === view.sel), detail.seconds));
 }
 
 const coresText = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
@@ -209,7 +246,7 @@ function given(percent, used, total, unit, warn) {
     h('span', { class: 'wf-muted', text: amount ?? '' }));
 }
 
-function guestList(detail) {
+function guestList(detail, ctx) {
   const avg = (key) => {
     const known = detail.guests.map((g) => g[key]).filter((v) => v !== null);
     return known.length ? `${Math.round(known.reduce((a, b) => a + b, 0) / known.length)}%` : '—';
@@ -220,20 +257,28 @@ function guestList(detail) {
   const cpu = (g) => given(g.cpu, g.cpuUsedCores === null ? null : g.cpuUsedCores.toFixed(1), g.cpuCores === null ? null : coresText(g.cpuCores), 'コア', 80);
   const mem = (g) => given(g.memory, gb(g.memoryUsedBytes), gb(g.memoryTotalBytes), 'GB', 90);
   const disk = (g) => given(g.disk, gb(g.diskUsedBytes), gb(g.diskTotalBytes), 'GB', 85);
-  return h('section', { class: 'wf-surface wf-table' },
+  return h('section', { class: 'wf-surface wf-table wf-tm-listbox', data: { scroll: 'vmlist' } },
     h('div', { class: 'wf-cols wf-cols-vm' }, h('span', { text: '名前' }), h('span', { text: '種類' }), h('span', { text: '状態' }),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('cpu') }), h('br'), 'CPU'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('memory') }), h('br'), 'メモリ'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: gpuAvg }), h('br'), 'GPU'),
       h('span', { class: 'wf-tm-num' }, h('b', { text: avg('disk') }), h('br'), 'ディスク')),
-    ...hosts.flatMap((host) => [
-      h('div', { class: 'wf-tm-hostrow', text: host }),
-      ...detail.guests.filter((g) => g.host === host).map((g) => h('div', { class: ['wf-row', 'wf-row-vm', !g.up && 'wf-row-off'] },
-        h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', g.up && 'wf-fresh', !g.up && g.always && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { class: 'wf-ellipsis', text: g.name })),
-        h('span', { class: 'wf-muted', text: `${g.type === 'lxc' ? 'LXC' : 'VM'} ${g.vmid ?? ''}` }),
-        h('span', { class: !g.up && g.always ? 'wf-bad' : '', text: g.up ? '稼働中' : g.always ? '止まっています' : '停止' }),
-        cpu(g), mem(g), given(g.gpu, null, null, '', 90), disk(g))),
-    ]),
+    ...hosts.flatMap((host) => {
+      const mine = detail.guests.filter((g) => g.host === host);
+      const open = !view.closed.has(host);
+      return [
+        h('button', {
+          type: 'button', class: 'wf-tm-hostrow', 'aria-expanded': String(open), data: { key: `host-${host}` }, title: open ? 'たたむ' : 'ひらく',
+          onclick: () => { toggleClosed(host); ctx.rerender(); },
+        }, s('svg', { class: open ? 'wf-tm-chev wf-tm-chev-open' : 'wf-tm-chev', viewBox: '0 0 10 10', 'aria-hidden': 'true' }, s('path', { d: 'M3 1.5 L7 5 L3 8.5', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' })),
+          h('b', { text: host }), h('span', { text: `${mine.filter((g) => g.up).length} / ${mine.length} 台が稼働中` })),
+        ...(open ? mine.map((g) => h('div', { class: ['wf-row', 'wf-row-vm', !g.up && 'wf-row-off'] },
+          h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', g.up && 'wf-fresh', !g.up && g.always && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { class: 'wf-ellipsis', text: g.name })),
+          h('span', { class: 'wf-muted', text: `${g.type === 'lxc' ? 'LXC' : 'VM'} ${g.vmid ?? ''}` }),
+          h('span', { class: !g.up && g.always ? 'wf-bad' : '', text: g.up ? '稼働中' : g.always ? '止まっています' : '停止' }),
+          cpu(g), mem(g), given(g.gpu, null, null, '', 90), disk(g))) : []),
+      ];
+    }),
     detail.guests.length ? null : h('div', { class: 'wf-empty', text: 'VM とコンテナは見つかりませんでした' }));
 }
 
@@ -272,9 +317,10 @@ function jobsCard(jobs, ctx) {
   return h('section', { class: 'wf-surface wf-table' },
     h('div', { class: 'wf-table-head' }, h('h2', { text: '秘書の仕事' }), h('span', { class: 'wf-muted', text: '最後の結果' })),
     ...jobs.map((j) => h('div', { class: 'wf-row wf-row-job' },
-      h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', j.ok && 'wf-fresh', !j.ok && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { text: j.title })),
+      h('span', { class: 'wf-devname' }, h('span', { class: ['wf-devdot', j.ok && 'wf-fresh', !j.ok && !j.resolved && 'wf-devdot-bad'], 'aria-hidden': 'true' }), h('b', { text: j.title })),
       h('span', { text: ago(j.at, ctx.now) }),
-      h('span', { class: ['wf-cell', !j.ok && 'wf-bad'], text: j.ok ? '成功' : j.problem }))));
+      // A run that failed for the login, when a later run logged in: past, so not red.
+      h('span', { class: ['wf-cell', !j.ok && !j.resolved && 'wf-bad', j.resolved && 'wf-muted'], text: j.ok ? '成功' : j.resolved ? j.note : j.problem }))));
 }
 
 function devices(data, ctx) {
@@ -322,7 +368,7 @@ function render(data, ctx) {
       h('div', { class: 'wf-empty' }, h('b', { class: 'wf-bad', text: lab.detail.error }), h('br'),
         h('span', { class: 'wf-muted', text: '監視サーバーが止まっているか、ネットワークにつながっていません' })))];
   } else {
-    body = [view.tab === 'perf' ? performance(lab.detail, ctx) : guestList(lab.detail)];
+    body = [view.tab === 'perf' ? performance(lab.detail, ctx) : guestList(lab.detail, ctx)];
   }
   return h('div', { class: 'wf-page-scroll', data: { scroll: 'server' } },
     ctx.head('サーバー', h('span', { class: 'wf-head-gap' }), tabs), ctx.banner(), ...body);
@@ -335,4 +381,4 @@ function skeleton(ctx) {
       h('div', { class: 'wf-tm-main' }, skel('120px', '22px'), skel('100%', '200px', { borderRadius: '8px' }))));
 }
 
-export default { load, render, skeleton };
+export default { load, render, skeleton, refreshMs };

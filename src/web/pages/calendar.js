@@ -7,10 +7,11 @@ import { GOOGLE_G } from '../google-mark.js';
 const ROW = 52;
 const H0 = 8;
 const H1 = 22;
-const view = { mode: 'week', anchor: dayStart(new Date()), sel: null };
+const view = { mode: 'week', anchor: null, sel: null };
 
-const mondayOf = (d) => addDays(d, -((d.getDay() + 6) % 7));
-const range = () => (view.mode === 'day' ? { from: view.anchor, days: 1 } : { from: mondayOf(view.anchor), days: 7 });
+// anchor is null while the view follows today; the week starts at its day, so today is on the left.
+const anchorDay = () => view.anchor ?? dayStart(new Date());
+const range = () => ({ from: anchorDay(), days: view.mode === 'day' ? 1 : 7 });
 
 async function load(api) {
   const { from, days } = range();
@@ -84,12 +85,12 @@ export function rangeLabel(from, days) {
   if (days === 1) return `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日（${WEEKDAYS[from.getDay()]}）`;
   const last = addDays(from, days - 1);
   const tail = last.getMonth() === from.getMonth() ? `${last.getDate()}日` : `${last.getMonth() + 1}月${last.getDate()}日`;
-  return `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日 – ${tail}`;
+  return `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日 ― ${tail}`;
 }
 
 function toolbar(ctx, from, days) {
   const move = (n) => {
-    view.anchor = addDays(view.anchor, n * (view.mode === 'day' ? 1 : 7));
+    view.anchor = addDays(anchorDay(), n * (view.mode === 'day' ? 1 : 7));
     ctx.refresh();
   };
   const pick = (mode) => {
@@ -100,7 +101,7 @@ function toolbar(ctx, from, days) {
   return h('div', { class: 'wf-week-bar' },
     h('button', { type: 'button', class: 'wf-btn wf-btn-sq', 'aria-label': isWeek ? '前の週' : '前の日', data: { key: 'prev' }, onclick: () => move(-1), text: '‹' }),
     h('button', { type: 'button', class: 'wf-btn wf-btn-sq', 'aria-label': isWeek ? '次の週' : '次の日', data: { key: 'next' }, onclick: () => move(1), text: '›' }),
-    h('button', { type: 'button', class: 'wf-btn', data: { key: 'today' }, onclick: () => { view.anchor = dayStart(new Date()); ctx.refresh(); }, text: '今日' }),
+    h('button', { type: 'button', class: 'wf-btn', data: { key: 'today' }, onclick: () => { view.anchor = null; ctx.refresh(); }, text: '今日' }),
     h('span', { class: 'wf-range', text: rangeLabel(from, days) }),
     h('div', { class: 'wf-seg', role: 'group', 'aria-label': '表示の幅' },
       h('button', { type: 'button', 'aria-pressed': String(!isWeek), data: { key: 'mode-day' }, onclick: () => pick('day'), text: '日' }),
