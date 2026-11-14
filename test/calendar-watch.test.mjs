@@ -196,10 +196,10 @@ test('an event warifuri wrote is not made fixed; its booking follows the calenda
   ledger.close();
 });
 
-test('the line 割り振りで作成 alone does not make an event warifuri\'s, and a moved pair follows the calendar it moved to', () => {
+test('the line warifuri で作成 alone does not make an event warifuri\'s, and a moved pair follows the calendar it moved to', () => {
   const ledger = openLedger(':memory:');
   // An event that says it was made by the secretary, with no pair: it is the person's.
-  const marked = ev('m1', 11, 9, { description: 'メモ\n割り振りで作成' });
+  const marked = ev('m1', 11, 9, { description: 'メモ\nwarifuri で作成' });
   run(ledger, [{ calendar: PRIMARY, events: [marked] }]);
   assert.deepEqual(fixedOf(ledger).map((b) => [b.source, b.external_id]), [['google-calendar', 'm1']]);
   // A task's time written to another calendar before, then moved to the main one: made there,
@@ -207,7 +207,7 @@ test('the line 割り振りで作成 alone does not make an event warifuri\'s, a
   const task = ledger.createTask({ title: '資料を作る', mode: 'human', done_when: '資料ができている' }, AGENT);
   const { booking } = ledger.book({ kind: 'task', task_id: task.id, starts_at: at(12, 9), ends_at: at(12, 10), source: 'google-calendar:work@example.com', external_id: 'old' }, AGENT);
   ledger.book({ id: booking.id, source: 'google-calendar', external_id: 'new' }, AGENT);
-  const main = { calendar: PRIMARY, events: [marked, ev('new', 12, 9, { summary: '資料を作る', description: '割り振りで作成' })] };
+  const main = { calendar: PRIMARY, events: [marked, ev('new', 12, 9, { summary: '資料を作る', description: 'warifuri で作成' })] };
   // While the old event is still there, it is taken in as fixed; once it is deleted, so is its copy.
   run(ledger, [main, { calendar: WORK, events: [ev('old', 12, 9, { summary: '資料を作る' })] }]);
   assert.ok(fixedOf(ledger).some((b) => b.external_id === 'old'));
