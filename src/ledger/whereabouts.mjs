@@ -4,8 +4,9 @@
 //
 // How a time's place is decided, the first that applies:
 // 1. A booking with a location: the person is at that location for the booking's time. When
-//    places.travel gives the minutes between that place and a home place, the person is also
-//    away for that long before and after it (on the way). A location that is a URL (an online
+//    places.travel gives the minutes between that place and a home place (the shortest way
+//    through the times written), the person is also away for that long before and after it
+//    (on the way). A booking of travel is skipped: it is that time on the way. A location that is a URL (an online
 //    meeting) says nothing of where the person is, and is skipped.
 // 2. A band of the week type (week.slots): the person is at its place.
 // 3. Neither: the person is taken to be at home (assumed). Only what is written moves the
@@ -20,12 +21,34 @@ const URL_LIKE = /^[a-z][a-z0-9+.-]*:\/\//i;
 // The names of the home places: places.places with home: true.
 export const homeNames = (places) => new Set((places ?? []).filter((p) => p?.home === true).map((p) => p.name));
 
+// The minutes on the way between places a and b by places.travel: the shortest way through
+// the times written, each of which goes both ways (研究室 0 minutes from 大学, 大学 15 minutes
+// from 家: 研究室 is 15 minutes from 家). 0 for the same place; null when no way is written.
+export function travelMinutes(a, b, travel) {
+  if (a === b) return 0;
+  const dist = new Map([[a, 0]]);
+  const done = new Set();
+  for (;;) {
+    let at = null;
+    for (const [p, d] of dist) if (!done.has(p) && (at === null || d < dist.get(at))) at = p;
+    if (at === null) return null;
+    if (at === b) return dist.get(at);
+    done.add(at);
+    for (const t of travel ?? []) {
+      const other = t.from === at ? t.to : t.to === at ? t.from : null;
+      if (other === null || done.has(other)) continue;
+      const d = dist.get(at) + t.minutes;
+      if (!dist.has(other) || d < dist.get(other)) dist.set(other, d);
+    }
+  }
+}
+
 // The minutes to come from the nearest home place to `place`, or 0 when none is written.
 function travelFromHome(place, homes, travel) {
   let best = null;
-  for (const t of travel ?? []) {
-    const other = t.from === place ? t.to : t.to === place ? t.from : null;
-    if (other !== null && homes.has(other) && (best === null || t.minutes < best)) best = t.minutes;
+  for (const h of homes) {
+    const m = travelMinutes(h, place, travel);
+    if (m !== null && (best === null || m < best)) best = m;
   }
   return best ?? 0;
 }
@@ -40,6 +63,8 @@ export function whereabouts({ fromMs, toMs, bands = [], bookings = [], places = 
   const isHome = (place) => homes.has(place);
   const spans = [];
   for (const b of bookings) {
+    // A booking of travel is the way itself, already counted around the booking it leads to.
+    if (b.kind === 'travel') continue;
     const place = typeof b.location === 'string' ? b.location.trim() : '';
     if (place === '' || URL_LIKE.test(place)) continue;
     const home = isHome(place);

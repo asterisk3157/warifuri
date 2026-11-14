@@ -1,6 +1,7 @@
 // 呼び出し(原則17): what in the secretary's conversation needs the person, sent to Discord.
-// Three things go: the secretary's questions (with their choices as buttons), the morning
-// report, and the runs that failed. A calendar under the message (show_calendar) goes with it
+// Four things go: the secretary's questions (with their choices as buttons), the morning
+// report, what the secretary changed when it planned again on its own (replan), and the runs
+// that failed. A calendar under the message (show_calendar) goes with it
 // as a picture.
 // The secretary's replies go too while the person talks from Discord: when what the person
 // last wrote came from Discord (src/notify/discord-chat.mjs), within TALK_MS. Replies to what
@@ -50,6 +51,9 @@ export function noticeOf(m, link, { talking = false, mirror = false } = {}) {
   }
   if (m.role === 'secretary' && m.data?.scheduled === 'morning') {
     return { text: `朝の報告です。\n${clip(m.body, BODY_MAX)}${tail}`, mention: false, components: replyComponents(m) };
+  }
+  if (m.role === 'secretary' && m.data?.scheduled === 'replan' && m.body.trim()) {
+    return { text: `計画を組み直しました。\n${clip(m.body, BODY_MAX)}${tail}`, mention: false, components: replyComponents(m) };
   }
   if (m.role === 'system' && m.data?.failure) return { text: `${m.body}${tail}`, mention: true };
   if (talking && m.role === 'secretary' && m.kind === 'text' && m.body.trim()) {

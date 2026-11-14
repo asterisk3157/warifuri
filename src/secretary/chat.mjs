@@ -55,6 +55,7 @@ import { readSettings, onboardingDue } from '../ledger/settings.mjs';
 import { findOnPath } from '../client/connect.mjs';
 import { localIso, inNight } from './schedule.mjs';
 import { createStreamReader, UNSUPPORTED } from './stream.mjs';
+import { replanLine } from './replan.mjs';
 import {
   deviceOf, paths, ownerOnlyDir, readSecretaryKey, writeMcpConfig, writeClaudeSettings, serverUrl, scheduleFrom, readyToSchedule, claudeArgs,
   claudeEnv, factLines, languageLines, readInstructions, openLog, defaultSpawn, kill, INSTRUCTIONS_DIR, failureOf,
@@ -75,8 +76,12 @@ const TEXT_TYPES = /^(text\/|application\/(json|xml|x-yaml|yaml|csv|javascript|x
 const TEXT_NAMES = /\.(txt|md|markdown|csv|tsv|json|ya?ml|toml|xml|html?|css|js|mjs|ts|py|rb|go|rs|sh|ini|log|ics)$/i;
 // What a scheduled trigger says in the conversation; its instructions are harness/secretary/<job>.md.
 // calendar is not of the clock: the calendar watch (src/calendar/watch.mjs) sends it when the
-// person's calendar changed and WARIFURI_GOOGLE_CALENDAR_WAKE is on.
-export const TRIGGERS = { morning: '朝の時間です', weekly: '週の完了確認の時間です', calendar: 'カレンダーの予定が変わりました' };
+// person's calendar changed and WARIFURI_GOOGLE_CALENDAR_WAKE is on. replan neither: the replan
+// watch (replan.mjs) sends it when tasks with a due date came or changed.
+export const TRIGGERS = {
+  morning: '朝の時間です', weekly: '週の完了確認の時間です', calendar: 'カレンダーの予定が変わりました',
+  replan: '締切や見積もりが変わったので、計画を組み直します',
+};
 // How many changes of the calendar are said one by one; the rest are counted in one line.
 export const CALENDAR_NOTES = 5;
 
@@ -192,6 +197,11 @@ export function buildChatPrompt({
   for (const tr of triggers) {
     const job = tr.data?.job;
     out.push('', `# 決まった時刻の仕事(${at(tr.created_at)})`, '', `warifuri が「${tr.body}」と知らせました。本人はこの場にいないかもしれません。`);
+    const tasks = Array.isArray(tr.data?.tasks) ? tr.data.tasks : [];
+    if (tasks.length) {
+      out.push('', '変わったタスク(資料として読みます):');
+      for (const t of tasks) out.push(`- ${t.task_id} ${replanLine(t)}`);
+    }
     if (job && Object.hasOwn(TRIGGERS, job)) out.push('', readInstructions(`${job}.md`, instructionsDir));
   }
   const requests = feed.filter(isRequest);
@@ -274,10 +284,12 @@ export function readUpload(dir, a) {
 }
 
 // Writes warifuri's call at a set time (job: morning or weekly) into the secretary's conversation.
-export function writeTrigger(ledger, job, writer) {
+// tasks: what changed, for replan ([{ task_id, title, change, due?, estimate_min? }]).
+export function writeTrigger(ledger, job, writer, { tasks } = {}) {
   if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);
   const thread = ledger.ensureThread(SECRETARY_THREAD.kind, writer);
-  return ledger.addMessage(thread.id, { role: 'system', kind: 'trigger', body: TRIGGERS[job], data: { job } }, writer);
+  const data = tasks?.length ? { job, tasks } : { job };
+  return ledger.addMessage(thread.id, { role: 'system', kind: 'trigger', body: TRIGGERS[job], data }, writer);
 }
 
 // The digest of one exchange in a thread, for the main session.
@@ -705,12 +717,17 @@ export function createChat(ledger, cfg, ctx = {}) {
     },
     // warifuri's call into the conversation at a set time (job: morning or weekly). Not in the night,
     // unless force (the person asked for it). { sent: message } or { skipped: reason }.
-    trigger(job, { force = false } = {}) {
+    // tasks: what changed, for replan. A replan while an earlier one still waits adds nothing.
+    trigger(job, { force = false, tasks } = {}) {
       if (!Object.hasOwn(TRIGGERS, job)) throw new Error(`no trigger ${job}`);
       if (!on) return { skipped: 'the secretary is off' };
       const schedule = scheduleFrom(cfg.values);
       if (!force && !schedule.night.error && inNight(schedule.night, now())) return { skipped: 'it is the night' };
-      const message = writeTrigger(ledger, job, WRITER);
+      if (job === 'replan') {
+        const main = mainThread();
+        if (main && unseen(main).some((m) => m.kind === 'trigger' && m.data?.job === 'replan')) return { skipped: 'an earlier replan still waits' };
+      }
+      const message = writeTrigger(ledger, job, WRITER, { tasks });
       kick(message.thread_id);
       return { sent: message };
     },

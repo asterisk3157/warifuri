@@ -98,8 +98,8 @@ export function weekData({ from, to, bookings, colors = {}, marks = [], bands = 
   for (const b of bookings) {
     const s = Date.parse(b.starts_at);
     const e = Date.parse(b.ends_at);
-    const color = b.kind === 'fixed' ? null : b.kind === 'habit' ? HABIT : colors[b.profile] ?? '#8cc4ea';
-    const label = b.kind === 'fixed' ? null : b.kind === 'habit' ? '習慣' : b.profile ?? 'タスク';
+    const color = ['fixed', 'travel'].includes(b.kind) ? null : b.kind === 'habit' ? HABIT : colors[b.profile] ?? '#8cc4ea';
+    const label = ['fixed', 'travel'].includes(b.kind) ? null : b.kind === 'habit' ? '習慣' : b.profile ?? 'タスク';
     for (const day of dates) {
       const dayStart = day.getTime();
       const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
