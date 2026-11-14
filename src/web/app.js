@@ -1,6 +1,6 @@
 // The frame of the Web screens: the sidebar, the card at its foot, the about dialog, and the
 // reading every 30 seconds. Each screen (pages/*.js) gives { load(api), skeleton(ctx),
-// render(data, ctx), nav?(ctx), busy?() }.
+// render(data, ctx), nav?(ctx), busy?(), refreshMs?() (when it wants to be read more often) }.
 
 import { h, icon, machinePicture, soonBadge, hhmm2, ago } from './ui.js';
 import calendar from './pages/calendar.js';
@@ -141,7 +141,7 @@ async function refresh() {
   }
   if (page.busy?.()) renderNav();
   else draw();
-  timer = setTimeout(refresh, REFRESH_MS);
+  timer = setTimeout(refresh, page.refreshMs?.() ?? REFRESH_MS);
 }
 
 // The about dialog: of the host machine (chip, memory, OS, 接続先), or of one device

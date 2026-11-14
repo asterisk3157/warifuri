@@ -472,8 +472,10 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-meter-bad .wf-meter-n { color: var(--red); font-weight: 600; }
 /* サーバー: the task manager of the home lab */
 .wf-head-gap { flex: 1; }
-.wf-tm { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 520px; overflow: hidden; }
-.wf-tm-side { border-right: 1px solid var(--hair); padding: 10px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; max-height: 720px; }
+.wf-tm { display: grid; grid-template-columns: 250px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 520px; overflow: hidden; }
+/* パフォーマンスは、ウィンドウの下まで伸びる(低いウィンドウでは 520px を下回らず、画面がスクロールする) */
+.wf-page-scroll > .wf-tm { flex: 1 0 auto; }
+.wf-tm-side { border-right: 1px solid var(--hair); padding: 10px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
 .wf-tm-group { display: flex; flex-direction: column; gap: 2px; }
 .wf-tm-host { font-size: 14px; font-weight: 600; padding: 6px 8px 4px; }
 .wf-tm-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: none; border-radius: 8px; background: transparent; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
@@ -515,7 +517,18 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-tm-num { text-align: right; font-variant-numeric: tabular-nums; }
 .wf-tm-num b { font-size: 17px; color: var(--ink); }
 .wf-tm-hot { background: var(--hot); border-radius: 4px; padding: 0 4px; }
-.wf-tm-hostrow { padding: 6px 20px; font-size: 13px; color: var(--sub); background: var(--fill); border-top: 1px solid var(--hair); }
+.wf-tm-hostrow { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 6px 20px; font: inherit; font-size: 13px; text-align: left; color: var(--sub); background: var(--fill); border: none; border-top: 1px solid var(--hair); cursor: pointer; }
+.wf-tm-hostrow b { color: var(--ink); font-weight: 600; }
+.wf-tm-hostrow:hover { background: var(--tint); }
+.wf-tm-chev { flex: none; width: 10px; height: 10px; transition: transform .15s; }
+.wf-tm-chev-open { transform: rotate(90deg); }
+/* 一覧は、ウィンドウの下まで使い、中でスクロールする(見出しの行は上に残る) */
+.wf-page-scroll > .wf-tm-listbox { flex: 1 1 0; min-height: 200px; overflow-y: auto; }
+.wf-tm-listbox > .wf-cols { position: sticky; top: 0; z-index: 2; background: var(--surface); border-top: none; border-bottom: 1px solid var(--hair); }
+/* 点が入るたびに、線が1点分だけ左へ滑る */
+.wf-tm-slide { animation: wf-tm-slide var(--slide-s, 5s) linear; }
+@keyframes wf-tm-slide { from { transform: translateX(var(--slide, 0)); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .wf-tm-slide { animation: none; } }
 .wf-srv-usage { margin-top: 14px; border-top: 1px solid var(--hair); }
 .wf-srv-usage .wf-row { padding-left: 0; padding-right: 0; }
 .wf-tm-hint { margin: 0 4px; font-size: 14px; }
