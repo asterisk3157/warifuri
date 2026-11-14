@@ -185,7 +185,7 @@ export const ACTIVITY_KINDS = ['created', 'started', 'released', 'waiting', 'def
 export const ACTIVITY_MAX_DAYS = 31;
 export const ACTIVITY_ITEMS_MAX = 50;
 
-function activityKind(entity, action, changes) {
+export function activityKind(entity, action, changes) {
   if (action === 'create') return 'created';
   if (action === 'reopen') return 'reopened';
   if (entity === 'task' && action === 'start') return 'started';

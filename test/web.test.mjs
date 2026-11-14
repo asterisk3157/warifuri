@@ -143,6 +143,9 @@ test('endpoint shapes', async (t) => {
   const read = thesis.tasks.find((x) => x.id === ids.a);
   assert.equal(read.hold.device, 'laptop');
   assert.equal(read.hold.place_name, 'thesis');
+  // 記録の要点: newest first, who did it.
+  assert.deepEqual(read.log.map((l) => [l.kind, l.by]), [['started', 'laptop'], ['created', 'human']]);
+  assert.equal(read.priority, null);
   assert.equal(tasks.unassigned[0].id, ids.loose);
   assert.equal(tasks.profiles.research, '#c9ced6');
   assert.equal(tasks.profiles.hobby, '#123abc');
@@ -778,4 +781,14 @@ test('/privacy without a contact names the operator, and a contact is escaped', 
   const { privacyHtml } = await import('../src/server/web.mjs');
   assert.match(privacyHtml('https://example.com/contact'), /<a href="https:\/\/example\.com\/contact">/);
   assert.doesNotMatch(privacyHtml('<script>x</script>'), /<script>/);
+});
+
+test('tasks endpoint: 記録の要点 carries the line that came with a release, a wait and a close', async (t) => {
+  const { base, ledger, ids } = await start(t);
+  ledger.release(ids.a, { next: '2章から' }, { actor: 'agent', device: 'laptop' });
+  ledger.setState(ids.a, 'waiting', { waiting_on: 'Robin', waiting_for: '図の確認' }, ACTOR);
+  ledger.setState(ids.a, 'done', { result: '読み終えた' }, ACTOR);
+  const tasks = await (await get(base, '/web/api/tasks')).json();
+  const read = tasks.goals.find((g) => g.id === ids.goal).tasks.find((x) => x.id === ids.a);
+  assert.deepEqual(read.log.slice(0, 3).map((l) => [l.kind, l.note]), [['done', '読み終えた'], ['waiting', '図の確認'], ['released', '2章から']]);
 });
