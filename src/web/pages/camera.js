@@ -60,6 +60,9 @@ async function askAccess(frame) {
 function makeTile(cam) {
   const box = h('div', { class: 'wf-cam-view', 'aria-busy': 'true' }, skel('100%', '100%', { borderRadius: '0' }));
   const tile = { cam, box, state: 'checking' };
+  // Opening the live view in its own tab needs no permission (a page of its own is not a page on
+  // the internet reading a local machine), so it is there whenever the view cannot be shown here.
+  const open = () => h('a', { class: 'wf-btn-line', href: cam.stream, target: '_blank', rel: 'noopener noreferrer', text: '新しいタブで開く' });
   const show = (...kids) => {
     box.removeAttribute('aria-busy');
     box.replaceChildren(h('div', { class: 'wf-cam-away' }, ...kids));
@@ -71,16 +74,18 @@ function makeTile(cam) {
       tile.state = 'away';
       show(
         h('p', { text: 'このブラウザで映像を見るには、許可が要ります' }),
-        h('button', { type: 'button', class: 'wf-btn-line', text: '許可する', onclick: async () => {
-          await askAccess(cam.frame);
-          tile.check();
-        } }),
+        h('div', { class: 'wf-cam-actions' },
+          h('button', { type: 'button', class: 'wf-btn-line', text: '許可する', onclick: async () => {
+            await askAccess(cam.frame);
+            tile.check();
+          } }),
+          open()),
       );
       return;
     }
     if (access === 'denied') {
       tile.state = 'away';
-      show(h('p', { text: 'ローカル ネットワークへのアクセスが、このサイトで拒否されています。アドレスバーの左のボタンから許可してください' }));
+      show(h('p', { text: 'ローカル ネットワークへのアクセスが、このサイトで拒否されています。アドレスバーの左のボタンから許可してください' }), open());
       return;
     }
     probe(cam.frame, (ok) => {
@@ -93,7 +98,7 @@ function makeTile(cam) {
         }));
       } else {
         tile.state = 'away';
-        show(h('p', { text: 'Tailscale につないだ端末で開くと映ります' }));
+        show(h('p', { text: 'Tailscale につないだ端末で開くと映ります' }), open());
       }
     });
   };
