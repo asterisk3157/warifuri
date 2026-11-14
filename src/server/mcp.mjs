@@ -1550,7 +1550,8 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
 // with ask_secretary. githubWebhookSecret: the secret of GitHub's webhook (github.mjs); without
 // it /api/github/webhook answers 404. githubLimit: its rate limit per address.
 // calendarWatch: the calendar watch ({ notify(headers) }), when Google calls this server.
-// cameras: the cameras of WARIFURI_CAMERAS (cameras.mjs), for カメラ on the Web screens.
+// cameras: the cameras of WARIFURI_CAMERAS (cameras.mjs), for カメラ on the Web screens, and
+// cameraAuth: their login (WARIFURI_CAMERA_AUTH), or null.
 export function createApp({
   ledger,
   home = null,
@@ -1571,6 +1572,7 @@ export function createApp({
   calendarWatch = null,
   operatorContact = null,
   cameras = [],
+  cameraAuth = null,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1611,10 +1613,10 @@ export function createApp({
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
     ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), operatorContact, chat, limit: webLimit,
-    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor, cameras,
+    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor, cameras, cameraAuth,
   });
   app.use(web.router);
-  app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };
+  app.locals.web = { mode: web.mode, issueLogin: web.issueLogin, upgrade: web.upgrade, closeUpgrades: web.closeUpgrades };
 
   app.use((req, res) => sendText(res, 404, 'not found'));
   // Errors from the routes above; the message may come from a library, so it is not echoed.
@@ -1626,10 +1628,17 @@ export function createApp({
   return app;
 }
 
-// The HTTP server; server.web is the app's { mode, issueLogin } for the Web screens.
+// The HTTP server; server.web is the app's { mode, issueLogin } for the Web screens. Its
+// WebSockets are the cameras' live views; closeAllConnections ends them too.
 export function createServer(options) {
   const app = createApp(options);
   const server = http.createServer(app);
   server.web = app.locals.web;
+  server.on('upgrade', app.locals.web.upgrade);
+  const closeAll = server.closeAllConnections.bind(server);
+  server.closeAllConnections = () => {
+    app.locals.web.closeUpgrades();
+    closeAll();
+  };
   return server;
 }

@@ -498,6 +498,7 @@ function runServe(args) {
       calendarWatch: watch,
       operatorContact: values.WARIFURI_OPERATOR_CONTACT ?? null,
       cameras: parseCameras(values.WARIFURI_CAMERAS).cameras,
+      cameraAuth: values.WARIFURI_CAMERA_AUTH ?? null,
     });
   } catch (err) {
     chat.stop();
