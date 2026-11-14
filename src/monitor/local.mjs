@@ -42,20 +42,44 @@ export function localMachine(home, { platform = process.platform } = {}) {
 // The runs of the secretary as their logs tell: for each job that has run, when it last
 // ended and whether it failed (failureOf on the end of its log). The conversation's turns
 // (the morning among them) are under 会話.
+// The login is one for every run, so a run that failed for the login is over once a later
+// run (of any job, the conversation too) got past it: the weekly inbox would otherwise stay
+// red for a week after the person logged in again. Such a run is not ok, but resolved, and
+// the screen shows it quietly.
 const JOBS = [['nightly', JOB_TITLES.nightly], ['sync', JOB_TITLES.sync], ['inbox', JOB_TITLES.inbox], ['chat', '会話']];
 export function secretaryJobs(home) {
   const dir = paths(home).logs;
-  const out = [];
-  for (const [job, title] of JOBS) {
-    const file = path.join(dir, `${job}.log`);
+  const runs = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith('.log'));
+  } catch {
+    return [];
+  }
+  // Every last log (the jobs', the conversation's, the threads', the tells'), for when the
+  // login last worked.
+  for (const n of names) {
+    const file = path.join(dir, n);
     let at;
     try {
       at = fs.statSync(file).mtime.toISOString();
     } catch {
       continue;
     }
-    const f = failureOf({ code: 0 }, logTail(file));
-    out.push({ job, title, at, ok: !f, problem: f ? f.text : null });
+    runs.push({ name: n.slice(0, -'.log'.length), at, failure: failureOf({ code: 0 }, logTail(file)) });
+  }
+  const loggedIn = runs.filter((r) => !r.failure).map((r) => r.at).sort().at(-1) ?? null;
+  const out = [];
+  for (const [job, title] of JOBS) {
+    const run = runs.find((r) => r.name === job);
+    if (!run) continue;
+    const f = run.failure;
+    const resolved = Boolean(f && f.reason === 'login' && loggedIn && loggedIn > run.at);
+    out.push({
+      job, title, at: run.at, ok: !f, resolved,
+      problem: f && !resolved ? f.text : null,
+      note: resolved ? 'ログインが切れて止まりました。そのあとログインし直せているので、次の回は動きます' : null,
+    });
   }
   return out;
 }

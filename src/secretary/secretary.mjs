@@ -297,7 +297,16 @@ export function disable(cfg) {
   return { lines, problems: [] };
 }
 
-// The lines that open every prompt: the work, the time, the night and the calendar.
+// The language of every word the person sees. The tools' descriptions and answers are in
+// English (they are shared with the agents), and a long prompt puts the rule of chat.md far
+// from where claude starts writing, so after a tool call or a bare answer to a question claude
+// slipped into English. The rule goes into the system prompt of every run
+// (--append-system-prompt) and at both ends of every prompt.
+export const LANGUAGE_RULE =
+  '返事はいつも日本語で書きます。ツールの説明、ツールの答え、資料が英語でも、本人に見える言葉(途中の様子、返事、質問、返事の候補、報告、案)は日本語にします。本人が別の言葉を使うように頼んだときだけ、その言葉にします。';
+export const languageLines = () => ['', '# 返事の言葉', '', LANGUAGE_RULE];
+
+// The lines that open every prompt: the language, the work, the time, the night and the calendar.
 export function factLines(title, name, { now, schedule }) {
   const calendar = schedule.calendarTools.length
     ? `カレンダーの MCP として ${schedule.calendarTools.map((t) => `\`${t}\``).join('、')} を使えます。`
@@ -309,6 +318,7 @@ export function factLines(title, name, { now, schedule }) {
   return [
     '# この実行について',
     '',
+    `- ${LANGUAGE_RULE}`,
     `- 仕事: ${title}(\`${name}\`)`,
     `- いまの日時: ${localIso(now)}(サーバーの機械の時刻)`,
     `- 夜の時間帯: ${fmtNight(schedule.night).replace('-', '〜')}`,
@@ -328,7 +338,7 @@ export const readInstructions = (name, instructionsDir = INSTRUCTIONS_DIR) => fs
 // The prompt: the facts of this run, the common rules, the job's instructions.
 export function buildPrompt(job, { now = new Date(), schedule, instructionsDir = INSTRUCTIONS_DIR } = {}) {
   const head = factLines(JOB_TITLES[job], job, { now, schedule }).join('\n');
-  return `${head}\n\n${readInstructions('common.md', instructionsDir)}\n\n${readInstructions(`${job}.md`, instructionsDir)}\n`;
+  return `${head}\n\n${readInstructions('common.md', instructionsDir)}\n\n${readInstructions(`${job}.md`, instructionsDir)}\n${languageLines().join('\n')}\n`;
 }
 
 // The command line of one run. The key is not in it: claude reads it from mcp.json.
@@ -342,6 +352,7 @@ export function claudeArgs({ mcpFile, schedule, settingsFile = null }) {
     ...(tools.length ? [] : ['--strict-mcp-config']),
     '--allowedTools', allowed.join(','),
     '--disallowedTools', DISALLOWED.join(','),
+    '--append-system-prompt', LANGUAGE_RULE,
     ...(settingsFile ? ['--settings', settingsFile] : []),
   ];
 }
