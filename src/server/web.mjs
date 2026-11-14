@@ -29,7 +29,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
-import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX, activityKind } from '../ledger/ledger.mjs';
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
@@ -59,6 +59,8 @@ export const SESSIONS_FILE = 'web-sessions.json';
 const MAX_LOGINS = 10;
 const MAX_SESSIONS = 100;
 const RECENT_DONE_MS = 7 * 24 * 60 * 60 * 1000;
+// How many lines of 記録の要点 each task carries to the Web screen.
+export const TASK_LOG_MAX = 8;
 const MAX_RANGE_MS = 42 * 24 * 60 * 60 * 1000;
 // How many messages of the conversation (and of a thread) the 秘書 screen shows.
 const SECRETARY_MESSAGES = 150;
@@ -623,6 +625,22 @@ export function createWeb({
     return { board, all, before, closed };
   }
 
+  // 記録の要点: what moved on a task (made, started, let go, waited, closed, 下調べ...), newest
+  // first, at most TASK_LOG_MAX; who did it, and the line that came with it (next, result,
+  // reason, what it waits for). A 下調べ's own words are in preps.
+  const taskLog = (id) => {
+    const out = [];
+    for (const r of ledger.records(id)) {
+      const kind = activityKind('task', r.action, r.changes);
+      if (!kind) continue;
+      const after = (f) => r.changes[f]?.after ?? null;
+      const note = kind === 'released' ? after('next') : kind === 'done' ? after('result') : kind === 'discarded' ? after('reason')
+        : kind === 'waiting' ? after('waiting_for') : null;
+      out.push({ kind, at: r.at, by: r.device ?? r.actor, note });
+    }
+    return out.reverse().slice(0, TASK_LOG_MAX);
+  };
+
   const taskOut = (t, { all, before, closed }, inList) => {
     const prev = before.get(t.id) ?? [];
     // Tasks before this one that are still open, in this goal or another (順番待ち).
@@ -637,6 +655,8 @@ export function createWeb({
       blocked: t.state === 'ready' && open.length > 0,
       // 下調べ, newest first (who wrote it, when, the summary, artifacts and what is unknown).
       preps: ledger.preps(t.id).map(({ device, actor, summary, artifacts, unknowns, next, created_at }) => ({ by: device ?? actor, summary, artifacts, unknowns, next, created_at })),
+      priority: t.priority ?? null,
+      log: taskLog(t.id),
     };
   };
 
