@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { parseWhen, parseNight } from './secretary/schedule.mjs';
+import { parseCameras } from './server/cameras.mjs';
 
 export const SETTINGS_FILE = 'warifuri.env';
 export const SECRETS_FILE = 'secrets.env';
@@ -323,6 +324,12 @@ export const SETTINGS = [
     name: 'WARIFURI_MONITOR_ALIASES',
     about: '監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01)',
     commands: ['serve'],
+  },
+  {
+    name: 'WARIFURI_CAMERAS',
+    about: '部屋に置いたカメラ。表示名=URL#ストリームの名前 を、カンマ区切りで書く(部屋=https://camera.example.ts.net#room)。URL は go2rtc の場所。ブラウザがそこから直接映像を読み、warifuri は中継も保存もしない。設定すると、Web 画面にカメラのタブが出る',
+    commands: ['serve'],
+    check: (v) => parseCameras(v).error,
   },
   {
     name: 'WARIFURI_DISCORD_TOKEN',

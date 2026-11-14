@@ -1494,6 +1494,7 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
 // with ask_secretary. githubWebhookSecret: the secret of GitHub's webhook (github.mjs); without
 // it /api/github/webhook answers 404. githubLimit: its rate limit per address.
 // calendarWatch: the calendar watch ({ notify(headers) }), when Google calls this server.
+// cameras: the cameras of WARIFURI_CAMERAS (cameras.mjs), for カメラ on the Web screens.
 export function createApp({
   ledger,
   home = null,
@@ -1513,6 +1514,7 @@ export function createApp({
   githubLimit,
   calendarWatch = null,
   operatorContact = null,
+  cameras = [],
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1553,7 +1555,7 @@ export function createApp({
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
     ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), operatorContact, chat, limit: webLimit,
-    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor,
+    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor, cameras,
   });
   app.use(web.router);
   app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };

@@ -65,6 +65,7 @@ import { createGateway } from './notify/gateway.mjs';
 import { createDiscordChat } from './notify/discord-chat.mjs';
 import { createThreadMap } from './notify/discord-threads.mjs';
 import { parseAliases } from './monitor/detail.mjs';
+import { parseCameras } from './server/cameras.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
 import { JOBS, CHAT_JOBS } from './secretary/schedule.mjs';
@@ -496,6 +497,7 @@ function runServe(args) {
       githubWebhookSecret: values.WARIFURI_GITHUB_WEBHOOK_SECRET ?? null,
       calendarWatch: watch,
       operatorContact: values.WARIFURI_OPERATOR_CONTACT ?? null,
+      cameras: parseCameras(values.WARIFURI_CAMERAS).cameras,
     });
   } catch (err) {
     chat.stop();

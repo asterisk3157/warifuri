@@ -40,6 +40,7 @@ import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, readProfileDefaults, profileFolders, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
+import { cameraOrigins } from './cameras.mjs';
 
 // Pictures a sent message shows in its bubble; other files show only their name.
 // How long the numbers of the home lab's monitoring are kept before asking again.
@@ -264,13 +265,18 @@ function readCookie(req, name) {
   return '';
 }
 
-const PAGE_CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
-  "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+// The pages' policy. The camera page also lets in the cameras' origins: their pictures (img) and
+// their live view (frame), and nothing else of them.
+export function pageCsp(origins = []) {
+  const extra = origins.length ? ` ${origins.join(' ')}` : '';
+  return `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:${extra}; connect-src 'self'; ` +
+    `font-src 'self'; ${origins.length ? `frame-src${extra}; ` : ''}base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+}
+const PAGE_CSP = pageCsp();
 
-function guard(res) {
+function guard(res, csp = PAGE_CSP) {
   res.set({
-    'Content-Security-Policy': PAGE_CSP,
+    'Content-Security-Policy': csp,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY',
@@ -352,7 +358,7 @@ export function privacyHtml(contact) {
 // public URL, or null. trustProxy: express's trust proxy value, when one is set. githubUser:
 // the GitHub login of the person, when the GitHub login is on. limit: the rate limit per
 // address. githubLogin: whether the login page offers GitHub (the router of oauth.mjs then
-// calls finishLogin). operatorContact: how to reach the operator, for /privacy, or null. chat: the conversation runner (src/secretary/chat.mjs), or null when the
+// calls finishLogin). operatorContact: how to reach the operator, for /privacy, or null. cameras: the cameras (cameras.mjs) for カメラ, or none. chat: the conversation runner (src/secretary/chat.mjs), or null when the
 // secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
 export function createWeb({
   ledger,
@@ -367,6 +373,7 @@ export function createWeb({
   secretaryDevice = null,
   serverDevices = [],
   monitor = null,
+  cameras = [],
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
@@ -462,15 +469,17 @@ export function createWeb({
   router.get('/about', limited, (req, res) => publicPage(res, 'warifuri について', aboutHtml()));
   router.get('/privacy', limited, (req, res) => publicPage(res, 'プライバシーポリシー', privacyHtml(operatorContact)));
 
-  // Pages: the same shell for each; the script reads the path.
-  for (const p of PAGES) {
+  // Pages: the same shell for each; the script reads the path. カメラ is there only when cameras
+  // are set, with a policy that lets in their origins.
+  const cameraCsp = pageCsp(cameraOrigins(cameras));
+  for (const p of cameras.length ? [...PAGES, 'camera'] : PAGES) {
     router.get(`/${p}`, limited, (req, res) => {
       if (!allowed(req)) {
         if (githubLogin) notice(res, 401, 'warifuri へようこそ', '', { href: '/web/login/github', text: 'GitHub でログイン', button: true });
         else notice(res, 401, 'warifuri へようこそ', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
         return;
       }
-      guard(res);
+      guard(res, p === 'camera' ? cameraCsp : PAGE_CSP);
       res.sendFile(path.join(assetsDir, 'app.html'));
     });
   }
@@ -505,7 +514,19 @@ export function createWeb({
       now: nowIso(), mode, place: publicUrl ? 'server' : 'local', label: serverLabel, url: origin(req), mcp_url: mcpUrl(req), machine: machineInfo(),
       // For the badge on 秘書: what the secretary said or asked that the person has not seen.
       secretary_unread: ledger.secretaryUnread(),
+      // Whether カメラ is in the menu.
+      cameras: cameras.length > 0,
     });
+  });
+
+  // カメラ: each camera's name and the two addresses the browser opens itself (the live view and
+  // a still picture, to tell whether this browser reaches the camera). Nothing is relayed.
+  api.get('/cameras', (req, res) => {
+    if (!cameras.length) {
+      res.status(404).json({ error: 'no cameras' });
+      return;
+    }
+    res.json({ cameras: cameras.map(({ name, stream, frame }) => ({ name, stream, frame })) });
   });
 
   // ナレッジ: the profiles (those with a folder, those named by places and goals, and those with
