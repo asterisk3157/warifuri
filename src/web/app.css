@@ -402,6 +402,10 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding: 14px 4px 8px; }
 .wf-group-count { font-size: 15px; color: var(--sub); }
 .wf-task { display: flex; align-items: flex-start; gap: 12px; padding: 10px 4px; border-top: 1px solid var(--hair); }
+.wf-task-pick { cursor: pointer; border-radius: 8px; }
+.wf-task-pick:hover { background: var(--fill); }
+.wf-task-pick:focus-visible { outline: 2px solid var(--pastel); outline-offset: -2px; }
+.wf-detail-open { margin: 0 0 8px; border-top: 0; padding: 0 0 8px; }
 .wf-task.wf-hl { background: var(--tint); }
 .wf-avatar { width: 34px; height: 34px; flex: none; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 600; color: var(--avatar-ink); background: var(--avatar); }
 .wf-avatar.wf-ai { border-radius: 10px; font-size: 13px; background: var(--avatar-ai); }
@@ -537,9 +541,6 @@ button.wf-row:hover { background-color: rgba(58,130,190,.05); }
 .wf-page-scroll > .wf-tm-listbox { flex: 1 1 0; min-height: 200px; overflow-y: auto; }
 .wf-tm-listbox > .wf-cols { position: sticky; top: 0; z-index: 2; background: var(--surface); border-top: none; border-bottom: 1px solid var(--hair); }
 /* 点が入るたびに、線が1点分だけ左へ滑る */
-.wf-tm-slide { animation: wf-tm-slide var(--slide-s, 5s) linear; }
-@keyframes wf-tm-slide { from { transform: translateX(var(--slide, 0)); } to { transform: translateX(0); } }
-@media (prefers-reduced-motion: reduce) { .wf-tm-slide { animation: none; } }
 .wf-srv-usage { margin-top: 14px; border-top: 1px solid var(--hair); }
 .wf-srv-usage .wf-row { padding-left: 0; padding-right: 0; }
 .wf-tm-hint { margin: 0 4px; font-size: 14px; }
