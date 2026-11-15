@@ -364,7 +364,7 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-node-small { justify-content: center; padding: 4px 10px; background: var(--fill); border-color: var(--hair); }
 .wf-node-small .wf-node-title { font-size: 12.5px; font-weight: 500; color: var(--sub); -webkit-line-clamp: 1; max-height: 1.3em; }
 .wf-node-check { color: var(--green); font-weight: 700; }
-.wf-node.wf-node-hit { border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-line); }
+.wf-node.wf-node-hit { border-color: var(--ink); }
 .wf-node.wf-node-fade { opacity: .28; }
 .wf-prep-tag { font-size: 12px; color: var(--accent); background: var(--tint); border-radius: 6px; padding: 1px 8px; }
 .wf-state { font-size: 13px; font-weight: 600; border-radius: 6px; padding: 2px 10px; align-self: flex-start; white-space: nowrap; }
@@ -379,16 +379,21 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-big-empty { padding: 40px 20px; text-align: center; font-size: 15px; color: var(--sub); }
 
 /* タスク: the counts at the top, then one part per goal with its chart, and the panel of a
-   task that slides in from the left over the page. */
-.wf-tk-counts { display: flex; flex-wrap: wrap; gap: 10px; flex: none; }
-.wf-tk-count { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 112px; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--surface-line); background: var(--surface); color: var(--ink); cursor: pointer; text-align: left; }
-.wf-tk-count:hover { background-color: var(--hover); }
-.wf-tk-count[aria-pressed="true"] { background: var(--tint); border-color: var(--pastel); }
+   task that slides in from the right over the page. Colour is kept for what needs a look:
+   a task past its due, a new 下調べ, the task the person pressed. */
+.wf-node-st { color: var(--sub); }
+.wf-node-st-on { color: var(--accent); font-weight: 600; }
+.wf-node-meta > :not(:first-child):not(.wf-node-left)::before { content: '·'; margin-right: 5px; color: var(--off); font-weight: 400; }
+.wf-node-prep { color: var(--sub); }
+.wf-node-prep-new { color: var(--accent); font-weight: 600; }
+.wf-node-over { color: var(--red); font-weight: 600; }
+.wf-tk-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: none; }
+.wf-tk-count { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border: none; border-radius: 999px; background: transparent; color: var(--sub); cursor: pointer; font: inherit; font-size: 14px; }
+.wf-tk-count:hover { color: var(--ink); background: var(--hover); }
+.wf-tk-count[aria-pressed="true"] { color: var(--ink); background: var(--fill); }
 .wf-tk-count:focus-visible, .wf-tk-ghead:focus-visible, .wf-node:focus-visible { outline: 2px solid var(--pastel); outline-offset: 2px; }
-.wf-tk-count-label { font-size: 13px; color: var(--sub); }
-.wf-tk-count-n { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wf-tk-count-n { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .wf-tk-n-red { color: var(--red); }
-.wf-tk-n-soon { color: var(--due-soon); }
 .wf-tk-main { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .wf-tk-main > * { flex-shrink: 0; }
 .wf-tk-empty { margin: 0; padding: 4px 0; font-size: 15px; color: var(--sub); }
@@ -400,12 +405,13 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-tk-goal-shut .wf-tk-chev { transform: rotate(-45deg); margin: 0 4px 0 0; }
 .wf-tk-ghead .wf-dot { width: 10px; height: 10px; }
 .wf-tk-gtitle { flex: 1 1 200px; min-width: 0; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
-.wf-tk-hits { font-size: 13px; font-weight: 600; color: var(--accent); background: var(--tint); border-radius: 6px; padding: 1px 8px; }
 .wf-tk-gmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-left: auto; }
+.wf-tk-gleft { font-size: 14px; font-weight: 600; white-space: nowrap; color: var(--ink); }
 .wf-tk-gdue { display: inline-flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
 .wf-tk-gdue small, small.wf-tk-gdue { font-size: 13px; color: var(--sub); }
 .wf-tk-gprog { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--sub); }
-.wf-tk-gbar { width: 120px; }
+.wf-tk-gbar { width: 96px; height: 4px; }
+.wf-tk-gbar > span { height: 4px; background: var(--sub); }
 .wf-tk-frac { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wf-tk-gbody { display: flex; flex-direction: column; gap: 10px; padding: 0 18px 16px; }
 .wf-tk-gout { margin: 0; font-size: 14px; line-height: 1.5; color: var(--sub); overflow-wrap: anywhere; }
@@ -422,10 +428,10 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-tk-veil { position: fixed; inset: 0; z-index: 40; background: rgba(10,14,20,.38); }
 .wf-tk-veil-in { animation: wf-fade .2s ease-out; }
 .wf-tk-veil-out { animation: wf-fade .17s ease-in reverse both; }
-.wf-tk-panel { position: fixed; top: 0; left: 0; bottom: 0; z-index: 41; width: clamp(420px, 38vw, 520px); max-width: 100vw; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); padding: 0 24px 28px; box-shadow: 8px 0 32px rgba(0,0,0,.18); }
+.wf-tk-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: clamp(420px, 38vw, 520px); max-width: 100vw; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); padding: 0 24px 28px; box-shadow: -8px 0 32px rgba(0,0,0,.18); }
 .wf-tk-panel-in { animation: wf-slide-in .24s cubic-bezier(.2,.8,.2,1); }
 .wf-tk-panel-out { animation: wf-slide-in .17s ease-in reverse both; }
-@keyframes wf-slide-in { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes wf-slide-in { from { transform: translateX(100%); } to { transform: none; } }
 .wf-tk-panel-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; background: var(--surface); }
 .wf-tk-panel-kind { font-size: 13px; color: var(--sub); }
 .wf-tk-goalname { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }

@@ -1,7 +1,7 @@
 // タスク: every goal with its flowchart, soonest due first. At the top, how many tasks are open
 // (and overdue, due within 3 days, waiting); pressing a count lifts the boxes it counts in the
 // charts and dims the rest, and the goals with none of them fold and go to the end. A box opens
-// the task's detail in a panel that slides in from the left over the page.
+// the task's detail in a panel that slides in from the right over the page.
 //
 // The screen is drawn again every 30 seconds: what is open (folded goals, the panel) lives in
 // view, and every scroll box and control has a data key, so a redraw keeps them. While the
@@ -28,6 +28,8 @@ const load = (api) => api('/tasks');
 const STATE = { done: '完了', running: '作業中', ready: '着手可能', waiting: '待ち', blocked: '順番待ち', deferred: '先送り', discarded: '破棄' };
 const WHO = { human: ['あなた', 'あ', false], ai_worker: ['AIエージェント', 'AI', true], human_with_ai: ['あなた + AI', 'あ', false] };
 const CLOSED = new Set(['done', 'discarded']);
+// States a box does not name: ready is the usual one, so only the others are worth saying.
+const QUIET = new Set(['ready']);
 const FRESH_MS = 24 * 60 * 60 * 1000;
 // Who wrote a 下調べ or a record, by device name.
 const NAMES = { muse: 'Muse', secretary: '秘書', human: 'あなた', web: 'あなた' };
@@ -44,7 +46,7 @@ const left = (t, today) => {
 };
 
 const FILTERS = [
-  { key: 'all', label: 'タスク', keep: () => true },
+  { key: 'all', label: 'すべて', keep: () => true },
   { key: 'over', label: '期限切れ', keep: (t, today) => left(t, today) !== null && left(t, today) < 0 },
   { key: 'soon', label: '3日以内', keep: (t, today) => left(t, today) !== null && left(t, today) >= 0 && left(t, today) <= 3 },
   { key: 'wait', label: '待ち', keep: (t) => t.state === 'waiting' },
@@ -170,15 +172,15 @@ function prepTag(t, now) {
   const p = t.preps?.[0];
   if (!p) return null;
   const fresh = now - Date.parse(p.created_at) < FRESH_MS;
-  return h('span', { class: ['wf-prep-tag', fresh && 'wf-prep-new'], text: fresh ? '新しい下調べ' : '下調べあり' });
+  return h('span', { class: ['wf-node-prep', fresh && 'wf-node-prep-new'], text: '下調べ' });
 }
 
 const dot = (profile, colors) => h('span', {
   class: 'wf-dot', style: { background: profileColor(profile, colors) }, role: 'img', 'aria-label': profile ?? 'プロフィールなし', title: profile ?? 'プロフィールなし',
 });
 
-// One task as a box: its state, the AI's mark, 下調べ, the days left (coloured when near) and the
-// title. A done one is a thin strip with a check. A filter lifts or dims it.
+// One task as a box: its state (left out when it is simply ready), the AI's mark, 下調べ, the
+// days left (red only when past) and the title, in plain grey text. A done one is a thin strip with a check. A filter lifts or dims it.
 function box(t, today, ctx, key, style = null) {
   const closed = t.state === 'done';
   const d = left(t, today);
@@ -196,10 +198,10 @@ function box(t, today, ctx, key, style = null) {
     ? h('span', { class: 'wf-node-title' }, h('span', { class: 'wf-node-check', 'aria-hidden': 'true', text: '✓ ' }), t.title)
     : [
       h('span', { class: 'wf-node-meta', 'aria-hidden': 'true' },
-        chip(st),
-        w[2] ? h('span', { class: 'wf-node-ai', text: 'AI' }) : null,
+        QUIET.has(st) ? null : h('span', { class: ['wf-node-st', st === 'running' && 'wf-node-st-on'], text: STATE[st] ?? st }),
+        w[2] ? h('span', { class: 'wf-node-st', text: 'AI' }) : null,
         prepTag(t, ctx.now),
-        d === null ? null : h('span', { class: ['wf-node-left', near && 'wf-node-near'], style: { color: near ? dueColor(d) : null }, text: leftText(d) })),
+        d === null ? null : h('span', { class: ['wf-node-left', d < 0 && 'wf-node-over', near && 'wf-node-near'], text: leftText(d) })),
       h('span', { class: 'wf-node-title', text: t.title }),
     ]);
 }
@@ -244,18 +246,19 @@ function flowchart(g, today, ctx) {
     h('div', { class: 'wf-tk-chart' }, chart, free));
 }
 
-// The counts at the top; each one lifts what it counts in the charts.
+// The counts at the top, as one quiet row of words; each one lifts what it counts in the charts.
+// A count of none is left out (unless it is the one on), so the row says only what is there.
 function band(open, today, ctx) {
-  return h('div', { class: 'wf-tk-counts', role: 'group', 'aria-label': '件数' },
+  return h('div', { class: 'wf-tk-counts', role: 'group', 'aria-label': '絞り込み' },
     ...FILTERS.map((f) => {
       const n = open.filter((t) => f.keep(t, today)).length;
-      const on = view.filter === f.key;
-      const tone = f.key === 'over' && n ? 'wf-tk-n-red' : f.key === 'soon' && n ? 'wf-tk-n-soon' : null;
+      const on = view.filter === f.key || (f.key === 'all' && !view.filter);
+      if (!n && !on) return null;
       return h('button', {
         type: 'button', class: 'wf-tk-count', 'aria-pressed': String(on), data: { key: `count-${f.key}` },
-        onclick: () => { view.filter = on ? null : f.key; view.peek.clear(); ctx.rerender(); },
-      }, h('span', { class: 'wf-tk-count-label', text: f.label }), h('span', { class: ['wf-tk-count-n', tone], text: `${n}件` }));
-    }));
+        onclick: () => { view.filter = f.key === 'all' || view.filter === f.key ? null : f.key; view.peek.clear(); ctx.rerender(); },
+      }, h('span', { class: 'wf-tk-count-label', text: f.label }), h('span', { class: ['wf-tk-count-n', f.key === 'over' && 'wf-tk-n-red'], text: String(n) }));
+    }).filter(Boolean));
 }
 
 const folded = (g, auto) => (view.fold.has(g.id) ? view.fold.get(g.id) : auto);
@@ -287,13 +290,12 @@ function goalSection(g, today, ctx, colors) {
     h('span', { class: 'wf-tk-chev', 'aria-hidden': 'true' }),
     real ? dot(g.profile, colors) : null,
     h('span', { class: 'wf-tk-gtitle', text: g.title }),
-    hits ? h('span', { class: 'wf-tk-hits', text: `${hits}件` }) : null,
     h('span', { class: 'wf-tk-gmeta' },
       real ? (g.due
-        ? h('span', { class: 'wf-tk-gdue' }, h('span', { class: 'wf-left', style: { color: finished ? 'var(--off)' : dueColor(d) }, text: finished ? '完了' : leftText(d) }), h('small', { text: `${mdw(dueDay(g.due))}${prov(g)}` }))
+        ? h('span', { class: 'wf-tk-gdue' }, h('span', { class: ['wf-tk-gleft', !finished && d !== null && d < 0 && 'wf-tk-n-red'], text: finished ? '完了' : leftText(d) }), h('small', { text: `${mdw(dueDay(g.due))}${prov(g)}` }))
         : h('small', { class: 'wf-tk-gdue', text: '期日なし' })) : h('small', { class: 'wf-tk-gdue', text: `${openTasks.length}件` }),
       real ? h('span', { class: 'wf-tk-gprog' },
-        h('span', { class: 'wf-tk-frac', text: `${done}/${total} 完了` }),
+        h('span', { class: 'wf-tk-frac', text: `${done}/${total}` }),
         h('span', { class: 'wf-bar wf-tk-gbar', 'aria-hidden': 'true' }, h('span', { class: ctx.first ? 'wf-bar-grow' : '', style: { width: `${pct}%` } }))) : null)),
     shut ? null : h('div', { class: 'wf-tk-gbody', id: body },
       o ? h('p', { class: 'wf-tk-gout', title: g.outcome, text: o }) : null,
@@ -472,7 +474,7 @@ function render(data, ctx) {
 }
 
 function skeleton(ctx) {
-  const count = () => h('div', { class: 'wf-tk-count' }, skel('50px', '13px'), skel('40px', '24px'));
+  const count = () => h('div', { class: 'wf-tk-count' }, skel('64px', '14px'));
   const goal = () => h('section', { class: 'wf-tk-goal' },
     h('div', { class: 'wf-tk-ghead' }, skel('40%', '18px')),
     h('div', { class: 'wf-tk-gbody' }, skel('60%', '14px'), skel('100%', '120px', { borderRadius: '10px' })));
