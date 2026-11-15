@@ -2,7 +2,7 @@
 // The meta table holds schema_version, so later versions can migrate an existing file.
 // Add a new entry to MIGRATIONS for each change; never edit an entry that has shipped.
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 21;
 
 const ENUM_STATE = "('ready','running','waiting','deferred','done','discarded')";
 const ENUM_MODE = "('ai_worker','human_with_ai','human')";
@@ -713,6 +713,146 @@ export const MIGRATIONS = [
   `
   ALTER TABLE people ADD COLUMN unverified TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE person_items ADD COLUMN unverified INTEGER NOT NULL DEFAULT 0 CHECK (unverified IN (0, 1));
+  `,
+  // 16 → 17: 移動. A booking may be of kind 'travel': the time on the way between two places,
+  // put in by warifuri (the secretary) before and after a booking somewhere else, and moved by
+  // it as the plan changes. The kind is in a CHECK, so bookings is rebuilt with its rows; no
+  // table points at it.
+  `
+  DROP INDEX IF EXISTS bookings_starts;
+  DROP INDEX IF EXISTS bookings_task;
+  DROP INDEX IF EXISTS bookings_external;
+  ALTER TABLE bookings RENAME TO bookings_v16;
+  CREATE TABLE bookings (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('task','habit','fixed','travel')),
+    task_id     TEXT REFERENCES tasks(id),
+    habit_id    TEXT REFERENCES habits(id),
+    starts_at   TEXT NOT NULL,
+    ends_at     TEXT NOT NULL,
+    note        TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    source      TEXT,
+    external_id TEXT,
+    location    TEXT,
+    organizer   TEXT,
+    CHECK (ends_at > starts_at)
+  );
+  INSERT INTO bookings (id, title, kind, task_id, habit_id, starts_at, ends_at, note, created_at, updated_at, source, external_id, location, organizer)
+    SELECT id, title, kind, task_id, habit_id, starts_at, ends_at, note, created_at, updated_at, source, external_id, location, organizer FROM bookings_v16;
+  DROP TABLE bookings_v16;
+  CREATE INDEX bookings_starts ON bookings(starts_at);
+  CREATE INDEX bookings_task ON bookings(task_id);
+  CREATE UNIQUE INDEX bookings_external ON bookings(source, external_id) WHERE external_id IS NOT NULL;
+  `,
+  // 17 → 18: a question of the secretary (ask) may be withdrawn ('withdrawn'): its answer
+  // came another way (the person told an agent, the task was closed), so it is no longer
+  // asked. The state is in a CHECK, so messages is rebuilt; threads and attachments point at
+  // it, so they are rebuilt with it, as in version 14.
+  `
+  PRAGMA defer_foreign_keys = ON;
+  DROP INDEX IF EXISTS threads_kind;
+  DROP INDEX IF EXISTS messages_thread;
+  DROP INDEX IF EXISTS messages_state;
+  DROP INDEX IF EXISTS attachments_message;
+  ALTER TABLE attachments RENAME TO attachments_v17;
+  ALTER TABLE messages RENAME TO messages_v17;
+  ALTER TABLE threads RENAME TO threads_v17;
+  CREATE TABLE threads (
+    id              TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL CHECK (kind IN ('secretary','sub','agent')),
+    title           TEXT NOT NULL,
+    runner          TEXT NOT NULL DEFAULT 'resume' CHECK (runner IN ('resume','resident')),
+    session_id      TEXT,
+    seen_until      TEXT,
+    parent_id       TEXT UNIQUE REFERENCES messages(id),
+    read_until      TEXT,
+    pending_options TEXT,
+    pending_calendar TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    CHECK ((kind = 'sub') = (parent_id IS NOT NULL))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS threads_kind ON threads(kind) WHERE kind IN ('secretary','agent');
+  CREATE TABLE messages (
+    id            TEXT PRIMARY KEY,
+    thread_id     TEXT NOT NULL REFERENCES threads(id),
+    role          TEXT NOT NULL CHECK (role IN ('user','secretary','system')),
+    kind          TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text','proposal','ask','answer','trigger','digest')),
+    body          TEXT NOT NULL,
+    title         TEXT,
+    autonomy_kind TEXT,
+    about         TEXT,
+    state         TEXT CHECK (state IS NULL OR state IN ('open','approved','changed','refused','later','answered','withdrawn')),
+    answer        TEXT,
+    answered_at   TEXT,
+    done_at       TEXT,
+    done_note     TEXT,
+    data          TEXT,
+    actor         TEXT NOT NULL,
+    device        TEXT,
+    created_at    TEXT NOT NULL,
+    CHECK ((kind IN ('proposal','ask')) = (state IS NOT NULL))
+  );
+  CREATE TABLE attachments (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    size       INTEGER NOT NULL CHECK (size >= 0),
+    sha256     TEXT NOT NULL,
+    message_id TEXT REFERENCES messages(id),
+    device     TEXT,
+    created_at TEXT NOT NULL
+  );
+  INSERT INTO threads (id, kind, title, runner, session_id, seen_until, parent_id, read_until, pending_options, pending_calendar, created_at, updated_at)
+    SELECT id, kind, title, runner, session_id, seen_until, parent_id, read_until, pending_options, pending_calendar, created_at, updated_at FROM threads_v17;
+  INSERT INTO messages (id, thread_id, role, kind, body, title, autonomy_kind, about, state, answer, answered_at, done_at, done_note, data, actor, device, created_at)
+    SELECT id, thread_id, role, kind, body, title, autonomy_kind, about, state, answer, answered_at, done_at, done_note, data, actor, device, created_at FROM messages_v17 ORDER BY rowid;
+  INSERT INTO attachments (id, name, type, size, sha256, message_id, device, created_at)
+    SELECT id, name, type, size, sha256, message_id, device, created_at FROM attachments_v17 ORDER BY rowid;
+  DROP TABLE attachments_v17;
+  DROP TABLE messages_v17;
+  DROP TABLE threads_v17;
+  CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, created_at);
+  CREATE INDEX IF NOT EXISTS messages_state ON messages(state) WHERE state IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS attachments_message ON attachments(message_id);
+  `,
+  `
+  -- What a guest device (an AI outside, such as one in someone else's cloud) may see and write:
+  -- JSON { profiles, hide, write } (src/ledger/scope.mjs), or NULL for an agent or the secretary.
+  ALTER TABLE devices ADD COLUMN scope TEXT;
+  `,
+  // 19 → 20: 下調べ (prep). What an AI (an agent, or a guest such as one in another cloud) found
+  // out ahead of the person, written back to a task: a summary, the artifacts ({ label, url } as
+  // JSON) and what is still unknown (JSON array of lines), and what it would do next. Only
+  // added; the task's own row is not changed. Each one is also in the records, as the task's
+  // 'prep', so it stays there if a snapshot drops the task.
+  `
+  CREATE TABLE preps (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    TEXT NOT NULL REFERENCES tasks(id),
+    actor      TEXT NOT NULL CHECK (length(actor) > 0),
+    device     TEXT,
+    summary    TEXT NOT NULL CHECK (length(summary) > 0),
+    artifacts  TEXT NOT NULL DEFAULT '[]',
+    unknowns   TEXT NOT NULL DEFAULT '[]',
+    next       TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX preps_task ON preps(task_id, created_at);
+  `,
+  // 20 → 21: 下調べ を頼む印と、下調べへの評価. tasks.prep_wanted_at: when someone asked for a
+  // 下調べ of the task (NULL: not asked). preps.rating: what the person made of it (useful,
+  // duplicate: it was already known, off: not what was wanted), with a line why (rating_note),
+  // who and when. NULL: not rated.
+  `
+  ALTER TABLE tasks ADD COLUMN prep_wanted_at TEXT;
+  ALTER TABLE preps ADD COLUMN rating TEXT CHECK (rating IS NULL OR rating IN ('useful','duplicate','off'));
+  ALTER TABLE preps ADD COLUMN rating_note TEXT;
+  ALTER TABLE preps ADD COLUMN rated_by TEXT;
+  ALTER TABLE preps ADD COLUMN rated_at TEXT;
   `,
 ];
 

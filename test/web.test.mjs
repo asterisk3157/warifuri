@@ -143,6 +143,9 @@ test('endpoint shapes', async (t) => {
   const read = thesis.tasks.find((x) => x.id === ids.a);
   assert.equal(read.hold.device, 'laptop');
   assert.equal(read.hold.place_name, 'thesis');
+  // 記録の要点: newest first, who did it.
+  assert.deepEqual(read.log.map((l) => [l.kind, l.by]), [['started', 'laptop'], ['created', 'human']]);
+  assert.equal(read.priority, null);
   assert.equal(tasks.unassigned[0].id, ids.loose);
   assert.equal(tasks.profiles.research, '#c9ced6');
   assert.equal(tasks.profiles.hobby, '#123abc');
@@ -234,6 +237,10 @@ test('秘書: the conversation only, oldest first, with questions; reports, prop
   assert.equal(out.thread, thread.id);
   assert.equal(out.threads[m.id].count, 0);
   assert.ok(!JSON.stringify(out).includes('close_forgotten'), 'the autonomy kind of a question is the secretary\'s business');
+  // A withdrawn question stays, with why.
+  ledger.withdrawAsk(a.id, {}, S);
+  const gone = (await (await get(base, '/web/api/secretary')).json()).items.find((x) => x.id === a.id);
+  assert.deepEqual([gone.state, gone.withdrawn.reason], ['withdrawn', '答えが出たため']);
 
   const bare = openLedger(':memory:');
   const server = createServer({ ledger: bare });
@@ -749,4 +756,39 @@ test('教える with the secretary off: refused with words to show', async (t) =
   assert.equal(res.status, 409);
   assert.deepEqual((await res.json()).problems, ['秘書が停止しているため、登録できません']);
   assert.equal((await (await get(base, '/web/api/rules')).json()).secretary, false);
+});
+
+test('/about and /privacy: no login, the page guard, and the operator contact', async (t) => {
+  const { base } = await start(t, { host: '0.0.0.0', operatorContact: 'operator@example.com' });
+  for (const p of ['/about', '/privacy']) {
+    const res = await get(base, p);
+    assert.equal(res.status, 200, p);
+    assert.match(res.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.match(res.headers.get('content-type'), /text\/html/);
+  }
+  assert.match(await (await get(base, '/about')).text(), /https:\/\/github\.com\/asterisk3157\/warifuri/);
+  const privacy = await (await get(base, '/privacy')).text();
+  assert.match(privacy, /href="mailto:operator@example\.com"/);
+  assert.match(privacy, /運営者本人の Google アカウント/);
+  // The other pages still need a login.
+  assert.equal((await get(base, '/calendar')).status, 401);
+});
+
+test('/privacy without a contact names the operator, and a contact is escaped', async (t) => {
+  const { base } = await start(t, { host: '0.0.0.0' });
+  assert.match(await (await get(base, '/privacy')).text(), /<p>このサーバーの運営者<\/p>/);
+  const { privacyHtml } = await import('../src/server/web.mjs');
+  assert.match(privacyHtml('https://example.com/contact'), /<a href="https:\/\/example\.com\/contact">/);
+  assert.doesNotMatch(privacyHtml('<script>x</script>'), /<script>/);
+});
+
+test('tasks endpoint: 記録の要点 carries the line that came with a release, a wait and a close', async (t) => {
+  const { base, ledger, ids } = await start(t);
+  ledger.release(ids.a, { next: '2章から' }, { actor: 'agent', device: 'laptop' });
+  ledger.setState(ids.a, 'waiting', { waiting_on: 'Robin', waiting_for: '図の確認' }, ACTOR);
+  ledger.setState(ids.a, 'done', { result: '読み終えた' }, ACTOR);
+  const tasks = await (await get(base, '/web/api/tasks')).json();
+  const read = tasks.goals.find((g) => g.id === ids.goal).tasks.find((x) => x.id === ids.a);
+  assert.deepEqual(read.log.slice(0, 3).map((l) => [l.kind, l.note]), [['done', '読み終えた'], ['waiting', '図の確認'], ['released', '2章から']]);
 });

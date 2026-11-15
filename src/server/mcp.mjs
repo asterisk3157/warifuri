@@ -4,7 +4,8 @@
 // Every /mcp request carries a bearer that tells which device is calling: a device's machine
 // key (wf_…), or, when OAuth is configured (oauth.mjs), an access token issued after the
 // person logged in with GitHub and chose the device. The read tools return the ledger as it
-// is: whoever holds a valid bearer sees everything. The write tools write as that device: the
+// is: whoever holds a valid bearer sees everything, unless its device has a scope (a guest,
+// scope.mjs), which sees and writes only what the scope allows. The write tools write as that device: the
 // device always comes from the bearer, never from a tool's arguments, and the actor names the
 // kind of bearer (device-key, or oauth:<client_id>). /api takes machine keys only.
 // Bearers are never logged.
@@ -23,9 +24,10 @@ import {
   STATES, MODES, LOADS, ONLY_AT, BOOKING_KINDS, AUTONOMY_KINDS, AUTONOMY_LEVELS, AUTONOMY_OUTCOMES, REPORT_KINDS, REPORT_BODY_MAX, isValidId,
   ASK_QUESTIONS_MAX, ASK_HEADER_MAX, ASK_OPTIONS_MIN, ASK_OPTIONS_MAX, REPLY_OPTIONS_MAX, REPLY_OPTION_MAX, THREAD_OPTION, REPLY_CALENDAR_DAYS, REPLY_CALENDAR_MARKS,
 } from '../ledger/rules.mjs';
-import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, REPORTS_DEFAULT, REPORTS_MAX, MESSAGES_DEFAULT, MESSAGES_MAX, ACTIVITY_MAX_DAYS, ACTIVITY_ITEMS_MAX, PREP_DAILY, PREP_RATINGS } from '../ledger/ledger.mjs';
 import { comparablePath } from '../ledger/paths.mjs';
 import { createOAuth } from './oauth.mjs';
+import { scopedRegistrar, prepAllowed } from './scope.mjs';
 import { rateLimit } from './limit.mjs';
 import { createWeb } from './web.mjs';
 import { githubWebhook } from './github.mjs';
@@ -76,7 +78,7 @@ const guarded = (fn) => async (args) => {
 // What reply_options says back: the buttons are attached, the question is not written yet.
 const REPLY_OPTIONS_NEXT = 'ボタンを付けました。返事の本文に、ボタンで答える問いをそのまま書いてください。ボタンのことは書きません。';
 const SECRETARY_TOOLS = new Set([
-  'report', 'propose', 'proposal_done', 'ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set',
+  'report', 'propose', 'proposal_done', 'ask', 'withdraw_ask', 'reply_options', 'show_calendar', 'autonomy_outcome', 'autonomy_set',
   // Tidying the knowledge: moving the inbox in, splitting, marking stale (原則22). Agents' notes
   // reach the knowledge only through the secretary, so only it rewrites those files.
   'sort_inbox', 'split_knowledge', 'mark_stale',
@@ -106,13 +108,17 @@ const clearable = z.string().nullable().optional();
 // conversation. secretaryDevice: the device the secretary calls from, null when the secretary
 // is off, or undefined to let any device call the secretary's tools. chat: the conversation
 // with the secretary (for ask_secretary), or null.
-function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined, chat = null) {
+// prepDaily: how many 下調べ a device should write in a day (WARIFURI_PREP_DAILY).
+function buildServer(ledger, device, knowledge, thread = null, secretaryDevice = undefined, chat = null, { prepDaily } = {}) {
   const server = new McpServer({ name: 'warifuri', version: VERSION });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
   const writer = { actor: device.actor, device: device.name };
+  // A device with a scope (a guest) gets only the tools its scope allows, each wrapped so it
+  // sees only what it may (scope.mjs). Other devices get every tool as it is.
+  const tools = device.scope ? scopedRegistrar(server, ledger, device.scope) : server;
 
-  server.registerTool(
+  tools.registerTool(
     'board',
     {
       description:
@@ -146,7 +152,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'get',
     {
       description: 'Read one goal, task, habit or place by id, with its order, hold and records.',
@@ -160,7 +166,39 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     },
   );
 
-  server.registerTool(
+  tools.registerTool(
+    'prep_candidates',
+    {
+      description:
+        'List tasks worth looking into before the person starts them (下調べ), best first. Before you look into one, read ' +
+        'its known and the records from get; do not look again into what is already known, only into what is missing. ' +
+        'Each candidate: score and why (the reasons), known (the body\'s start, next, done_when, what it waits for, recent ' +
+        'records, earlier 下調べ with their ratings, the last move and who made it), prep_wanted (someone asked for a 下調べ), ' +
+        'recently_touched (someone worked on it lately: it goes last, unless a 下調べ was asked). Tasks held by anyone are ' +
+        'left out. suggest: how many to look into this time; today: this device\'s 下調べ written today against the daily ' +
+        'aim; notice when the day\'s are done: stop there for today. feedback: recent ratings of 下調べ (useful, duplicate: ' +
+        'already known, off: not what was wanted), with the bad ones and why, and who rated them; change how you look into ' +
+        'things by them. Write what you find with prep. profile or place (the place id or the directory you work in) narrows ' +
+        'to that profile. limit: default 5, at most 100.',
+      inputSchema: {
+        profile: z.string().optional(),
+        place: z.string().min(1).optional(),
+        limit: z.number().int().optional(),
+        recent_days: z.number().optional(),
+      },
+      annotations: readOnly,
+    },
+    guarded(async ({ profile, place, limit, recent_days: recentDays }) => {
+      const p = profile ?? (place === undefined ? undefined : resolvePlace(ledger, device.name, place, 'prep_candidates').profile ?? null);
+      // A guest is offered only the tasks it may write a 下調べ to.
+      const keep = device.scope ? (t) => prepAllowed(device.scope, t.profile ?? null) : undefined;
+      // The secretary's writes do not count as someone working on a task.
+      const quiet = typeof secretaryDevice === 'string' ? [secretaryDevice] : [];
+      return result(ledger.prepCandidates({ profile: p, limit, recentDays, keep, device: device.name, quiet, daily: prepDaily }));
+    }),
+  );
+
+  tools.registerTool(
     'places',
     {
       description:
@@ -172,7 +210,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     async ({ profile }) => result({ places: ledger.listPlaces({ profile }) }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'search',
     {
       description: 'Find goals and tasks whose title contains the text, closed ones too. Use it before creating one, to avoid duplicates.',
@@ -182,7 +220,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     async ({ text, limit }) => result(ledger.search(text, { limit: limit ?? 20 })),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'flow',
     {
       description:
@@ -198,7 +236,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     },
   );
 
-  server.registerTool(
+  tools.registerTool(
     'stale',
     {
       description:
@@ -218,7 +256,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       result({ ...ledger.stale({ heldDays, readyDays, waitingDays }), merged: githubMergedOpen(ledger) }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'context',
     {
       description:
@@ -243,7 +281,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'schedule',
     {
       description:
@@ -263,16 +301,16 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     }),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'activity',
     {
       description:
         "What moved in [from, to), from the ledger's own records of goals and tasks: created, started, released " +
         '(let go, with its next line), waiting, deferred, resumed, done (with result), discarded (with reason), ' +
-        'reopened. from and to as in schedule; from defaults to yesterday 00:00, to to now; at most ' +
+        'reopened, prepped (a 下調べ written, with its summary). from and to as in schedule; from defaults to yesterday 00:00, to to now; at most ' +
         `${ACTIVITY_MAX_DAYS} days. Returns { from, to, counts: { <kind>: n }, goals: [{ id, title, items }] (the goals ` +
         `that moved, most first), items: [{ at, kind, entity, id, title, device, actor, goal, profile, and result, ` +
-        `reason, next, waiting_on, waiting_for or defer_until where they apply }] (newest first, at most ` +
+        `reason, next, summary, waiting_on, waiting_for or defer_until where they apply }] (newest first, at most ` +
         `${ACTIVITY_ITEMS_MAX}), more (items cut) }. Commits and merges are not in the ledger and do not appear.`,
       inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
       annotations: readOnly,
@@ -280,7 +318,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ from, to }) => result(ledger.activity({ from, to }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'free_time',
     {
       description:
@@ -304,7 +342,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ from, to, only_at }) => result(freeTimeFor(ledger, { from, to, only_at }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'timetable',
     {
       description:
@@ -316,18 +354,28 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
         'dates (the task\'s or its goal\'s). A task with only_at home goes only in free time at home. A band of the week type with a ' +
         "profile takes only that profile's tasks and is filled first. A block is block_min_minutes to " +
         'block_max_minutes long; a task gets one block a day, none on a day it is already booked, and the daily cap is ' +
-        'kept, so the day is not filled for its own sake. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
-        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes }], left: [{ task_id, ' +
-        'title, left_min, reason, misses_due? }] (tasks that got no block, and tasks with no estimate; misses_due: true ' +
-        'with due when its due date falls in the period, the case to ask the person about), habits_left (habits that ' +
-        'fit nowhere) }.',
-      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional() },
+        'kept, so the day is not filled for its own sake. Weekdays are filled first; Saturday takes what did not fit. Sunday has no ' +
+        'duties: only one spare block (spare: true) a Sunday, for a task that would otherwise miss a due date within 4 days of it. ' +
+        'Travel (移動): when bookings at different places (location) follow one another in a day, the way between them ' +
+        '(places.travel) goes right before the booking it leads to, from home before the first and back home after the last; ' +
+        'a way of 0 minutes puts nothing. replan: true lets the task bookings warifuri made in the period (from now on, not ' +
+        'moved by the person in the calendar) move; fixed bookings never move; the oldest bookings are kept first and the ' +
+        'newest go first when a task would miss its due date. Returns { from, to, limits, blocks: [{ kind (task or habit), ' +
+        'task_id or habit_id, title, goal, profile, due, human_led, starts_at, ends_at, minutes, booking_id?, spare? }] (booking_id: ' +
+        'move that booking here with book and its id; without it, a new booking), travel: [{ title, from, to, starts_at, ' +
+        'ends_at, minutes, short?, booking_id? }] (book as kind travel; short: the way does not fit before the booking), ' +
+        'unbook: [{ booking_id, kind, title, starts_at, ends_at }] (warifuri\'s bookings no longer needed), changes: [{ kind, ' +
+        'booking_id, task_id?, title, before, after, line }] (each booking put, moved or taken away, with a line to show ' +
+        'the person), left: [{ task_id, title, left_min, reason, misses_due? }] (tasks that got no block, and tasks with no ' +
+        'estimate; misses_due: true with due when its due date falls in the period, the case to ask the person about), ' +
+        'habits_left (habits that fit nowhere) }.',
+      inputSchema: { from: z.string().min(1).optional(), to: z.string().min(1).optional(), replan: z.boolean().optional() },
       annotations: readOnly,
     },
-    guarded(async ({ from, to }) => result(timetableFor(ledger, { from, to }))),
+    guarded(async ({ from, to, replan }) => result(timetableFor(ledger, { from, to, replan }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'autonomy',
     {
       description:
@@ -341,7 +389,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
   );
 
   // Loose types here, so the ledger says in Japanese what is wrong.
-  server.registerTool(
+  tools.registerTool(
     'reports',
     {
       description:
@@ -354,7 +402,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
     guarded(async ({ kind, limit, before }) => result(ledger.listReports({ kind, limit, before }))),
   );
 
-  server.registerTool(
+  tools.registerTool(
     'proposals',
     {
       description:
@@ -374,7 +422,7 @@ function buildServer(ledger, device, knowledge, thread = null, secretaryDevice =
       })),
   );
 
-  registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat });
+  registerWriteTools(tools, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat, prepDaily });
   return server;
 }
 
@@ -430,7 +478,7 @@ function resolvePlace(ledger, device, value, tool = 'start') {
   throw new LedgerError([`place には作業フォルダの id か、絶対パスのディレクトリを渡します(${value} はどちらでもありません)`]);
 }
 
-function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat }) {
+function registerWriteTools(server, ledger, device, { write, writer, knowledge, thread, secretaryDevice, chat, prepDaily }) {
   const tool = (name, description, inputSchema, fn, annotations = write) =>
     server.registerTool(name, { description, inputSchema, annotations }, guarded(onlyFor(name, fn)));
   // Whether the secretary runs: a secretary device is set and, when the conversation is
@@ -521,7 +569,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     'Change fields of a goal or task. Only the fields given change; null clears one. Goals take title, outcome, due, ' +
       'due_provisional, mode, human_led, profile; tasks take title, body, done_when, due, due_provisional, mode, load, ' +
       'goal_id, estimate_min, place_id, next, delegated, only_at ("home": only at home; null: anywhere), priority ' +
-      '(the order the person gave, 1 first; null: none). State changes go through close, defer, wait, start and release.',
+      '(the order the person gave, 1 first; null: none), prep_wanted (true: ask for a 下調べ of the task, so it is looked ' +
+      'into first; false: take the ask back). State changes go through close, defer, wait, start and release.',
     {
       id: z.string().min(1),
       title: z.string().optional(),
@@ -541,6 +590,7 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       only_at: z.enum(ONLY_AT).nullable().optional(),
       priority: z.number().int().nullable().optional(),
       profile: clearable,
+      prep_wanted: z.boolean().optional(),
     },
     async ({ id, ...fields }) => result(ledger.update(id, given(fields), writer)),
   );
@@ -575,11 +625,75 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
         // The order is a plan, not a lock (原則3): starting early is allowed, and said.
         const open = ledger.openBefore(taskId);
         const notice = open.length ? { open_before: open, notice: `前のタスク ${open.join(', ')} がまだ閉じていません。順序どおりでなくてよいか確かめてください` } : {};
-        return result({ ...task, ...(moved ? { moved_from: before } : {}), ...notice });
+        return result({ ...task, ...(moved ? { moved_from: before } : {}), ...notice, ...prepNotice(taskId) });
       } catch (err) {
         if (!(err instanceof LedgerError) || !err.heldTaskId) throw err;
         return refusal(err.problems, { held: ledger.held({ device: device.name, placeId: place.id }) });
       }
+    },
+  );
+
+  // What start says of the task's 下調べ: the newest in full, so the one starting sees it.
+  function prepNotice(taskId) {
+    const list = ledger.preps(taskId);
+    if (!list.length) return {};
+    const [latest] = list;
+    return {
+      prep: {
+        notice: `下調べがあります(${list.length}件)。読んでから始めてください。読んで使ったら、rate_prep で使えたかどうかを返してください`,
+        count: list.length,
+        latest: { id: latest.id, by: latest.device ?? latest.actor, at: latest.created_at, summary: latest.summary, artifacts: latest.artifacts, unknowns: latest.unknowns, next: latest.next, rating: latest.rating },
+      },
+    };
+  }
+
+  tool(
+    'prep',
+    'Write a 下調べ to a task the person has not started: what you looked into ahead of them. Before you look into it, ' +
+      'read its known (prep_candidates) and its records (get); do not look again into what is already known, only into ' +
+      'what is missing, and say only what is new. summary: what you found ' +
+      '(required). artifacts: where the results are, each { label, url } (url: a URL, or a path such as one in a repository). ' +
+      'unknowns: what is still unknown, one line each. next: one line on what to do next. It only adds; the task\'s state ' +
+      'does not change and it is not closed (closing is the person\'s call). A closed task is refused. The person and ' +
+      'whoever starts the task see it (get, start, the Web screen).',
+    {
+      task_id: z.string().min(1),
+      summary: z.string(),
+      artifacts: z.array(z.object({ label: z.string().optional(), url: z.string() })).optional(),
+      unknowns: z.array(z.string()).optional(),
+      next: z.string().optional(),
+    },
+    async ({ task_id: taskId, ...fields }) => {
+      const prep = ledger.writePrep(taskId, given(fields), writer);
+      const written = ledger.prepsToday(device.name);
+      const daily = prepDaily ?? PREP_DAILY;
+      const today = { daily, written, left: Math.max(0, daily - written) };
+      return result({ ...prep, today, ...(today.left === 0 ? { notice: `今日の目安の${daily}件に達しました。今日はここまでです` } : {}) });
+    },
+  );
+
+  tool(
+    'rate_prep',
+    'Say whether a 下調べ could be used, after you read it and worked with it (start shows it). rating: useful, ' +
+      'duplicate (it was already known), off (not what was needed), or null to take a rating back. Name it by prep_id ' +
+      '(from start, get) or by task_id (its newest 下調べ). note: in 1–2 lines, what could be used, or why it could not. ' +
+      'Who rated it is kept, and the AI that writes 下調べ reads it in prep_candidates to look into things better.',
+    {
+      prep_id: z.number().int().optional(),
+      task_id: z.string().min(1).optional(),
+      rating: z.enum(PREP_RATINGS).nullable(),
+      note: z.string().optional(),
+    },
+    async ({ prep_id: prepId, task_id: taskId, rating, note }) => {
+      if ((prepId === undefined) === (taskId === undefined)) return refusal(['prep_id か task_id のどちらか1つを渡します']);
+      let id = prepId;
+      if (taskId !== undefined) {
+        if (ledger.get(taskId)?.kind !== 'task') return refusal([`${taskId} というタスクはありません`]);
+        const [latest] = ledger.preps(taskId);
+        if (!latest) return refusal([`タスク ${taskId} には下調べがありません`]);
+        id = latest.id;
+      }
+      return result(ledger.ratePrep(id, rating, { note }, writer));
     },
   );
 
@@ -615,6 +729,11 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
     async ({ id, state, learned_people: learnedPeople, ...extra }) => {
       const closed = ledger.setState(id, state, given(extra), writer);
       const out = { ...closed };
+      // A 下調べ that was there but is not rated: ask for one, without stopping the close.
+      const unrated = ledger.preps(id).filter((p) => p.rating === null);
+      if (unrated.length) {
+        out.prep_unrated = { ids: unrated.map((p) => p.id), notice: `評価のない下調べが${unrated.length}件あります。使えたかどうかを rate_prep で返してください` };
+      }
       if (extra.learned !== undefined) out.noted = noteLearned(id, extra.learned);
       if (learnedPeople !== undefined && learnedPeople.trim() !== '') out.noted_people = notePeople(id, learnedPeople);
       return result(out);
@@ -803,7 +922,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   // 人 (people.mjs), kept as a table. A caller names a profile (profile, or place for its
   // profile) and sees the people in it, with that profile's free columns and memos. The
   // secretary may name none and see everyone, and may put people in other profiles.
-  const isSecretary = secretaryDevice === undefined || device.name === secretaryDevice;
+  // A guest is never the secretary, even on a server that lets any device call the secretary's tools.
+  const isSecretary = !device.scope && (secretaryDevice === undefined || device.name === secretaryDevice);
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const peopleScope = (place, profile, name) => {
     if (place === undefined && profile === undefined) {
@@ -1016,7 +1136,8 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
   tool(
     'book',
     'Book time: kind task (task_id) or habit (habit_id) gives time to it, and its title defaults to theirs; kind ' +
-      'fixed is an appointment and needs a title. starts_at and ends_at: ISO datetimes with offset (Z or +09:00), ' +
+      'fixed is an appointment and needs a title; kind travel is the way between two places (timetable\'s travel), ' +
+      'with no location, and its title defaults to 移動. starts_at and ends_at: ISO datetimes with offset (Z or +09:00), ' +
       'stored in UTC; at most 24 hours. With id, changes that booking (only the fields given change). Bookings may ' +
       'overlap: overlaps lists the ones sharing time with this one, so you can move one if that was not meant. ' +
       'source (such as google-calendar) and external_id (the event id there) name the outside event the booking is: ' +
@@ -1088,7 +1209,10 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
         return refusal(['秘書が有効になっていないので、頼めません。free_time で空き時間を見て、本人の了承を得てから book で入れます']);
       }
       if (device.name === secretaryDevice) return refusal(['秘書は自分に頼めません']);
-      const out = await chat.request({ from: device.name, ...fields }, writer, { waitMs: (wait_seconds ?? ASK_SECRETARY_WAIT_MAX) * 1000 });
+      // A guest's request says so, with the profiles whose people or knowledge it may not see,
+      // since the secretary's reply goes back to it as it is.
+      const guest = device.scope ? { guest: Object.keys(device.scope.hide).filter((p) => device.scope.hide[p].length) } : {};
+      const out = await chat.request({ from: device.name, ...fields, ...guest }, writer, { waitMs: (wait_seconds ?? ASK_SECRETARY_WAIT_MAX) * 1000 });
       if (out.timedOut) {
         return result({ status: 'waiting', request_id: out.request.id, say: '秘書に頼みました。決まったら秘書の画面に出ます' });
       }
@@ -1157,6 +1281,17 @@ function registerWriteTools(server, ledger, device, { write, writer, knowledge, 
       '(left out: the one you are talking in). Returns the stored question.',
     { questions: z.array(question), thread: z.string().min(1).optional() },
     async ({ questions, thread: t }) => result(ledger.ask(given({ questions, thread: threadArg(t) }), writer)),
+  );
+
+  tool(
+    'withdraw_ask',
+    'Withdraw a question you asked with ask (open, or answered あとで) that is no longer needed: its answer came ' +
+      'another way, such as the person telling an agent, the task being closed or the answer written in the ' +
+      'ledger. The question is kept and shown greyed out as 取り下げ済み, on the screen and in Discord (its buttons ' +
+      'removed); the person cannot answer it any more. reason: a few words of why (left out: 答えが出たため). ' +
+      'Returns the question.',
+    { id: z.string().min(1), reason: z.string().optional() },
+    async ({ id, reason }) => result(ledger.withdrawAsk(id, given({ reason }), writer)),
   );
 
   tool(
@@ -1376,8 +1511,9 @@ function threadOf(ledger, req) {
   return ledger.getThread(id) ? id : null;
 }
 
-async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat) {
-  const server = buildServer(ledger, { name: req.auth.extra.device, actor: actorFor(req.auth) }, knowledge, threadOf(ledger, req), secretaryDevice, chat);
+async function handleMcp(ledger, knowledge, req, res, secretaryDevice, chat, extra = {}) {
+  const name = req.auth.extra.device;
+  const server = buildServer(ledger, { name, actor: actorFor(req.auth), scope: ledger.deviceScope(name) }, knowledge, threadOf(ledger, req), secretaryDevice, chat, extra);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     transport.close().catch(() => {});
@@ -1397,6 +1533,11 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
     const device = ledger.deviceForKey(m ? m[1] : null);
     if (!device) {
       res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'a valid device key is required' });
+      return;
+    }
+    // A guest's key is for /mcp alone: the hooks' answers (brief, held) are an agent's.
+    if (ledger.deviceScope(device.name)) {
+      res.status(403).json({ error: 'this device key is scoped to /mcp' });
       return;
     }
     ledger.markSeen(device.name);
@@ -1457,6 +1598,8 @@ function apiRouter(ledger, limit, secretaryRuns = () => false, home = null) {
 // with ask_secretary. githubWebhookSecret: the secret of GitHub's webhook (github.mjs); without
 // it /api/github/webhook answers 404. githubLimit: its rate limit per address.
 // calendarWatch: the calendar watch ({ notify(headers) }), when Google calls this server.
+// cameras: the cameras of WARIFURI_CAMERAS (cameras.mjs), for カメラ on the Web screens, and
+// cameraAuth: their login (WARIFURI_CAMERA_AUTH), or null.
 export function createApp({
   ledger,
   home = null,
@@ -1475,6 +1618,10 @@ export function createApp({
   githubWebhookSecret = null,
   githubLimit,
   calendarWatch = null,
+  operatorContact = null,
+  cameras = [],
+  cameraAuth = null,
+  prepDaily,
   log = (line) => process.stderr.write(`${line}\n`),
 }) {
   const app = express();
@@ -1491,7 +1638,7 @@ export function createApp({
   }
   const knowledge = home ? { home, secretary } : null;
   const mcp = (req, res) =>
-    handleMcp(ledger, knowledge, req, res, secretaryDevice, chat).catch((err) => {
+    handleMcp(ledger, knowledge, req, res, secretaryDevice, chat, { prepDaily }).catch((err) => {
       log(`warifuri: /mcp failed: ${err.message}`);
       if (!res.headersSent) {
         res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });
@@ -1514,11 +1661,11 @@ export function createApp({
   }
   app.use('/api', apiRouter(ledger, apiLimit, () => typeof secretaryDevice === 'string' && (chat ? chat.on : true), home));
   web = createWeb({
-    ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), chat, limit: webLimit,
-    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor,
+    ledger, home, host, publicUrl, trustProxy, githubUser: oauth?.githubUser ?? null, githubLogin: Boolean(oauth), operatorContact, chat, limit: webLimit,
+    secretaryDevice: typeof secretaryDevice === 'string' ? secretaryDevice : null, serverDevices, monitor, cameras, cameraAuth,
   });
   app.use(web.router);
-  app.locals.web = { mode: web.mode, issueLogin: web.issueLogin };
+  app.locals.web = { mode: web.mode, issueLogin: web.issueLogin, upgrade: web.upgrade, closeUpgrades: web.closeUpgrades };
 
   app.use((req, res) => sendText(res, 404, 'not found'));
   // Errors from the routes above; the message may come from a library, so it is not echoed.
@@ -1530,10 +1677,17 @@ export function createApp({
   return app;
 }
 
-// The HTTP server; server.web is the app's { mode, issueLogin } for the Web screens.
+// The HTTP server; server.web is the app's { mode, issueLogin } for the Web screens. Its
+// WebSockets are the cameras' live views; closeAllConnections ends them too.
 export function createServer(options) {
   const app = createApp(options);
   const server = http.createServer(app);
   server.web = app.locals.web;
+  server.on('upgrade', app.locals.web.upgrade);
+  const closeAll = server.closeAllConnections.bind(server);
+  server.closeAllConnections = () => {
+    app.locals.web.closeUpgrades();
+    closeAll();
+  };
   return server;
 }

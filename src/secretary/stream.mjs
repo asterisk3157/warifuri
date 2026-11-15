@@ -25,6 +25,7 @@ const TOOL_STEPS = {
   activity: ['read', '進み具合を読みました'],
   free_time: ['search', '空き時間を探しました'],
   search: ['search', '探しました'],
+  prep_candidates: ['search', '下調べの候補を探しました'],
   autonomy: ['read', '自律度を読みました'],
   reports: ['read', '報告を読みました'],
   github: ['read', 'GitHub の PR と Issue を読みました'],
@@ -44,12 +45,15 @@ const TOOL_STEPS = {
   unlink: ['write', '順序を外しました'],
   habit: ['write', '習慣を直しました'],
   note: ['write', 'ナレッジに書きました'],
+  prep: ['write', '下調べを書きました'],
+  rate_prep: ['write', '下調べを評価しました'],
   report: ['write', '報告を書きました'],
   propose: ['write', '案を残しました'],
   proposal_done: ['write', '案に済みの印を付けました'],
   autonomy_outcome: ['write', '自律度に記録しました'],
   autonomy_set: ['write', '自律度を変えました'],
   ask: ['ask', '質問を出しました'],
+  withdraw_ask: ['write', '質問を取り下げました'],
 };
 // Tools whose step is not shown: the reply buttons belong to the reply itself.
 const QUIET = new Set(['reply_options']);

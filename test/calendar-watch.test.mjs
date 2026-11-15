@@ -546,3 +546,16 @@ test('a change of the calendar is one line, and the call for it brings its instr
 test('WRITER names the watch in the record', () => {
   assert.deepEqual(WRITER, { actor: 'calendar-watch', device: 'calendar-watch' });
 });
+
+test('google login refuses another account when WARIFURI_GOOGLE_ACCOUNT is set', async () => {
+  const { checkAccount } = await import('../src/calendar/login.mjs');
+  const fetch = async (url) => (String(url).startsWith(TOKEN_URL)
+    ? answer(200, { access_token: 'a', expires_in: 3600 })
+    : answer(200, { items: [{ id: 'other@example.com', primary: true, accessRole: 'owner' }] }));
+  const args = { clientId: 'id', clientSecret: 'secret', refreshToken: 'r', fetch };
+  assert.deepEqual(await checkAccount({ ...args, account: '' }), { ok: true });
+  assert.deepEqual(await checkAccount({ ...args, account: 'Other@Example.com' }), { ok: true });
+  const no = await checkAccount({ ...args, account: 'operator@example.com' });
+  assert.match(no.problem, /WARIFURI_GOOGLE_ACCOUNT/);
+  assert.doesNotMatch(no.problem, /other@example\.com/);
+});

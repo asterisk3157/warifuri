@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { parseWhen, parseNight } from './secretary/schedule.mjs';
+import { parseCameras, checkCameraAuth } from './server/cameras.mjs';
 
 export const SETTINGS_FILE = 'warifuri.env';
 export const SECRETS_FILE = 'secrets.env';
@@ -79,6 +80,11 @@ export const SETTINGS = [
     name: 'WARIFURI_PUBLIC_URL',
     flag: 'public-url',
     about: 'ハーネスから見えるサーバーの URL。https で始まり、道を含まない。GitHub のログインに要る',
+    commands: ['serve'],
+  },
+  {
+    name: 'WARIFURI_OPERATOR_CONTACT',
+    about: 'プライバシーポリシー(/privacy)に載せる、運営者への問い合わせ先。メールアドレスか URL。空なら「このサーバーの運営者」と書く',
     commands: ['serve'],
   },
   {
@@ -155,6 +161,14 @@ export const SETTINGS = [
     name: 'WARIFURI_STOP',
     section: 'client',
     about: '作業の終わりの確認。エージェントが作業を終えるとき、持ったままのタスクがあれば、会話ごとに一度だけ、閉じるか手放すよう伝える。off にすると伝えない',
+    def: 'on',
+    commands: ['hook'],
+    check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
+  },
+  {
+    name: 'WARIFURI_CAPTURE',
+    section: 'client',
+    about: '書き漏れの確認。ユーザーの最後の発言に日付や締切の言葉があり、そのあと warifuri に何も書いていなければ、エージェントが返事を終えるときに、発言ごとに一度だけ、台帳に書くよう伝える。Claude Code だけで動く。off にすると伝えない',
     def: 'on',
     commands: ['hook'],
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
@@ -240,6 +254,22 @@ export const SETTINGS = [
     check: (v) => parseNight(v).error ?? null,
   },
   {
+    name: 'WARIFURI_BIRTHDAY_NOTICE_DAYS',
+    section: 'secretary',
+    about: '誕生日の何日前に、秘書の会話と Discord に知らせるか。好きなもの、苦手なもの、前にあげた誕プレを添える。0 で知らせない',
+    def: '14',
+    commands: SECRETARY,
+    check: (v) => (/^\d+$/.test(v) && Number(v) <= 60 ? null : 'must be a number of days from 0 to 60'),
+  },
+  {
+    name: 'WARIFURI_BIRTHDAY_NOTICE_PROFILES',
+    section: 'secretary',
+    about: '誕生日を知らせる人のプロフィール(カンマ区切り)。all にすると、すべての人',
+    def: '友人',
+    commands: SECRETARY,
+    check: (v) => (v.split(',').every((t) => t.trim() !== '') ? null : 'must be profile names, comma-separated, or all'),
+  },
+  {
     name: 'WARIFURI_SECRETARY_TIMEOUT',
     section: 'secretary',
     about: '秘書の1回の仕事の上限(分)。超えたら止める',
@@ -278,6 +308,13 @@ export const SETTINGS = [
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),
   },
   {
+    name: 'WARIFURI_PREP_DAILY',
+    about: '1台のデバイスが1日に書く下調べの数の目安。prep_candidates が今日の残りを返し、超えたら「今日はここまで」と伝える。止めはしない',
+    def: '8',
+    commands: ['serve'],
+    check: (v) => (/^\d+$/.test(v) && Number(v) <= 100 ? null : 'must be a whole number from 0 to 100'),
+  },
+  {
     name: 'WARIFURI_MONITOR_URL',
     about: '自宅サーバーの監視(Prometheus)の URL。設定すると、サーバーの画面のパフォーマンスと一覧が使える。http か https で始まり、道を含まない',
     commands: ['serve'],
@@ -294,6 +331,19 @@ export const SETTINGS = [
     name: 'WARIFURI_MONITOR_ALIASES',
     about: '監視の中で同じ機械が別の名前で呼ばれるときの対応。Proxmox の名前=node_exporter の名前を、カンマ区切りで書く(nas=nas-01)',
     commands: ['serve'],
+  },
+  {
+    name: 'WARIFURI_CAMERAS',
+    about: '部屋に置いたカメラ。表示名=URL#ストリームの名前 を、カンマ区切りで書く(部屋=http://192.0.2.10:1984#room)。URL は go2rtc の場所で、warifuri のサーバーから届く番地にする。映像は warifuri が中継し、ログインした人だけが Web 画面のカメラのタブで見られる。保存はしない',
+    commands: ['serve'],
+    check: (v) => parseCameras(v).error,
+  },
+  {
+    name: 'WARIFURI_CAMERA_AUTH',
+    about: 'カメラ(go2rtc)の Basic 認証。user:password の形で、すべてのカメラに使う。warifuri が中継するときだけ送り、ブラウザには渡さない',
+    secret: true,
+    commands: ['serve'],
+    check: checkCameraAuth,
   },
   {
     name: 'WARIFURI_DISCORD_TOKEN',
@@ -330,6 +380,11 @@ export const SETTINGS = [
     commands: GOOGLE,
   },
   {
+    name: 'WARIFURI_GOOGLE_ACCOUNT',
+    about: 'カレンダーを読む Google アカウントのメールアドレス。設定すると、warifuri google login でほかのアカウントで許可したときに断り、トークンを保存しない',
+    commands: ['google'],
+  },
+  {
     name: 'WARIFURI_GOOGLE_CLIENT_SECRET',
     about: 'その OAuth クライアントのシークレット',
     secret: true,
@@ -357,7 +412,7 @@ export const SETTINGS = [
   },
   {
     name: 'WARIFURI_GOOGLE_CALENDAR_WAKE',
-    about: 'Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く',
+    about: 'Google カレンダーの予定が変わったとき、秘書を起こして見てもらう。off では、変わったことを秘書の会話に書くだけで、秘書は次の回に読む。on にすると、変わるたびに秘書が1回動く。off でも、タスクや習慣の予定に重なる変更があれば、秘書を1回起こして知らせる',
     def: 'off',
     commands: ['serve'],
     check: (v) => (v === 'on' || v === 'off' ? null : 'must be on or off'),

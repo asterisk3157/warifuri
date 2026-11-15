@@ -64,7 +64,7 @@ test('every kind of activity appears, newest first, with its device, goal, profi
   L.reopen(a.id, ACTOR);
 
   const out = L.activity();
-  assert.deepEqual(out.counts, { created: 4, started: 1, released: 1, waiting: 1, deferred: 1, resumed: 1, done: 1, discarded: 1, reopened: 1 });
+  assert.deepEqual(out.counts, { created: 4, started: 1, released: 1, waiting: 1, deferred: 1, resumed: 1, done: 1, discarded: 1, reopened: 1, prepped: 0 });
   assert.deepEqual(Object.keys(out.counts), ACTIVITY_KINDS);
   assert.equal(out.more, 0);
   assert.deepEqual(

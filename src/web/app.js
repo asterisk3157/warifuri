@@ -9,11 +9,12 @@ import server from './pages/server.js';
 import secretary from './pages/secretary.js';
 import settings from './pages/settings.js';
 import knowledge from './pages/knowledge.js';
+import camera from './pages/camera.js';
 
-const PAGES = { calendar, tasks, server, secretary, knowledge, settings };
+const PAGES = { calendar, tasks, server, secretary, knowledge, camera, settings };
 const NAME = location.pathname.split('/')[1] || 'calendar';
 const page = PAGES[NAME] ?? calendar;
-const TITLES = { calendar: 'カレンダー', tasks: 'タスク', server: 'サーバー', secretary: '秘書', knowledge: 'ナレッジ', settings: '設定' };
+const TITLES = { calendar: 'カレンダー', tasks: 'タスク', server: 'サーバー', secretary: '秘書', knowledge: 'ナレッジ', camera: 'カメラ', settings: '設定' };
 const REFRESH_MS = 30_000;
 
 const nav = document.getElementById('wf-nav');
@@ -91,17 +92,20 @@ function renderNav() {
     return;
   }
   nav.className = '';
-  nav.replaceChildren(
+  // An item that is not shown is null: left out, so that it is not written as text.
+  nav.replaceChildren(...[
     h('div', { class: 'wf-nav-gap' }),
     navItem('calendar', 'カレンダー', 'calendar'),
     navItem('tasks', 'タスク', 'tasks'),
     navItem('server', 'サーバー', 'server'),
     navItem('secretary', '秘書', 'secretary', NAME === 'secretary' ? 0 : state.about?.secretary_unread ?? 0),
     navItem('knowledge', 'ナレッジ', 'knowledge'),
+    // Only when cameras are set.
+    state.about?.cameras || NAME === 'camera' ? navItem('camera', 'カメラ', 'camera') : null,
     soonItem('デスク', 'desk'),
     h('a', { class: 'wf-nav-item wf-nav-bottom', href: '/settings' }, icon('gear'), h('span', { text: '設定' })),
     card(),
-  );
+  ].filter(Boolean));
 }
 
 // What a screen gets to draw with.

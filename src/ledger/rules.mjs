@@ -24,6 +24,9 @@ export const AUTONOMY_KINDS = [
   // the events warifuri wrote there (told apart by source and external_id). The person's own
   // events, which have no pair in warifuri, are never edited or deleted: that is stage 4.
   { kind: 'write_calendar', label: '予定をカレンダーに書き出す', stage: 2 },
+  // A task whose end is clear (its PR merged, the task after it done, a record of what came
+  // of it, the person's word) is closed without asking whatever the level, and told in one
+  // note after the run (harness/secretary/common.md); the level decides the rest.
   { kind: 'close_forgotten', label: '閉じ忘れたタスクを閉じる', stage: 3 },
   { kind: 'move_task', label: 'タスクをほかのゴールへ移す', stage: 3 },
   { kind: 'bundle_loose_tasks', label: 'ゴールにつながっていないタスクを束ねる', stage: 3 },
@@ -37,12 +40,18 @@ export const AUTONOMY_OUTCOMES = ['approved', 'changed', 'refused', 'revoked'];
 // Approvals in a row that raise a kind to act_then_tell: the default the person agreed to
 // when installing warifuri (原則13). It changes only on the person's word.
 export const AUTONOMY_STREAK = 3;
-export const BOOKING_KINDS = ['task', 'habit', 'fixed'];
+// travel: the time on the way between two places, put in by warifuri around a booking somewhere
+// else (timetable.mjs), and moved by it as the plan changes.
+export const BOOKING_KINDS = ['task', 'habit', 'fixed', 'travel'];
 export const BOOKING_MAX_MS = 24 * 60 * 60 * 1000;
 // 報告: the secretary's nightly check, morning summary and inbox tidy-up.
 export const REPORT_KINDS = ['nightly', 'morning', 'inbox'];
 export const REPORT_TITLE_MAX = 200;
 export const REPORT_BODY_MAX = 20000;
+// 下調べ (prep): what an AI found out ahead of the person, written back to a task.
+export const PREP_SUMMARY_MAX = 4000;
+export const PREP_ITEMS_MAX = 20;
+export const PREP_LINE_MAX = 1000;
 // 会話: a thread's runner, who wrote a message, and the states of a proposal. The person's
 // message is kept short enough to read back; the secretary's reply may be as long as a report.
 export const THREAD_KINDS = ['secretary', 'sub', 'agent'];
@@ -54,8 +63,10 @@ export const PROPOSAL_STATES = ['open', 'approved', 'changed', 'refused'];
 // (the small label over it, such as タスク整理), the question, 2–4 options (label and
 // description; the recommended one first) and multiSelect. The person may always write
 // something else (その他) instead. A question may name the autonomy kind it falls under, the
-// goal or task it is about, and the proposal it asks about.
-export const ASK_STATES = ['open', 'later', 'answered'];
+// goal or task it is about, and the proposal it asks about. A question no longer needed (its
+// answer came another way) is withdrawn by the secretary: kept, shown greyed out.
+export const ASK_STATES = ['open', 'later', 'answered', 'withdrawn'];
+export const WITHDRAW_REASON_MAX = 200;
 export const ASK_QUESTIONS_MAX = 4;
 export const ASK_HEADER_MAX = 12;
 export const ASK_QUESTION_MAX = 300;
@@ -436,6 +447,36 @@ export function checkReport(row) {
   else if (charLength(row.body) > REPORT_BODY_MAX) p.push(`本文(body)は ${REPORT_BODY_MAX} 文字までです。長いものは分けます`);
   // eslint-disable-next-line no-control-regex
   else if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(row.body)) p.push('本文(body)には、改行とタブのほかの制御文字を入れられません');
+  return p;
+}
+
+// A 下調べ as it is about to be stored: summary (required), artifacts ([{ label, url }], url
+// required: a URL or a path such as one in a repository), unknowns (lines) and next (one line).
+export function checkPrep(row) {
+  const p = [];
+  const line = (v) => typeof v === 'string' && v.trim() !== '' && !/[\r\n]/.test(v) && charLength(v) <= PREP_LINE_MAX;
+  if (typeof row.summary !== 'string' || row.summary.trim() === '') p.push('下調べには要約(summary)が要ります');
+  else if (charLength(row.summary) > PREP_SUMMARY_MAX) p.push(`要約(summary)は ${PREP_SUMMARY_MAX} 文字までです`);
+  // eslint-disable-next-line no-control-regex
+  else if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(row.summary)) p.push('要約(summary)には、改行とタブのほかの制御文字を入れられません');
+  if (!Array.isArray(row.artifacts)) p.push('成果物(artifacts)は { label, url } の一覧です');
+  else {
+    if (row.artifacts.length > PREP_ITEMS_MAX) p.push(`成果物(artifacts)は ${PREP_ITEMS_MAX} 件までです`);
+    row.artifacts.forEach((a, i) => {
+      if (a === null || typeof a !== 'object' || Array.isArray(a)) return p.push(`成果物の ${i + 1} 件目は { label, url } の形です`);
+      const extra = Object.keys(a).filter((k) => !['label', 'url'].includes(k));
+      if (extra.length) p.push(`成果物の ${i + 1} 件目に知らない項目があります: ${extra.join(', ')}`);
+      if (!line(a.url)) p.push(`成果物の ${i + 1} 件目の url は、URL かパスを1行(${PREP_LINE_MAX} 文字まで)で書きます`);
+      if (a.label !== undefined && a.label !== null && !line(a.label)) p.push(`成果物の ${i + 1} 件目の label は1行(${PREP_LINE_MAX} 文字まで)で書きます`);
+      return null;
+    });
+  }
+  if (!Array.isArray(row.unknowns)) p.push('まだ分からないこと(unknowns)は、1件1行の一覧です');
+  else {
+    if (row.unknowns.length > PREP_ITEMS_MAX) p.push(`まだ分からないこと(unknowns)は ${PREP_ITEMS_MAX} 件までです`);
+    if (!row.unknowns.every(line)) p.push(`まだ分からないこと(unknowns)は、1件を1行(${PREP_LINE_MAX} 文字まで)で書きます`);
+  }
+  if (row.next !== null && !line(row.next)) p.push(`続きの提案(next)は1行(${PREP_LINE_MAX} 文字まで)で書きます`);
   return p;
 }
 

@@ -386,8 +386,8 @@ test('the weekly check: a call into the same session with the weekly instruction
   assert.equal(call.at('--resume'), sid, 'the weekly check resumes the conversation\'s session, so what the person said there is at hand');
   assert.match(call.input, /# 決まった時刻の仕事[\s\S]*「週の完了確認の時間です」[\s\S]*# 週の完了確認\(weekly\)/);
   assert.ok(!call.input.includes('# 朝の時間(morning)'));
-  // The instructions never let it close a task on its own, and keep Git out.
-  assert.match(call.input, /閉じるのは、本人が了承したタスクだけです/);
+  // The instructions close only what has clear grounds, ask the rest at once, and keep Git out.
+  assert.match(call.input, /根拠が弱いものだけを、1回の質問にまとめて本人に聞きます/);
   assert.match(call.input, /Git のコミット[^\n]*探しません/);
   const reply = w.ledger.listMessages(w.main().id).at(-1);
   assert.deepEqual([reply.role, reply.data.scheduled], ['secretary', 'weekly']);

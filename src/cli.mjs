@@ -4,7 +4,9 @@
 //   warifuri init
 //   warifuri config
 //   warifuri import <snapshot.json> [--actor <name>]
-//   warifuri key add <device>
+//   warifuri key add <device> [--guest] [--profiles <a,b>] [--hide <profile>[=people,knowledge,details]]...
+//                             [--write <note,ask_secretary,prep>]   (a guest: a key with a scope)
+//   warifuri key scope <device> [the same flags | --clear]       (show or change a device's scope)
 //   warifuri key list
 //   warifuri key revoke <device>     (also ends the device's GitHub logins)
 //   warifuri backup --dir <dir> [--keep 7]
@@ -39,6 +41,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { openLedger, LedgerError } from './ledger/ledger.mjs';
+import { normalizeScope, HIDE_ITEMS } from './ledger/scope.mjs';
 import { createServer } from './server/mcp.mjs';
 import { oauthConfig, cleanClientName } from './server/oauth.mjs';
 import { backupLedger } from './ledger/backup.mjs';
@@ -52,13 +55,17 @@ import { decideBrief } from './client/brief-hook.mjs';
 import { decideTools } from './secretary/tool-hook.mjs';
 import * as secretary from './secretary/secretary.mjs';
 import { createScheduler } from './secretary/scheduler.mjs';
+import { createReplanWatch } from './secretary/replan.mjs';
 import { createChat, writeTrigger, TRIGGERS } from './secretary/chat.mjs';
 import { createDiscord } from './notify/discord.mjs';
 import { createNotifier } from './notify/notifier.mjs';
+import { createDeadlineWatch } from './secretary/deadlines.mjs';
+import { createBirthdayWatch, parseProfiles } from './secretary/birthdays.mjs';
 import { createGateway } from './notify/gateway.mjs';
 import { createDiscordChat } from './notify/discord-chat.mjs';
 import { createThreadMap } from './notify/discord-threads.mjs';
 import { parseAliases } from './monitor/detail.mjs';
+import { parseCameras } from './server/cameras.mjs';
 import { calendarSvg, svgToPng } from './calendar/image.mjs';
 import { profileColors } from './server/web.mjs';
 import { JOBS, CHAT_JOBS } from './secretary/schedule.mjs';
@@ -72,7 +79,9 @@ const USAGE = [
   'usage: warifuri init',
   '       warifuri config',
   '       warifuri import <snapshot.json> [--actor <name>]',
-  '       warifuri key add <device>',
+  '       warifuri key add <device> [--guest] [--profiles <a,b>] [--hide <profile>[=people,knowledge,details]]',
+  '                                 [--write <note,ask_secretary,prep>]',
+  '       warifuri key scope <device> [--guest ... | --clear]',
   '       warifuri key list',
   '       warifuri key revoke <device>',
   '       warifuri backup --dir <dir> [--keep 7]',
@@ -98,6 +107,11 @@ const USAGE = [
   'environment, which wins over the files.',
   '',
   'key revoke also ends every GitHub login of that device.',
+  'key add --guest makes a key for an AI outside (such as one in another cloud): it sees the',
+  'board, schedule, search and the people and knowledge of the profiles not hidden, and may',
+  'write only note, ask_secretary and prep. --hide 仕事 hides that profile\'s people, knowledge and',
+  'task details (or only those named after =); --profiles lists the only profiles it sees;',
+  '--write lists the writes it may make (none: --write ""). key scope shows or changes it.',
   '',
   'serve listens on 127.0.0.1 unless --host says otherwise. Listening beyond this machine',
   'is your choice; the GitHub login and the device keys are then the only guard, so put',
@@ -256,7 +270,40 @@ function fail(err, what) {
   return 1;
 }
 
-// warifuri key add|list|revoke. add creates the device when it is new. The actor in the
+// The scope the flags of key add or key scope give (src/ledger/scope.mjs), or undefined when
+// none is given. --guest alone is the guest's defaults: every profile, nothing hidden, writes
+// note, ask_secretary and prep. Throws a usage message when a flag cannot be read.
+function scopeFromFlags(values) {
+  const named = values.guest || values.profiles !== undefined || values.hide !== undefined || values.write !== undefined;
+  if (!named) return undefined;
+  const list = (v) => v.split(',').map((x) => x.trim()).filter(Boolean);
+  const hide = {};
+  for (const h of values.hide ?? []) {
+    const [profile, items] = h.includes('=') ? [h.slice(0, h.indexOf('=')), h.slice(h.indexOf('=') + 1)] : [h, ''];
+    if (!profile.trim()) throw new Error(`--hide takes <profile> or <profile>=people,knowledge,details (${h})`);
+    hide[profile.trim()] = items ? list(items) : [...HIDE_ITEMS];
+  }
+  return {
+    profiles: values.profiles === undefined ? null : list(values.profiles),
+    hide,
+    write: values.write === undefined ? undefined : list(values.write),
+  };
+}
+
+const defined = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+
+// One line of a scope, for key list and key scope.
+function scopeLine(scope) {
+  if (!scope) return 'no scope (an agent or the secretary: sees and writes everything)';
+  const hidden = Object.entries(scope.hide).map(([p, items]) => `${p}=${items.join(',')}`);
+  return [
+    `profiles: ${scope.profiles ? scope.profiles.join(',') || '(none)' : 'all'}`,
+    `hide: ${hidden.length ? hidden.join(' ') : 'nothing'}`,
+    `write: ${scope.write.length ? scope.write.join(',') : 'nothing'}`,
+  ].join('  ');
+}
+
+// warifuri key add|scope|list|revoke. add creates the device when it is new. The actor in the
 // records is the person at this command line.
 function runKey(args) {
   const [sub, ...rest] = args;
@@ -265,35 +312,70 @@ function runKey(args) {
     parsed = parseArgs({
       args: rest,
       allowPositionals: true,
-      options: flagOptions('key'),
+      options: {
+        ...flagOptions('key'),
+        guest: { type: 'boolean' },
+        profiles: { type: 'string' },
+        hide: { type: 'string', multiple: true },
+        write: { type: 'string' },
+        clear: { type: 'boolean' },
+      },
     });
   } catch (err) {
     return usage(err.message);
   }
   const { values, positionals } = parsed;
-  if (!['add', 'list', 'revoke'].includes(sub)) return usage('key takes add, list or revoke');
+  if (!['add', 'scope', 'list', 'revoke'].includes(sub)) return usage('key takes add, scope, list or revoke');
   if (sub === 'list' && positionals.length !== 0) return usage('key list takes no name');
   if (sub !== 'list' && positionals.length !== 1) return usage(`key ${sub} takes one device name`);
+  let scope;
+  try {
+    scope = scopeFromFlags(values);
+  } catch (err) {
+    return usage(err.message);
+  }
+  if (scope !== undefined && !['add', 'scope'].includes(sub)) return usage(`key ${sub} takes no scope flags`);
+  if (values.clear && (sub !== 'scope' || scope !== undefined)) return usage('--clear goes with key scope alone');
   const cfg = settingsFor('key', values);
   if (cfg === 2) return 2;
 
   let ledger;
   try {
     ledger = openConfiguredLedger(cfg);
+    const name = positionals[0];
     if (sub === 'add') {
-      const { name, key } = ledger.issueKey(positionals[0], { actor: 'cli' });
+      // The scope is set before the key is issued, so the key never works without it; a bad
+      // flag is refused before the device is made.
+      if (scope !== undefined) {
+        const checked = normalizeScope(defined(scope));
+        if (checked.problems) throw new LedgerError(checked.problems);
+        if (ledger.listDevices().some((d) => d.name === name && d.has_key)) {
+          throw new LedgerError([`デバイス ${name} には使えるシークレットがもうあります。範囲だけを変えるときは key scope を使います`]);
+        }
+        ledger.addDevice(name, { actor: 'cli' });
+        ledger.setDeviceScope(name, defined(scope), { actor: 'cli' });
+      }
+      const { key } = ledger.issueKey(name, { actor: 'cli' });
+      const now = ledger.deviceScope(name);
       process.stdout.write(`key for ${name}:\n${key}\nThis key will not be shown again. Keep it in that device's settings.\n`);
+      if (now) process.stdout.write(`scope: ${scopeLine(now)}\n`);
+    } else if (sub === 'scope') {
+      if (values.clear) ledger.setDeviceScope(name, null, { actor: 'cli' });
+      else if (scope !== undefined) ledger.setDeviceScope(name, defined(scope), { actor: 'cli' });
+      else if (!ledger.listDevices().some((d) => d.name === name)) throw new LedgerError([`デバイス ${name} がありません`]);
+      process.stdout.write(`${name}  ${scopeLine(ledger.deviceScope(name))}\n`);
     } else if (sub === 'revoke') {
-      const out = ledger.revokeKey(positionals[0], { actor: 'cli' });
+      const out = ledger.revokeKey(name, { actor: 'cli' });
       const logins = out.oauth_tokens ? ` (and ${out.oauth_tokens} GitHub login token${out.oauth_tokens === 1 ? '' : 's'})` : '';
-      process.stdout.write(`revoked: ${positionals[0]}${logins}\n`);
+      process.stdout.write(`revoked: ${name}${logins}\n`);
     } else {
       const rows = ledger.listDevices();
       if (rows.length === 0) process.stdout.write('no devices\n');
       for (const d of rows) {
         const state = d.has_key ? 'key in use' : d.revoked_at ? `revoked ${d.revoked_at}` : 'no key';
         const seen = d.last_seen_at ? `  seen ${d.last_seen_at}` : '';
-        process.stdout.write(`${d.name}  added ${d.created_at}${seen}  (${state})\n`);
+        const scoped = d.scope ? `  [guest: ${scopeLine(d.scope)}]` : '';
+        process.stdout.write(`${d.name}  added ${d.created_at}${seen}  (${state})${scoped}\n`);
       }
     }
     return 0;
@@ -414,6 +496,10 @@ function runServe(args) {
       monitor: values.WARIFURI_MONITOR_URL ? { url: values.WARIFURI_MONITOR_URL, aliases: parseAliases(values.WARIFURI_MONITOR_ALIASES), step: Number(values.WARIFURI_MONITOR_STEP) } : null,
       githubWebhookSecret: values.WARIFURI_GITHUB_WEBHOOK_SECRET ?? null,
       calendarWatch: watch,
+      operatorContact: values.WARIFURI_OPERATOR_CONTACT ?? null,
+      cameras: parseCameras(values.WARIFURI_CAMERAS).cameras,
+      cameraAuth: values.WARIFURI_CAMERA_AUTH ?? null,
+      prepDaily: Number(values.WARIFURI_PREP_DAILY),
     });
   } catch (err) {
     chat.stop();
@@ -505,7 +591,8 @@ function startCalendarWatch(cfg, chat, ledger) {
 // line per run start and end is printed; claude's output goes to its log file. The morning
 // and the weekly check are not runs of their own: they are calls into the conversation
 // (chat.trigger), answered by the secretary of the conversation. Each check also looks for
-// calls written by `warifuri secretary run morning` (or weekly) from another process.
+// calls written by `warifuri secretary run morning` (or weekly) from another process, and for
+// tasks whose due date or estimate changed (replan.mjs: one call to plan again).
 function startSecretary(cfg, chat, ledger) {
   if (cfg.values.WARIFURI_SECRETARY !== 'on') return null;
   const ready = secretary.readyToSchedule(cfg);
@@ -518,8 +605,15 @@ function startSecretary(cfg, chat, ledger) {
   // A run that failed is said in the conversation, once until a run goes well again.
   let failed = null;
   const runJob = async (job) => {
+    // The tasks the run closes without asking (their grounds were clear) are told in one note.
+    const mark = ledger.recordMark();
     const out = await secretary.runJob(job, cfg, { signal: abort.signal, scheduled: true });
     if (abort.signal.aborted || out?.busy || out?.skipped) return out;
+    try {
+      chat.tellClosed(job, mark);
+    } catch (err) {
+      log(`secretary: the note of closed tasks was not written: ${err.message}`);
+    }
     const f = secretary.failureOf(out, out?.logFile ? secretary.logTail(out.logFile) : '');
     if (!f) failed = null;
     else if (f.reason !== failed) {
@@ -554,12 +648,39 @@ function startSecretary(cfg, chat, ledger) {
       });
     }
   }
+  // Tasks with a due date that came or changed: one call to plan again, once things are quiet.
+  const replan = createReplanWatch({
+    ledger, night: ready.schedule.night, ignoreDevice: secretary.deviceOf(cfg.values), log,
+    trigger: (tasks) => chat.trigger('replan', { tasks }),
+  });
+  // Tasks due soon and not done are told without waking the AI (src/secretary/deadlines.mjs).
+  const deadlines = createDeadlineWatch({
+    ledger, tell: (body, data) => chat.notice(body, data), file: path.join(secretary.paths(cfg.home).dir, 'deadlines.json'),
+    night: ready.schedule.night.error ? null : ready.schedule.night, log,
+  });
+  // Friends' birthdays near, with what they like and the presents before (src/secretary/birthdays.mjs).
+  const birthdays = createBirthdayWatch({
+    ledger, tell: (body, data) => chat.notice(body, data), file: path.join(secretary.paths(cfg.home).dir, 'birthdays.json'),
+    days: Number(cfg.values.WARIFURI_BIRTHDAY_NOTICE_DAYS ?? 14), profiles: parseProfiles(cfg.values.WARIFURI_BIRTHDAY_NOTICE_PROFILES),
+    night: ready.schedule.night.error ? null : ready.schedule.night, log,
+  });
   const scheduler = createScheduler({
     jobs: ready.schedule.jobs,
     log,
     run: (job) => (CHAT_JOBS.includes(job) ? chat.trigger(job) : runJob(job)),
     onTick: () => {
+      try {
+        if (chat.on) deadlines.tick();
+      } catch (err) {
+        log(`deadlines: check failed: ${err.message}`);
+      }
+      try {
+        if (chat.on) birthdays.tick();
+      } catch (err) {
+        log(`birthdays: check failed: ${err.message}`);
+      }
       chat.kick();
+      replan.tick();
       notifier.tick().catch((err) => log(`discord: ${err.message}`));
     },
   });
@@ -736,7 +857,7 @@ async function runHook(args) {
         url: v.WARIFURI_SERVER_URL, key: readKey(v.WARIFURI_DEVICE_KEY_FILE), gate: v.WARIFURI_GATE,
         ...(setting ? { route: v[setting], setting } : {}),
         ...(args[0] === 'brief' ? { brief: v.WARIFURI_BRIEF } : {}),
-        ...(args[0] === 'stop' ? { stop: v.WARIFURI_STOP, stateFile: path.join(cfg.home, STOP_STATE_FILE) } : {}),
+        ...(args[0] === 'stop' ? { stop: v.WARIFURI_STOP, capture: v.WARIFURI_CAPTURE, stateFile: path.join(cfg.home, STOP_STATE_FILE) } : {}),
       });
     }
   } catch {

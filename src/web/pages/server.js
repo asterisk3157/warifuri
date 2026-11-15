@@ -72,25 +72,18 @@ const kwh = (wh) => (wh === null || wh === undefined ? '—' : `${(wh / 1000).to
 // dark (app.css).
 const COLOR = { cpu: 'var(--g-cpu)', memory: 'var(--g-memory)', disk: 'var(--g-disk)', gpu: 'var(--g-cpu)', power: 'var(--g-power)' };
 
-// Whether the lines slide in this time (only when a new point has come), and how long a point lasts.
-const slide = { on: false, secs: 5, end: null };
-function settle(detail) {
-  slide.on = detail.end !== slide.end;
-  slide.end = detail.end;
-  slide.secs = detail.step ?? 5;
-}
 
-// A line over the last minute, filled below it, scaled to max (100 for percentages). The line
-// slides in by one point each time it is drawn, so it seems to move left as time goes by.
+// A line over the last minute, filled below it, scaled to max (100 for percentages). Each new
+// point redraws it in one step, without a slide.
 function graph(series, color, { max = 100, cls = 'wf-tm-graph' } = {}) {
   const data = series && series.length > 1 ? series : [0, 0];
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${30 - (Math.min(max, Math.max(0, v)) / max) * 30}`);
+  const step = 100 / (data.length - 1);
+  const y = (v) => 30 - (Math.min(max, Math.max(0, v)) / max) * 30;
+  const pts = data.map((v, i) => `${i * step},${y(v)}`);
   const svg = s('svg', { class: cls, viewBox: '0 0 100 30', preserveAspectRatio: 'none', 'aria-hidden': 'true', style: { color } },
-    s('g', { class: slide.on ? 'wf-tm-slide' : null },
+    s('g', {},
       s('polygon', { points: `0,30 ${pts.join(' ')} 100,30`, fill: 'currentColor', 'fill-opacity': '0.1' }),
       s('polyline', { points: pts.join(' '), fill: 'none', stroke: 'currentColor', 'stroke-width': '1.2', 'vector-effect': 'non-scaling-stroke' })));
-  svg.style.setProperty('--slide', `${(100 / (data.length - 1)).toFixed(2)}px`);
-  svg.style.setProperty('--slide-s', `${slide.secs}s`);
   return svg;
 }
 
@@ -229,7 +222,6 @@ function mainPanel(it, seconds) {
 }
 
 function performance(detail, ctx) {
-  settle(detail);
   const groups = itemsOf(detail);
   const items = groups.flatMap((g) => g.items);
   if (!items.some((it) => it.id === view.sel)) view.sel = items[0]?.id ?? null;

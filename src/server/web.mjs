@@ -17,6 +17,8 @@
 //   HttpOnly, SameSite=Strict cookie (Secure over https). When the GitHub login is on, the
 //   login page offers it too, for the one person allowed (oauth.mjs). A session lasts 30 days
 //   and is kept (as a hash) in the data directory, so a restart of the server does not end it.
+// - Public: /about (what warifuri is) and /privacy (the privacy policy) need no login: Google's
+//   OAuth consent screen links to them. They are static pages, with the same guard.
 // Device keys and OAuth tokens are never taken here, as cookies or otherwise. No response
 // carries a key, a token or a hash of one.
 
@@ -27,7 +29,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { CLOSED_STATES } from '../ledger/rules.mjs';
-import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX } from '../ledger/ledger.mjs';
+import { LedgerError, SECRETARY_THREAD, AGENT_THREAD, ATTACHMENTS_MAX, activityKind, PREP_RATINGS } from '../ledger/ledger.mjs';
 import { PROPOSAL_ANSWERS, MESSAGE_MAX, ANSWER_MAX, AUTONOMY_KINDS } from '../ledger/rules.mjs';
 import { paths as secretaryPaths } from '../secretary/secretary.mjs';
 import { listBackups } from '../ledger/backup.mjs';
@@ -38,6 +40,7 @@ import { localMachine, secretaryJobs } from '../monitor/local.mjs';
 import { profileDir, profileName, readContext, readProfileDefaults, profileFolders, PROFILES_DIR } from '../knowledge/profiles.mjs';
 import { rateLimit } from './limit.mjs';
 import { cleanClientName } from './oauth.mjs';
+import { createCameraRelay, cameraView } from './camera-relay.mjs';
 
 // Pictures a sent message shows in its bubble; other files show only their name.
 // How long the numbers of the home lab's monitoring are kept before asking again.
@@ -56,6 +59,8 @@ export const SESSIONS_FILE = 'web-sessions.json';
 const MAX_LOGINS = 10;
 const MAX_SESSIONS = 100;
 const RECENT_DONE_MS = 7 * 24 * 60 * 60 * 1000;
+// How many lines of 記録の要点 each task carries to the Web screen.
+export const TASK_LOG_MAX = 8;
 const MAX_RANGE_MS = 42 * 24 * 60 * 60 * 1000;
 // How many messages of the conversation (and of a thread) the 秘書 screen shows.
 const SECRETARY_MESSAGES = 150;
@@ -262,13 +267,17 @@ function readCookie(req, name) {
   return '';
 }
 
-const PAGE_CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
-  "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+// The pages' policy. With cameras, the pages may also frame this origin: カメラ shows the
+// relayed live views (camera-relay.mjs), which come from here.
+export function pageCsp(frames = false) {
+  return "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
+    `font-src 'self'; ${frames ? "frame-src 'self'; " : ''}base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+}
+const PAGE_CSP = pageCsp();
 
-function guard(res) {
+function guard(res, csp = PAGE_CSP) {
   res.set({
-    'Content-Security-Policy': PAGE_CSP,
+    'Content-Security-Policy': csp,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY',
@@ -295,13 +304,64 @@ function notice(res, status, title, text, link) {
     );
 }
 
+export const REPOSITORY_URL = 'https://github.com/asterisk3157/warifuri';
+export const PUBLIC_PAGES = ['/about', '/privacy'];
+
+// How the operator is reached on /privacy: a link for a URL or a mail address, else the text.
+function contactHtml(contact) {
+  const c = typeof contact === 'string' ? contact.trim() : '';
+  if (!c) return 'このサーバーの運営者';
+  if (/^https?:\/\//i.test(c)) return `<a href="${escapeHtml(c)}">${escapeHtml(c)}</a>`;
+  if (/^[^\s@]+@[^\s@]+$/.test(c)) return `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`;
+  return escapeHtml(c);
+}
+
+// The pages anyone may read. body: HTML written here (only the contact comes from settings).
+function publicPage(res, title, body) {
+  guard(res);
+  res
+    .type('html')
+    .send(
+      '<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+        `<title>warifuri · ${escapeHtml(title)}</title><link rel="stylesheet" href="/web/app.css"><script src="/web/theme.js"></script></head>` +
+        `<body class="wf-notice wf-doc"><main>${body}</main></body></html>`,
+    );
+}
+
+export function aboutHtml() {
+  return '<h1>warifuri</h1>' +
+    '<p>warifuri は、AI エージェントと働く人のための、タスクと予定の秘書です。タスクと目標を1つの台帳にまとめ、Google カレンダーの予定と空いている時間から、作業の時間割を組みます。</p>' +
+    '<p>warifuri は、使う人が自分のサーバーに置いて動かします。このサーバーも、運営者が自分で使うために動かしているものです。</p>' +
+    `<p><a href="${REPOSITORY_URL}">GitHub のリポジトリ</a></p>` +
+    '<p><a href="/privacy">プライバシーポリシー</a></p>';
+}
+
+export function privacyHtml(contact) {
+  return '<h1>プライバシーポリシー</h1>' +
+    '<p>このサーバーの warifuri は、運営者が自分だけで使うために、自分のサーバーで動かしています。ほかの人に向けたサービスではありません。</p>' +
+    '<p>Google の OAuth クライアントは運営者本人のもので、運営者本人の Google アカウントのカレンダーを読むためだけに使います。ほかの人のアカウントでのログインには使いません。</p>' +
+    '<h2>Google カレンダーから読むもの</h2>' +
+    '<ul><li>読むのは、Google カレンダーの予定だけです。Google に求める許可も、カレンダーを読む許可だけです。</li>' +
+    '<li>読んだ予定は、時間割を組むために、このサーバーのデータベースに写しを持ちます。</li></ul>' +
+    '<h2>データの扱い</h2>' +
+    '<ul><li>読んだ予定を、第三者に渡しません。</li>' +
+    '<li>Google の許可のトークンは、このサーバーの <code>secrets.env</code> に置き、外に出しません。</li></ul>' +
+    '<h2>許可の取り消し</h2>' +
+    '<ul><li>Google アカウントの「サードパーティのアクセス」から warifuri を外すと、以後カレンダーを読めなくなります。</li>' +
+    '<li>サーバーの <code>secrets.env</code> から <code>WARIFURI_GOOGLE_REFRESH_TOKEN</code> の行を消すと、サーバーもトークンを持たなくなります。</li></ul>' +
+    '<h2>問い合わせ先</h2>' +
+    `<p>${contactHtml(contact)}</p>` +
+    '<p><a href="/about">warifuri について</a></p>';
+}
+
 // The router of the Web screens. ledger: the open ledger. home: the data directory (profile
 // colours, backups), or null. host: the address the server listens on. publicUrl: the
 // public URL, or null. trustProxy: express's trust proxy value, when one is set. githubUser:
 // the GitHub login of the person, when the GitHub login is on. limit: the rate limit per
 // address. githubLogin: whether the login page offers GitHub (the router of oauth.mjs then
-// calls finishLogin). chat: the conversation runner (src/secretary/chat.mjs), or null when the
-// secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin }.
+// calls finishLogin). operatorContact: how to reach the operator, for /privacy, or null. cameras: the cameras (cameras.mjs) for カメラ, or none. cameraAuth: their login (user:password), or null. chat: the conversation runner (src/secretary/chat.mjs), or null when the
+// secretary is off. now: the clock (ms). Returns { router, mode, issueLogin, finishLogin, upgrade, closeUpgrades }
+// (upgrade: the server's 'upgrade' listener, for the cameras' WebSockets).
 export function createWeb({
   ledger,
   home = null,
@@ -310,10 +370,13 @@ export function createWeb({
   trustProxy,
   githubUser = null,
   githubLogin = false,
+  operatorContact = null,
   chat = null,
   secretaryDevice = null,
   serverDevices = [],
   monitor = null,
+  cameras = [],
+  cameraAuth = null,
   limit = { max: 600, windowMs: 60_000 },
   now = Date.now,
   startedAt = now(),
@@ -405,18 +468,29 @@ export function createWeb({
 
   router.get('/', limited, (req, res) => res.redirect(302, '/calendar'));
 
-  // Pages: the same shell for each; the script reads the path.
-  for (const p of PAGES) {
+  // The pages for Google's consent screen: no login, no device key.
+  router.get('/about', limited, (req, res) => publicPage(res, 'warifuri について', aboutHtml()));
+  router.get('/privacy', limited, (req, res) => publicPage(res, 'プライバシーポリシー', privacyHtml(operatorContact)));
+
+  // Pages: the same shell for each; the script reads the path. カメラ is there only when cameras
+  // are set. Every page then may frame this origin, since moving between the tabs does not load
+  // a new page: a page opened at カレンダー keeps its policy when the person opens カメラ.
+  const cameraCsp = pageCsp(cameras.length > 0);
+  for (const p of cameras.length ? [...PAGES, 'camera'] : PAGES) {
     router.get(`/${p}`, limited, (req, res) => {
       if (!allowed(req)) {
         if (githubLogin) notice(res, 401, 'warifuri へようこそ', '', { href: '/web/login/github', text: 'GitHub でログイン', button: true });
         else notice(res, 401, 'warifuri へようこそ', 'warifuri serve が起動したときに表示した、ログインの URL を開いてください。');
         return;
       }
-      guard(res);
+      guard(res, cameraCsp);
       res.sendFile(path.join(assetsDir, 'app.html'));
     });
   }
+
+  // The cameras' live views, relayed (camera-relay.mjs), with the login.
+  const relay = createCameraRelay({ cameras, auth: cameraAuth, allowed, publicOrigin });
+  if (cameras.length) router.use('/web/camera', relay.handle);
 
   // The scripts and stylesheet: public code, served to anyone.
   router.use(
@@ -448,7 +522,18 @@ export function createWeb({
       now: nowIso(), mode, place: publicUrl ? 'server' : 'local', label: serverLabel, url: origin(req), mcp_url: mcpUrl(req), machine: machineInfo(),
       // For the badge on 秘書: what the secretary said or asked that the person has not seen.
       secretary_unread: ledger.secretaryUnread(),
+      // Whether カメラ is in the menu.
+      cameras: cameras.length > 0,
     });
+  });
+
+  // カメラ: each camera's name and the address of its relayed live view on this server.
+  api.get('/cameras', (req, res) => {
+    if (!cameras.length) {
+      res.status(404).json({ error: 'no cameras' });
+      return;
+    }
+    res.json({ cameras: cameras.map((c, n) => ({ name: c.name, stream: cameraView(n, c) })) });
   });
 
   // ナレッジ: the profiles (those with a folder, those named by places and goals, and those with
@@ -543,6 +628,22 @@ export function createWeb({
     return { board, all, before, closed };
   }
 
+  // 記録の要点: what moved on a task (made, started, let go, waited, closed, 下調べ...), newest
+  // first, at most TASK_LOG_MAX; who did it, and the line that came with it (next, result,
+  // reason, what it waits for). A 下調べ's own words are in preps.
+  const taskLog = (id) => {
+    const out = [];
+    for (const r of ledger.records(id)) {
+      const kind = activityKind('task', r.action, r.changes);
+      if (!kind) continue;
+      const after = (f) => r.changes[f]?.after ?? null;
+      const note = kind === 'released' ? after('next') : kind === 'done' ? after('result') : kind === 'discarded' ? after('reason')
+        : kind === 'waiting' ? after('waiting_for') : null;
+      out.push({ kind, at: r.at, by: r.device ?? r.actor, note });
+    }
+    return out.reverse().slice(0, TASK_LOG_MAX);
+  };
+
   const taskOut = (t, { all, before, closed }, inList) => {
     const prev = before.get(t.id) ?? [];
     // Tasks before this one that are still open, in this goal or another (順番待ち).
@@ -555,6 +656,12 @@ export function createWeb({
       after: prev.filter((id) => inList.has(id)),
       open_before: open.map((x) => ({ id: x.id, title: x.title })),
       blocked: t.state === 'ready' && open.length > 0,
+      // 下調べ, newest first (who wrote it, when, the summary, artifacts and what is unknown).
+      // rating: what someone made of it (useful, duplicate, off), and who (rated_by).
+      preps: ledger.preps(t.id).map(({ id, device, actor, summary, artifacts, unknowns, next, created_at, rating, rated_by }) => ({ id, by: device ?? actor, summary, artifacts, unknowns, next, created_at, rating, rated_by })),
+      prep_wanted: Boolean(t.prep_wanted_at),
+      priority: t.priority ?? null,
+      log: taskLog(t.id),
     };
   };
 
@@ -643,6 +750,7 @@ export function createWeb({
         type: 'ask', id: m.id, state: m.state, created_at: m.created_at,
         questions: (m.data?.questions ?? []).map((q) => ({ header: q.header, question: q.question, multiSelect: q.multiSelect, options: q.options.map((o) => ({ label: o.label, description: o.description })) })),
         answers: (m.data?.answers ?? []).map((a) => (a ? { picked: a.picked, other: a.other, at: a.at } : null)),
+        ...(m.state === 'withdrawn' ? { withdrawn: { reason: m.data?.withdrawn?.reason ?? null, at: m.data?.withdrawn?.at ?? null } } : {}),
       };
     }
     const d = m.data ?? {};
@@ -941,6 +1049,38 @@ export function createWeb({
   const WEB = { actor: 'web', device: null };
   api.get('/rules', (req, res) => res.json(rulesOut()));
 
+  // 下調べを頼む印 on a task: { wanted: true | false }.
+  api.post('/tasks/:id/prep-wanted', sameOrigin, smallJson, (req, res) => {
+    if (!exact(req.body, ['wanted']) || typeof req.body.wanted !== 'boolean') {
+      res.status(400).json({ error: 'refused', problems: ['送る形は { "wanted": true か false } です'] });
+      return;
+    }
+    if (ledger.get(req.params.id)?.kind !== 'task') {
+      res.status(404).json({ error: 'not found', problems: [`${req.params.id} というタスクはありません`] });
+      return;
+    }
+    try {
+      const t = ledger.update(req.params.id, { prep_wanted: req.body.wanted }, WEB);
+      res.json({ id: t.id, prep_wanted: t.prep_wanted });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+  // A 下調べ rated by the person: { rating: useful | duplicate | off | null (taken back) }.
+  api.post('/preps/:id/rating', sameOrigin, smallJson, (req, res) => {
+    const id = /^\d+$/.test(req.params.id) ? Number(req.params.id) : null;
+    if (!exact(req.body, ['rating']) || !(req.body.rating === null || PREP_RATINGS.includes(req.body.rating))) {
+      res.status(400).json({ error: 'refused', problems: [`送る形は { "rating": ${PREP_RATINGS.join(', ')} か null } です`] });
+      return;
+    }
+    try {
+      const p = ledger.ratePrep(id, req.body.rating, {}, WEB);
+      res.json({ id: p.id, rating: p.rating, rated_by: p.rated_by });
+    } catch (err) {
+      refused(res, err);
+    }
+  });
+
   // { life?, places?, week?, github? }, each as writeSettings takes it.
   api.post('/rules/settings', sameOrigin, rulesJson, (req, res) => {
     if (!exact(req.body, ['life', 'places', 'week', 'github']) || Object.keys(req.body).length === 0) {
@@ -1094,5 +1234,5 @@ export function createWeb({
     notice(res, 200, 'ログインしました', '', { href: '/calendar', text: 'カレンダーを開く', refresh: true });
   };
 
-  return { router, mode, issueLogin: () => store.issueLogin(), finishLogin };
+  return { router, mode, issueLogin: () => store.issueLogin(), finishLogin, upgrade: relay.upgrade, closeUpgrades: relay.close };
 }
