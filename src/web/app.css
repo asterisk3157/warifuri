@@ -393,7 +393,7 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-tk-count[aria-pressed="true"] { color: var(--ink); background: var(--fill); }
 .wf-tk-count:focus-visible, .wf-tk-ghead:focus-visible, .wf-node:focus-visible { outline: 2px solid var(--pastel); outline-offset: 2px; }
 .wf-tk-count-n { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
-.wf-tk-n-red { color: var(--red); }
+.wf-tk-n-red, .wf-tk-gleft.wf-tk-n-red { color: var(--red); }
 .wf-tk-main { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .wf-tk-main > * { flex-shrink: 0; }
 .wf-tk-empty { margin: 0; padding: 4px 0; font-size: 15px; color: var(--sub); }
