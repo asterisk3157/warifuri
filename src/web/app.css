@@ -387,6 +387,8 @@ a.wf-nav-item:hover { background-color: rgba(58,130,190,.08); color: var(--ink);
 .wf-node-prep { color: var(--sub); }
 .wf-node-prep-new { color: var(--accent); font-weight: 600; }
 .wf-node-over { color: var(--red); font-weight: 600; }
+.wf-node.wf-node-ready { border: 1.5px solid var(--green); }
+.wf-node.wf-node-prepped { border: 1.5px solid var(--accent); }
 .wf-tk-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: none; }
 .wf-tk-count { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border: none; border-radius: 999px; background: transparent; color: var(--sub); cursor: pointer; font: inherit; font-size: 14px; }
 .wf-tk-count:hover { color: var(--ink); background: var(--hover); }

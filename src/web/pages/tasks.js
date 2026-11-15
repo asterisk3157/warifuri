@@ -179,6 +179,9 @@ const dot = (profile, colors) => h('span', {
   class: 'wf-dot', style: { background: profileColor(profile, colors) }, role: 'img', 'aria-label': profile ?? 'プロフィールなし', title: profile ?? 'プロフィールなし',
 });
 
+// The box's outline: blue when a 下調べ is waiting for it, else green when it can be started.
+const edge = (t, st) => (!isOpen(t) ? [] : t.preps?.length ? ['wf-node-prepped'] : st === 'ready' ? ['wf-node-ready'] : []);
+
 // One task as a box: its state (left out when it is simply ready), the AI's mark, 下調べ, the
 // days left (red only when past) and the title, in plain grey text. A done one is a thin strip with a check. A filter lifts or dims it.
 function box(t, today, ctx, key, style = null) {
@@ -190,7 +193,7 @@ function box(t, today, ctx, key, style = null) {
   const lit = view.filter ? (hit(t, today) ? 'wf-node-hit' : 'wf-node-fade') : null;
   const near = d !== null && d <= 3;
   return h('button', {
-    type: 'button', class: ['wf-node', closed && 'wf-node-small', closed && 'wf-dim', lit, !style?.left && 'wf-node-loose'],
+    type: 'button', class: ['wf-node', closed && 'wf-node-small', closed && 'wf-dim', lit, !style?.left && 'wf-node-loose', ...edge(t, st)],
     data: { key }, 'aria-pressed': String(on), title: t.title,
     'aria-label': `${t.title}、${STATE[st] ?? st}${closed || d === null ? '' : `、${leftText(d)}`}`,
     style, onclick: () => openTask(t.id, key),
