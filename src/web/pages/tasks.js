@@ -1,6 +1,7 @@
 // タスク: every goal with its flowchart, soonest due first. At the top, how many tasks are open
 // (and overdue, due within 3 days, waiting); pressing a count lifts the boxes it counts in the
-// charts and dims the rest, and the goals with none of them fold and go to the end. A box opens
+// charts and dims the rest, and the goals with none of them fold and go to the end. Goals start
+// folded; pressing a goal's head shows its chart. A box opens
 // the task's detail in a panel that slides in from the right over the page.
 //
 // The screen is drawn again every 30 seconds: what is open (folded goals, the panel) lives in
@@ -272,9 +273,10 @@ function goalSection(g, today, ctx, colors) {
   const real = g.id !== 'none';
   const { done, total, pct, finished } = progress(g.tasks);
   const hits = view.filter ? g.tasks.filter((t) => hit(t, today)).length : null;
-  // A finished goal, and with a filter on a goal with nothing it counts, start folded.
+  // Every goal starts folded and opens when its head is pressed. With a filter on, the goals
+  // with something it counts open (unless finished); the rest fold and go to the end.
   const away = Boolean(view.filter) && !hits;
-  const shut = away ? !view.peek.has(g.id) : folded(g, finished);
+  const shut = away ? !view.peek.has(g.id) : folded(g, finished || !view.filter);
   const d = real && dueDay(g.due) ? daysFrom(today, dueDay(g.due)) : null;
   const key = `ghead-${g.id}`;
   const body = `gbody-${g.id}`;
